@@ -264,6 +264,7 @@ function updateLiveValues(){
     if(el.textContent!==rendered)el.textContent=rendered;
  });
  SDWorkspace.paintSimulation(S);
+ SDWorkspace.paintCooling(S);
 }
 // Graph history draws at most once every 8 seconds. While a graph is being
 // inspected/dragged, freeze its base paint so the hover remains uninterrupted.
