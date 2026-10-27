@@ -89,11 +89,22 @@ const SDWorkspace = (() => {
    const gpu=sensorSets[0][1].filter(s=>/gpu|radeon|geforce/i.test(s.device));
    const storage=sensorSets[0][1].filter(s=>/Storage/i.test(s.deviceType)||/nvme|ssd|drive/i.test(s.device));
    const featured=[
-     ...prefer(/Tctl\/Tdie|CPU Package|CPU Core/i,cpu),
-     ...prefer(/GPU Core|GPU Temperature/i,gpu),
+     ...prefer(/Tctl\/Tdie|CPU Package|CPU Core|CPU Die|Package/i,cpu),
+     ...prefer(/GPU Hot Spot|GPU Core|GPU Temperature/i,gpu),
      ...prefer(/Composite|Drive Temperature/i,storage)
    ];
-   for(const group of sensorSets)for(const s of group[1])if(featured.length<4&&!featured.some(f=>f.id===s.id))featured.push(s);
+   // Generic "Temperature #1" is a genuine LHM label, but makes a poor
+   // default gauge. Prefer descriptive sensor names; Explorer retains all raw
+   // readings and allows renaming them.
+   const descriptive=s=>!/^(Temperature|Fan|Control|Power|Load)\s*#\d+$/i.test(s.name||'');
+   for(const group of sensorSets)for(const reading of group[1].filter(descriptive))
+     if(featured.length<4&&!featured.some(f=>f.id===reading.id))featured.push(reading);
+   if(!featured.length){
+     // Show a fallback with its hardware context when no descriptive sensors
+     // exist, instead of silently presenting an empty dashboard.
+     const fallback=sensorSets[0][1][0]||sensorSets[1][1][0]||sensorSets[2][1][0];
+     if(fallback)featured.push(fallback);
+   }
    const count=k=>S.sensors.filter(s=>s.type===k&&!isHidden(S,s)).length;
    const metricBody=featured.slice(0,4).map(s=>
      h.metric(displayName(S,s),s,
