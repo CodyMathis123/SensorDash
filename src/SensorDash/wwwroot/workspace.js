@@ -70,7 +70,10 @@ const SDWorkspace = (() => {
    if(chosen)S.workspaceDashboardId=chosen.id;
    const tabBar='<div class="w-tabs">'+all.map(d=>button('switch-dashboard',d.name,
       'data-id="'+attr(d.id)+'"',chosen?.id!==d.id)).join('')+
-      button('add-dashboard','+ New dashboard')+'</div>';
+      button('add-dashboard','+ Blank dashboard')+'</div>'+
+   '<div class="w-actions">'+button('add-dashboard','Thermal template','data-template="thermal"')+
+   button('add-dashboard','Cooling telemetry template','data-template="cooling"')+
+   button('add-dashboard','Storage template','data-template="storage"')+'</div>';
    if(!chosen)return tabBar+card('Start your first dashboard','Hardware-neutral metric/chart building blocks',nothing('Add a dashboard to begin.'));
    const widgets=chosen.widgets||[];
    const shown=widgets.map(w=>{
@@ -272,7 +275,20 @@ const SDWorkspace = (() => {
      const cfg=S.settings;
      if(action==='switch-dashboard'){S.workspaceDashboardId=id;h.render();return true;}
      if(action==='add-dashboard'){
-       const d={id:uid(),name:'New dashboard',widgets:[]};cfg.dashboards.push(d);S.workspaceDashboardId=d.id;
+       const template=el.dataset.template||'blank';
+       const newWidget=(title,kind,ids)=>({id:uid(),title,kind,sensorIds:ids});
+       const physical=S.sensors.filter(sensor=>sensor.deviceType!=='Virtual');
+       const sources=template==='thermal'?physical.filter(sensor=>sensor.type==='Temperature')
+         :template==='cooling'?physical.filter(sensor=>['Fan','Control','Flow'].includes(sensor.type))
+         :template==='storage'?physical.filter(sensor=>sensor.deviceType==='Storage'):[];
+       const suggested=sources.slice(0,6).map(sensor=>sensor.id);
+       const d={id:uid(),name:template==='thermal'?'Thermal overview':template==='cooling'?'Cooling telemetry':
+         template==='storage'?'Storage telemetry':'New dashboard',
+         widgets:template==='blank'?[]:[
+          newWidget('Live readings','readings',suggested),
+          newWidget('History','chart',suggested.filter(id=>S.byId.get(id)?.type===S.byId.get(suggested[0])?.type).slice(0,4))
+         ]};
+       cfg.dashboards.push(d);S.workspaceDashboardId=d.id;
      }
      if(action==='remove-dashboard'){
        if(!confirm('Delete this dashboard?'))return true;
@@ -287,8 +303,10 @@ const SDWorkspace = (() => {
      }
      if(action==='add-system'){
        const kind=el.dataset.kind||'custom';
+       const preset=kind==='liquid'?['heat-source','radiator','pump','fan','sensor']:
+         kind==='air'?['heat-source','fan','sensor']:[];
        cfg.coolingSystems.push({id:uid(),name:kind==='liquid'?'Liquid cooling system':kind==='air'?'Air cooling system':'Custom cooling system',
-         kind,components:[]});
+         kind,components:preset.map(type=>({id:uid(),name:type.replace('-',' '),kind:type,sensorIds:[]}))});
      }
      if(action==='remove-system'){
        if(!confirm('Delete this cooling system?'))return true;
