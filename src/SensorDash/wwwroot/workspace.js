@@ -228,17 +228,17 @@ const SDWorkspace = (() => {
      // Never add core/package/board power indiscriminately: multiple readings
      // may overlap. Instead show individual source measurements.
      const summaries=[
-       ['Assigned temperatures',temperatures.length?Math.max(...temperatures.map(s=>s.value)).toFixed(1)+' °C':'—',
+       ['highest-temp','Assigned temperatures',temperatures.length?Math.max(...temperatures.map(s=>s.value)).toFixed(1)+' °C':'—',
          temperatures.length?'Highest assigned temperature':'Add a temperature sensor'],
-       ['Heat-source power',sampledPower?value(sampledPower)+' W':heat.length+' sources',
+       ['heat-power','Heat-source power',sampledPower?value(sampledPower)+' W':heat.length?heat.length+' power readings':'—',
          heat.length===1?displayName(S,sampledPower):heat.length?'Multiple readings; shown individually':'Assign source power readings'],
-       ['Cooling fans',fans.length?fans.length+' readings':'—',
+       ['fan-count','Cooling fans',fans.length?fans.length+' readings':'—',
          fans.length?'Fan speeds plotted below':'Assign Fan RPM sensors'],
-       ['Circulation',pumps.length+' pumps',
+       ['pump-count','Circulation',pumps.length+' pumps',
          telemetry.byType('Flow').length?'Flow sensors assigned':'Optional pump RPM / flow']
      ];
-     const summary='<div class="w-cooling-summary">'+summaries.map(([name,val,description])=>
-       '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong>'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
+     const summary='<div class="w-cooling-summary">'+summaries.map(([key,name,val,description])=>
+       '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong data-cooling-value="'+attr(sys.id)+'|'+key+'">'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
      ).join('')+'</div>';
      const powerDetails=heat.length>1?
        '<p class="note">Power is shown by sensor rather than summed because package, core and device readings may overlap.</p>':'';
@@ -673,6 +673,32 @@ const SDWorkspace = (() => {
    if(view==='storage')return renderStorage(S);
    return nothing('View unavailable');
  };
+ const paintCooling=(S)=>{
+   // Update only the visible summary numbers, never rebuild a chart or form
+   // during a sensor frame. This preserves drag/hover and input focus.
+   const cache=new Map();
+   document.querySelectorAll('[data-cooling-value]').forEach(node=>{
+     const [id,key]=node.dataset.coolingValue.split('|');
+     let values=cache.get(id);
+     if(!values){
+       const system=S.settings?.coolingSystems?.find(s=>s.id===id);
+       if(!system)return;
+       const data=coolingReadings(S,system);
+       const temperatures=data.byType('Temperature').filter(s=>Number.isFinite(s.value));
+       const fans=data.byType('Fan').filter(s=>Number.isFinite(s.value));
+       values={
+         'highest-temp':temperatures.length?Math.max(...temperatures.map(s=>s.value)).toFixed(1)+' °C':'—',
+         'heat-power':data.heatPower.length===1?value(data.heatPower[0])+' W':
+           data.heatPower.length?data.heatPower.length+' power readings':'—',
+         'fan-count':fans.length?fans.length+' readings':'—',
+         'pump-count':system.components.filter(c=>c.kind==='pump').length+' pumps'
+       };
+       cache.set(id,values);
+     }
+     const next=values[key];
+     if(next!=null&&node.textContent!==next)node.textContent=next;
+   });
+ };
  const paintSimulation=(S)=>{
    const readings=S.simulation?.results||[];
    document.querySelectorAll('[data-sim]').forEach(el=>{
@@ -682,5 +708,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation,handleCurvePointInput,isHidden,displayName,usageIndex};
+ return {render,handle,paintSimulation,paintCooling,handleCurvePointInput,isHidden,displayName,usageIndex};
 })();
