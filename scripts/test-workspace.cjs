@@ -76,6 +76,8 @@ const h={
   assert.ok(html.includes('unit="'+unit+'"'),'Missing history chart '+unit);
  assert.ok(html.includes('data-cooling-component-id="probe-1"'));
  assert.ok(html.includes('2 power readings'),'Separate power readings should not be summed');
+ assert.ok(html.includes('108 L/h'),'Single physical flow reading should appear in circulation summary');
+ assert.ok(html.includes('RPM sensors'),'Pump RPM should not be misidentified as a fan count');
  assert.ok(!html.includes('Radiator (legacy)'));
  S.focusCoolingTarget={systemId:'loop-1',componentId:'probe-1'};
  assert.match(workspace.render(S,'cooling',h),/w-referenced-component/);
@@ -92,6 +94,16 @@ const h={
  assert.deepEqual(Array.from(S.settings.coolingSystems.at(-1).components.map(c=>c.kind)),
   ['heat-source','fan-group','pump','temperature-probe']);
  assert.ok(!S.settings.coolingSystems.at(-1).components.some(c=>c.kind==='radiator'));
+ // Different cooling systems can reference the same hardware without
+ // cross-system charts or changes to hardware ownership.
+ const secondary=S.settings.coolingSystems.at(-1);
+ secondary.name='Secondary cooling system';
+ secondary.components[0].sensorIds=['gpuTemp','gpuW'];
+ const allSystems=workspace.render(S,'cooling',h);
+ assert.ok(allSystems.includes('Workstation loop'));
+ assert.ok(allSystems.includes('Secondary cooling system'));
+ assert.ok(allSystems.includes('108 L/h'));
+ assert.equal(S.settings.coolingSystems.length,2);
  await click('cooling-to-dashboard',{id:system.id});
  const board=S.settings.dashboards.at(-1);
  assert.match(board.name,/Workstation loop/);
