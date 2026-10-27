@@ -52,18 +52,19 @@ const SDWorkspace = (() => {
  };
  const usageIndex=(S)=>{
   const cfg=S.settings||{},index=new Map();
-  const add=(id,what,page,dashboardId='')=>{
+  const add=(id,what,page,where={})=>{
    if(!id)return;
    const entries=index.get(id)||[];
-   entries.push({label:what,page,dashboardId});
+   entries.push({label:what,page,...where});
    index.set(id,entries);
   };
   for(const d of cfg.dashboards||[])
    for(const w of d.widgets||[])for(const id of w.sensorIds||[])
-    add(id,'Dashboard: '+d.name+' / '+w.title,'dashboards',d.id);
+    add(id,'Dashboard: '+d.name+' / '+w.title,'dashboards',{dashboardId:d.id,widgetId:w.id});
   for(const system of cfg.coolingSystems||[])
    for(const part of system.components||[])for(const id of part.sensorIds||[])
-    add(id,'Cooling: '+system.name+' / '+part.name,'cooling');
+    add(id,'Cooling: '+system.name+' / '+part.name,'cooling',
+      {systemId:system.id,componentId:part.id});
   for(const w of cfg.trayWidgets||[])add(w.sensorId,'Tray: '+(w.label||'Sensor readout'),'tray');
   for(const v of cfg.virtualSensors||[])
    for(const id of v.sensorIds||[])add(id,'Virtual sensor: '+v.name,'virtual');
@@ -260,7 +261,10 @@ const SDWorkspace = (() => {
        const preferred=typesByComponent[c.kind];
        const current=c.sensorIds.map(id=>S.byId.get(id)).filter(Boolean);
        const outOfKind=current.filter(s=>preferred&&!preferred.includes(s.type));
-       return '<div class="w-component">'+
+       const focused=S.focusCoolingTarget?.systemId===sys.id &&
+         S.focusCoolingTarget?.componentId===c.id;
+       return '<div class="w-component'+(focused?' w-referenced-component':'')+
+         '" data-cooling-system-id="'+attr(sys.id)+'" data-cooling-component-id="'+attr(c.id)+'">'+
          '<div class="w-actions w-compact">'+
          '<label>Component name<input data-component-name="'+attr(scope)+'" value="'+attr(c.name)+'"></label>'+
          '<label>Role<select data-component-kind="'+attr(scope)+'">'+componentOptions(c.kind)+'</select></label>'+
@@ -275,7 +279,7 @@ const SDWorkspace = (() => {
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
        summary+powerDetails+chartsHtml+
-       '<div class="w-cooling-configuration">'+
+       '<div class="w-cooling-configuration" data-cooling-system-id="'+attr(sys.id)+'">'+
        '<h3>Configure components</h3>'+
        '<p class="note">Component types guide sensor selection; they do not claim control of the hardware. '+
         'An air-cooled PC can use the same model without a pump or coolant sensor.</p>'+
