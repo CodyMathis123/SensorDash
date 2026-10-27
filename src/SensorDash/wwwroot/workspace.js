@@ -4,7 +4,32 @@
 const SDWorkspace = (() => {
  const uid=()=>crypto.randomUUID();
  const types=['Temperature','Fan','Control','Power','Load','Voltage','Clock','Flow','Throughput'];
- const kinds=['heat-source','radiator','pump','fan','sensor','other'];
+ const componentKinds=[
+  {id:'heat-source',name:'Heat source',hint:'Associate the component temperatures and power measurements'},
+  {id:'fan-group',name:'Fan group',hint:'Fan RPM, available output duty and optional nearby temperature'},
+  {id:'pump',name:'Pump',hint:'Pump RPM, optional flow meter and output duty'},
+  {id:'temperature-probe',name:'Temperature probe',hint:'Coolant, ambient, inlet, outlet or any other temperature'},
+  {id:'flow-meter',name:'Flow meter',hint:'Flow sensor readings for circulation monitoring'},
+  {id:'other',name:'Other hardware',hint:'Any supported sensor or device'},
+  // Retain older stored configurations without forcing automatic migrations.
+  {id:'radiator',name:'Radiator (legacy)',hint:'Physical hardware with no direct reading; use a Fan group instead'},
+  {id:'fan',name:'Fan (legacy)',hint:'Legacy fan component; a Fan group is recommended'},
+  {id:'sensor',name:'Sensor (legacy)',hint:'Legacy generic sensor component'}
+ ];
+ const kinds=componentKinds.map(x=>x.id);
+ const componentLabel=kind=>componentKinds.find(x=>x.id===kind)?.name||kind;
+ const componentOptions=kind=>componentKinds.map(x=>'<option value="'+attr(x.id)+'" '+(x.id===kind?'selected':'')+'>'+
+   safe(x.name)+'</option>').join('');
+ const typesByComponent={
+  'heat-source':['Temperature','Power','Load','Clock'],
+  'fan-group':['Fan','Control','Temperature'],
+  'pump':['Fan','Flow','Control','Temperature'],
+  'temperature-probe':['Temperature'],
+  'flow-meter':['Flow']
+ };
+ // Fitting/physical parts aren't sensor types: descriptions remain optional.
+ const suitable=(kind,s)=>!typesByComponent[kind]||typesByComponent[kind].includes(s.type);
+
  const icon={Temperature:'°',Fan:'↻',Power:'⚡',Load:'%',Flow:'↝'};
  const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const attr=safe;
@@ -170,34 +195,107 @@ const SDWorkspace = (() => {
        button('add-widget','+ Chart','data-kind="chart" data-id="'+attr(chosen.id)+'"')+
        button('add-widget','+ Readings','data-kind="readings" data-id="'+attr(chosen.id)+'"')+'</div>':'');
  };
- const renderCooling=(S)=>{
+ // A cooling system is a derived telemetry workspace, not just an inventory.
+ // It never invents radiator temperatures, heat dissipation or cooling capacity.
+ const coolingReadings=(S,sys)=>{
+   const all=(sys.components||[]).flatMap(c=>(c.sensorIds||[]).map(id=>S.byId.get(id)).filter(Boolean));
+   const distinct=[...new Map(all.map(reading=>[reading.id,reading])).values()];
+   const byType=type=>distinct.filter(s=>s.type===type);
+   const heatSources=(sys.components||[]).filter(c=>c.kind==='heat-source');
+   const watts=heatSources.flatMap(c=>(c.sensorIds||[]).map(id=>S.byId.get(id))
+     .filter(s=>s?.type==='Power'&&Number.isFinite(s.value)));
+   const uniqueWatts=[...new Map(watts.map(s=>[s.id,s])).values()];
+   return {all:distinct,byType,heatPower:uniqueWatts,heatSources};
+ };
+ const renderCooling=(S,h)=>{
    const systems=S.settings?.coolingSystems||[];
    const starter='<div class="w-actions">'+button('add-system','+ Liquid system','data-kind="liquid"',false)+
-      button('add-system','+ Air system','data-kind="air"')+
-      button('add-system','+ Custom system','data-kind="custom"')+'</div>';
-   if(!systems.length)return card('Your cooling systems','No assumptions about system topology',
-       '<p class="note">Add a cooling system, then assign heat sources, pumps, fans, radiators, temperature probes, flow sensors or other components. A device may be shown in multiple systems, but this page never commands hardware.</p>'+starter);
-   const html=systems.map(sys=>{
+     button('add-system','+ Air system','data-kind="air"')+
+     button('add-system','+ Custom system','data-kind="custom"')+'</div>';
+   if(!systems.length)return card('Your cooling systems','A reusable, sensor-driven view of thermal behavior',
+       '<p class="note">Configure heat sources, fan groups, pumps, temperature probes and optional flow meters. '+
+       'Sensor assignments automatically generate meaningful readings, summaries and historical graphs. '+
+       'For liquid cooling, temperature probes can represent coolant, ambient, inlet or outlet readings. '+
+       'There is no mandatory radiator component because a radiator itself does not supply telemetry.</p>'+starter);
+   const systemHtml=systems.map(sys=>{
+     const telemetry=coolingReadings(S,sys);
+     const live=telemetry.all.filter(s=>s.value!=null&&Number.isFinite(s.value));
+     const temperatures=telemetry.byType('Temperature').filter(s=>Number.isFinite(s.value));
+     const heat=telemetry.heatPower;
+     const fans=telemetry.byType('Fan').filter(s=>Number.isFinite(s.value));
+     const pumps=(sys.components||[]).filter(c=>c.kind==='pump');
+     const sampledPower=heat.length===1?heat[0]:null;
+     // Never add core/package/board power indiscriminately: multiple readings
+     // may overlap. Instead show individual source measurements.
+     const summaries=[
+       ['Assigned temperatures',temperatures.length?Math.max(...temperatures.map(s=>s.value)).toFixed(1)+' °C':'—',
+         temperatures.length?'Highest assigned temperature':'Add a temperature sensor'],
+       ['Heat-source power',sampledPower?value(sampledPower)+' W':heat.length+' sources',
+         heat.length===1?displayName(S,sampledPower):heat.length?'Multiple readings; shown individually':'Assign source power readings'],
+       ['Cooling fans',fans.length?fans.length+' readings':'—',
+         fans.length?'Fan speeds plotted below':'Assign Fan RPM sensors'],
+       ['Circulation',pumps.length+' pumps',
+         telemetry.byType('Flow').length?'Flow sensors assigned':'Optional pump RPM / flow']
+     ];
+     const summary='<div class="w-cooling-summary">'+summaries.map(([name,val,description])=>
+       '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong>'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
+     ).join('')+'</div>';
+     const powerDetails=heat.length>1?
+       '<p class="note">Power is shown by sensor rather than summed because package, core and device readings may overlap.</p>':'';
+     const chartGroups=[
+       ['Temperature','Temperature history','Temperature probes and component temperatures'],
+       ['Power','Heat-source power history','Assigned power measurements (not a measurement of heat rejected)'],
+       ['Fan','Fan RPM history','Cooling fan and pump tachometers'],
+       ['Control','Control duty history','Reported duty percentages, monitoring only'],
+       ['Flow','Flow history','Circulation flow sensor history']
+     ];
+     const charts=chartGroups.map(([type,title,description])=>{
+       const series=(type==='Power'?telemetry.heatPower:telemetry.byType(type));
+       if(!series.length)return '';
+       const limit=series.slice(0,8);
+       return h.panel(title,description+(series.length>8?' · '+limit.length+'/'+series.length+' sensors shown':''),
+         h.chart(limit,unit(type)));
+     }).filter(Boolean);
+     const chartsHtml=charts.length?
+       '<div class="w-cooling-charts">'+charts.join('')+'</div>':
+       nothing('Assign sensors to components and their automatic charts will appear here.');
      const components=(sys.components||[]).map(c=>{
        const scope='component:'+sys.id+':'+c.id;
-       return '<div class="w-component"><div class="w-actions w-compact">'+
+       const preferred=typesByComponent[c.kind];
+       const current=c.sensorIds.map(id=>S.byId.get(id)).filter(Boolean);
+       const outOfKind=current.filter(s=>preferred&&!preferred.includes(s.type));
+       return '<div class="w-component">'+
+         '<div class="w-actions w-compact">'+
          '<label>Component name<input data-component-name="'+attr(scope)+'" value="'+attr(c.name)+'"></label>'+
-         '<label>Type<select data-component-kind="'+attr(scope)+'">'+opts(kinds,c.kind)+'</select></label>'+
+         '<label>Role<select data-component-kind="'+attr(scope)+'">'+componentOptions(c.kind)+'</select></label>'+
          button('remove-component','Remove','data-scope="'+attr(scope)+'"')+'</div>'+
+         '<p class="note">'+safe(componentKinds.find(x=>x.id===c.kind)?.hint||'Hardware sensor association')+'</p>'+
+         (outOfKind.length?'<p class="note">Existing assignments of other types are retained; change the component role if necessary.</p>':'')+
          selectors(S,c.sensorIds,scope)+
-         '<div class="w-add-input">'+select(S,'',()=>true,'Associate physical or virtual sensor','data-add-to="'+attr(scope)+'"')+
-           button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div></div>';
+         '<div class="w-add-input">'+select(S,'',s=>suitable(c.kind,s),
+           'Add compatible sensor','data-add-to="'+attr(scope)+'"')+
+         button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div></div>';
      }).join('');
-     return card(sys.name,sys.kind.toUpperCase()+' cooling system • '+(sys.components||[]).length+' components',
+     return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
+         ' logical components · '+live.length+' live readings',
+       summary+powerDetails+chartsHtml+
+       '<div class="w-cooling-configuration">'+
+       '<h3>Configure components</h3>'+
+       '<p class="note">Component types guide sensor selection; they do not claim control of the hardware. '+
+        'An air-cooled PC can use the same model without a pump or coolant sensor.</p>'+
        '<div class="w-actions"><label>System name<input data-system-name="'+attr(sys.id)+'" value="'+attr(sys.name)+'"></label>'+
-       '<label>Kind<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
-       button('save-editor','Save changes')+button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>'+
-       (components||nothing('Add your first component.'))+
-       '<div class="w-actions"><label>Component type<select data-new-kind="'+attr(sys.id)+'">'+opts(kinds,'sensor')+'</select></label>'+
-       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div>');
+       '<label>Type<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
+       button('save-editor','Save changes')+
+       button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+
+       button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>'+
+       (components||nothing('Add a component below to associate sensors.'))+
+       '<div class="w-actions"><label>Component role<select data-new-kind="'+attr(sys.id)+'">'+
+        componentOptions('heat-source')+'</select></label>'+
+       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div></div>');
    }).join('');
-   return heading('A sensor can appear in more than one visualization; control-output ownership will be enforced when hardware writes are implemented.')+
-     starter+html;
+   return heading('Cooling systems correlate temperatures, power, fan RPM, reported duty and optional flow. '+
+     'Charts are generated automatically from the assigned sensors; no particular CPU, GPU or loop topology is assumed.')+
+     starter+systemHtml;
  };
  const renderTray=(S)=>{
    const list=S.settings?.trayWidgets||[];
@@ -495,8 +593,8 @@ const SDWorkspace = (() => {
      }
      if(action==='add-system'){
        const kind=el.dataset.kind||'custom';
-       const preset=kind==='liquid'?['heat-source','radiator','pump','fan','sensor']:
-         kind==='air'?['heat-source','fan','sensor']:[];
+       const preset=kind==='liquid'?['heat-source','fan-group','pump','temperature-probe']:
+         kind==='air'?['heat-source','fan-group']:[];
        cfg.coolingSystems.push({id:uid(),name:kind==='liquid'?'Liquid cooling system':kind==='air'?'Air cooling system':'Custom cooling system',
          kind,components:preset.map(type=>({id:uid(),name:type.replace('-',' '),kind:type,sensorIds:[]}))});
      }
@@ -504,10 +602,30 @@ const SDWorkspace = (() => {
        if(!confirm('Delete this cooling system?'))return true;
        cfg.coolingSystems=cfg.coolingSystems.filter(c=>c.id!==id);
      }
+     if(action==='cooling-to-dashboard'){
+       const sys=cfg.coolingSystems.find(c=>c.id===id);
+       if(!sys)return true;
+       const data=coolingReadings(S,sys);
+       if(!data.all.length){h.toast('Assign some sensors to the system first.');return true;}
+       const createWidget=(title,kind,sensorIds)=>({id:uid(),title,kind,sensorIds:sensorIds.slice(0,12)});
+       const widgets=[createWidget('Current readings','readings',data.all.map(s=>s.id))];
+       for(const [type,title] of [
+         ['Temperature','Temperature history'],['Power','Power history'],
+         ['Fan','RPM history'],['Control','Duty history'],['Flow','Flow history']]){
+         const readings=type==='Power'?data.heatPower:data.byType(type);
+         if(readings.length)widgets.push(createWidget(title,'chart',readings.slice(0,8).map(s=>s.id)));
+       }
+       const dashboard={id:uid(),name:sys.name+' · Cooling overview',widgets,locked:false};
+       cfg.dashboards.push(dashboard);
+       S.workspaceDashboardId=dashboard.id;
+       await persist(S,h);
+       S.view='dashboards';history.replaceState(null,'','#dashboards');h.render();
+       return true;
+     }
      if(action==='add-component'){
        const parent=cfg.coolingSystems.find(c=>c.id===id);
-       const kind=document.querySelector('[data-new-kind="'+CSS.escape(id)+'"]')?.value||'sensor';
-       parent?.components.push({id:uid(),name:kind.replace('-',' '),kind,sensorIds:[]});
+       const kind=document.querySelector('[data-new-kind="'+CSS.escape(id)+'"]')?.value||'heat-source';
+       parent?.components.push({id:uid(),name:componentLabel(kind),kind,sensorIds:[]});
      }
      if(action==='remove-component'){
        const [,sys,child]=scope.split(':');const parent=cfg.coolingSystems.find(s=>s.id===sys);
@@ -548,7 +666,7 @@ const SDWorkspace = (() => {
  const render=(S,view,h)=>{
    if(view==='overview')return renderOverview(S,h);
    if(view==='dashboards')return renderDashboards(S,h);
-   if(view==='cooling')return renderCooling(S);
+   if(view==='cooling')return renderCooling(S,h);
    if(view==='tray')return renderTray(S);
    if(view==='curves')return renderCurves(S);
    if(view==='virtual')return renderVirtual(S);
