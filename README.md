@@ -30,6 +30,21 @@ No administrator rights are required to *start* SensorDash, but certain low-leve
 - If no SSD temperature is discovered, the library may lack the necessary device access. Close the ordinary SensorDash instance and **run the executable as administrator once for comparison**. If sensors appear only when elevated, automatic non-elevated startup will still lack them. Keep the web host local-only; SensorDash does not require or enforce elevation.
 - **Storage polling is enabled** in the embedded collector and defaults to every 10 seconds. Fan Control keeps its own independent storage polling setting.
 
+## Chart hover and elevated startup (v0.1.2)
+
+Graph crosshairs and tooltips now render on their **own transparent overlay** and are cleared before each mouse move, preventing trails or ghosted hover markers.
+
+Some storage/NVMe sensors need Windows administrator privileges. If NVMe temperature appears only when you run SensorDash as administrator, you can opt in to elevated startup:
+
+1. Extract the full release into a permanent folder and close any currently running SensorDash process.
+2. Double-click **Install-ElevatedStartup.cmd**, approve the **one-time UAC prompt**, and read the output.
+3. At your next sign-in, Task Scheduler launches SensorDash with highest privileges **as your interactive Windows account**, not as SYSTEM, with no repeated UAC prompts.
+4. To reverse this, double-click **Remove-ElevatedStartup.cmd**, then **Install-Startup.cmd** if you want ordinary startup again.
+
+The elevated installer removes the standard startup shortcut **only after successful task registration**, preventing duplicate startup. Regular startup does not grant NVMe privileges. Neither mode changes Fan Control.
+
+**Security trade-off:** Elevated startup also elevates the locally hosted dashboard/API. SensorDash listens exclusively on \`127.0.0.1\`, but other programs on the same computer can reach that local API. Use the optional elevated task only if you want the additional sensor access and understand this trade-off. It cannot be installed silently; Windows administrator approval is required. If your everyday Windows account is not an administrator and UAC uses a different account, use ordinary startup until an appropriate per-user privilege arrangement is configured.
+
 ## Development
 Install .NET 10 SDK. From the repo:
 
