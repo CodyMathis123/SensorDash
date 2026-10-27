@@ -27,8 +27,13 @@ const SDWorkspace = (() => {
  const textfield=(field,id,value,label='')=>'<label class="w-field">'+safe(label||field)+'<input data-field="'+field+'" data-object="'+attr(id)+'" value="'+attr(value)+'"></label>';
  const selectors=(S,assigned,scope)=>{
   const current=new Set(assigned);
-  return '<div class="w-chips">'+assigned.map(id=>'<span class="w-chip">'+safe(S.settings?.aliases?.[id]||S.byId.get(id)?.name||id)+
-    button('remove-sensor','×','data-scope="'+attr(scope)+'" data-sensor="'+attr(id)+'"')+'</span>').join('')+'</div>';
+  return '<div class="w-chips">'+assigned.map(id=>{
+   const reading=S.byId.get(id);
+   return '<span class="w-chip">'+safe(S.settings?.aliases?.[id]||reading?.name||id)+
+    (reading?'<b data-live-reading="'+attr(id)+'" data-live-format="unit" data-live-unit="'+attr(unit(reading.type))+'">'+
+      value(reading)+' '+unit(reading.type)+'</b>':'')+
+    button('remove-sensor','×','data-scope="'+attr(scope)+'" data-sensor="'+attr(id)+'"')+'</span>';
+  }).join('')+'</div>';
  };
  const heading=(title,desc)=>'<div class="w-intro"><p>'+safe(desc)+'</p></div>';
  const nothing=(label)=>'<div class="empty">'+safe(label)+'</div>';
@@ -146,6 +151,27 @@ const SDWorkspace = (() => {
       '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
       (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
+ const curveDiagram=(points,activeTemperature,activePercent)=>{
+  const sorted=[...points].filter(p=>Number.isFinite(p.temperature)&&Number.isFinite(p.percent))
+    .sort((a,b)=>a.temperature-b.temperature);
+  if(sorted.length<2)return '';
+  const lo=Math.min(0,sorted[0].temperature-5),hi=Math.max(85,sorted[sorted.length-1].temperature+5);
+  const x=t=>44+(t-lo)/(hi-lo)*392,y=p=>174-p/100*148;
+  const poly=sorted.map(p=>x(p.temperature).toFixed(1)+','+y(p.percent).toFixed(1)).join(' ');
+  const grid=[0,25,50,75,100].map(v=>'<line x1="44" y1="'+y(v)+'" x2="436" y2="'+y(v)+'" stroke="#293e4c"/>'+
+    '<text x="36" y="'+(y(v)+4)+'" text-anchor="end" fill="#98b2c4" font-size="11">'+v+'%</text>').join('');
+  const pointsMarkup=sorted.map(p=>'<circle cx="'+x(p.temperature)+'" cy="'+y(p.percent)+'" r="4" fill="#60d6cf">'+
+     '<title>'+p.temperature+'°C → '+p.percent+'%</title></circle>').join('');
+  const marker=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent)
+    ?'<circle cx="'+x(activeTemperature)+'" cy="'+y(activePercent)+'" r="6" fill="#f2bd6d" stroke="#132535" stroke-width="2"></circle>'+
+     '<line x1="'+x(activeTemperature)+'" y1="20" x2="'+x(activeTemperature)+'" y2="180" stroke="#f2bd6d" stroke-dasharray="4 4"/>':'';
+  return '<svg class="w-curve-plot" viewBox="0 0 460 205" role="img" aria-label="Simulated fan curve showing output percentage by input temperature">'+
+    grid+'<line x1="44" y1="174" x2="436" y2="174" stroke="#7890a0"/>'+
+    '<text x="44" y="194" fill="#98b2c4" font-size="11">'+lo+'°C</text>'+
+    '<text x="436" y="194" text-anchor="end" fill="#98b2c4" font-size="11">'+hi+'°C</text>'+
+    '<polyline points="'+poly+'" fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'+
+    pointsMarkup+marker+'</svg>';
+ };
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
@@ -155,6 +181,7 @@ const SDWorkspace = (() => {
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
      return card(curve.name,'1 Hz simulation • no motherboard, pump or controller writes',
+       curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+
        '<div class="w-sim-preview">'+
          '<div><span>Input</span><strong data-sim="'+attr(scope)+':input">'+
            (sample?.inputTemperature==null?'—':value({value:sample.inputTemperature,type:'Temperature'})+' °C')+'</strong></div>'+
