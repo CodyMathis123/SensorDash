@@ -173,16 +173,88 @@ const SDWorkspace = (() => {
     '<polyline points="'+poly+'" fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'+
     pointsMarkup+marker+'</svg>';
  };
+ // A curve is a series of editable numeric rows, with one blank row always
+ // available. Nothing is sent to the elevated collector until Save is clicked.
+ const curvePointRow=(point=null)=>{
+  const temp=point?.temperature==null?'':point.temperature;
+  const percent=point?.percent==null?'':point.percent;
+  return '<tr data-curve-point-row>'+
+   '<td><input type="number" min="-30" max="150" step="1" inputmode="decimal" '+
+    'data-curve-temperature value="'+attr(temp)+'" placeholder="°C" aria-label="Curve point temperature in °C"></td>'+
+   '<td><input type="number" min="0" max="100" step="1" inputmode="decimal" '+
+    'data-curve-percentage value="'+attr(percent)+'" placeholder="%" aria-label="Curve point fan duty percentage"></td>'+
+   '<td>'+button('remove-curve-point','×','aria-label="Remove curve point"')+'</td></tr>';
+ };
+ const curveTable=(curve)=>
+  '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
+  '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th class="w-curve-actions-col"></th></tr></thead>'+
+  '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point)).join('')+curvePointRow()+'</tbody></table></div>'+
+  '<p class="note">Click the empty row to add a point; a new row appears automatically when both values are entered. Points are sorted by temperature when saved.</p>'+
+  '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
+ const readCurvePointRows=(table)=>{
+  const rows=[...table.querySelectorAll('tbody tr[data-curve-point-row]')];
+  const points=[];
+  for(const row of rows){
+   const inputTemperature=row.querySelector('[data-curve-temperature]');
+   const inputPercent=row.querySelector('[data-curve-percentage]');
+   const temp=inputTemperature?.value.trim()||'';
+   const pct=inputPercent?.value.trim()||'';
+   if(!temp&&!pct)continue;
+   if(!temp||!pct)throw Error('Complete both temperature and percentage for each point.');
+   const temperature=Number(temp),percent=Number(pct);
+   if(!Number.isFinite(temperature)||!Number.isFinite(percent)||
+      temperature < -30||temperature>150||percent<0||percent>100||
+      !inputTemperature.validity.valid||!inputPercent.validity.valid)
+      throw Error('Temperature must be -30 to 150°C and fan speed must be 0 to 100%, in steps of 1.');
+   points.push({temperature,percent});
+  }
+  if(points.length<2)throw Error('Enter at least two complete curve points.');
+  if(points.length>16)throw Error('A curve can contain at most 16 points.');
+  points.sort((a,b)=>a.temperature-b.temperature);
+  if(points.some((p,i)=>i>0&&p.temperature===points[i-1].temperature))
+    throw Error('Each temperature must be unique.');
+  return points;
+ };
+ const updateCurvePreview=(table,S)=>{
+  const container=table.closest('.panel');
+  const message=container?.querySelector('[data-curve-feedback]');
+  const preview=container?.querySelector('[data-curve-preview]');
+  if(!preview)return;
+  try{
+   const points=readCurvePointRows(table);
+   const id=table.dataset.curveTable;
+   const live=S.simulation?.results?.find(x=>x.id===id);
+   preview.innerHTML=curveDiagram(points,live?.inputTemperature,null);
+   if(message)message.textContent='Preview updated · save to apply this curve to simulation.';
+  }catch(e){
+   if(message)message.textContent=e.message;
+  }
+ };
+ const handleCurvePointInput=(event,S)=>{
+  const input=event.target.closest('[data-curve-temperature],[data-curve-percentage]');
+  if(!input)return false;
+  const table=input.closest('[data-curve-table]');
+  if(!table)return false;
+  const rows=[...table.querySelectorAll('tbody tr[data-curve-point-row]')];
+  const last=rows.at(-1);
+  if(last && last.querySelector('[data-curve-temperature]')?.value.trim() &&
+     last.querySelector('[data-curve-percentage]')?.value.trim() &&
+     rows.length<=16){
+    last.insertAdjacentHTML('afterend',curvePointRow());
+  }
+  updateCurvePreview(table,S);
+  return true;
+ };
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
    const cards=curves.map(curve=>{
      const sample=simulation.find(s=>s.id===curve.id);
-     const points=(curve.points||[]).map(p=>p.temperature+':'+p.percent).join(', ');
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
      return card(curve.name,'1 Hz simulation • no motherboard, pump or controller writes',
-       curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+
+       '<div data-curve-preview="'+attr(scope)+'">'+
+       curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+'</div>'+
        '<div class="w-sim-preview">'+
          '<div><span>Input</span><strong data-sim="'+attr(scope)+':input">'+
            (sample?.inputTemperature==null?'—':value({value:sample.inputTemperature,type:'Temperature'})+' °C')+'</strong></div>'+
@@ -194,9 +266,7 @@ const SDWorkspace = (() => {
          '<label>Curve name<input data-curve-name="'+attr(scope)+'" value="'+attr(curve.name)+'"></label>'+
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
-       '<label class="w-field">Curve points — temperature:percent, comma separated'+
-         '<input data-curve-points="'+attr(scope)+'" value="'+attr(points)+'" placeholder="30:25, 50:55, 75:100">'+
-       '</label>'+
+       curveTable(curve)+
        '<div class="w-actions"><label>Read-only output reference'+
          select(S,curve.outputSensorId,s=>s.type==='Control'||s.type==='Fan','Optional RPM/control sensor',
            'data-curve-output="'+attr(scope)+'"')+'</label>'+
@@ -273,19 +343,18 @@ const SDWorkspace = (() => {
      const field=e.dataset.traySensor?'sensorId':e.dataset.trayLabel?'label':e.dataset.trayColor?'color':'decimals';
      o[field]=field==='decimals'?Number(e.value):e.value;
    }
-   for(const e of document.querySelectorAll('[data-curve-name],[data-curve-input],[data-curve-output],[data-curve-age],[data-curve-points]')){
-     const id=e.dataset.curveName||e.dataset.curveInput||e.dataset.curveOutput||e.dataset.curveAge||e.dataset.curvePoints;
+   for(const e of document.querySelectorAll('[data-curve-name],[data-curve-input],[data-curve-output],[data-curve-age]')){
+     const id=e.dataset.curveName||e.dataset.curveInput||e.dataset.curveOutput||e.dataset.curveAge;
      const o=d.simulatedFanCurves.find(c=>c.id===id);if(!o)continue;
      if(e.dataset.curveName)o.name=e.value;
      if(e.dataset.curveInput)o.sourceSensorId=e.value;
      if(e.dataset.curveOutput)o.outputSensorId=e.value;
      if(e.dataset.curveAge)o.maxSampleAgeSeconds=Number(e.value);
-     if(e.dataset.curvePoints){
-       const parsed=e.value.split(',').map(entry=>entry.trim().split(':').map(Number));
-       if(parsed.length<2||parsed.some(pair=>pair.length!==2||pair.some(n=>!Number.isFinite(n))))
-         throw Error('Curve points must be in the form 30:25, 50:55, 75:100');
-       o.points=parsed.map(([temperature,percent])=>({temperature,percent}));
-     }
+
+   }
+   for(const table of document.querySelectorAll('[data-curve-table]')){
+     const curve=d.simulatedFanCurves.find(c=>c.id===table.dataset.curveTable);
+     if(curve)curve.points=readCurvePointRows(table);
    }
    for(const e of document.querySelectorAll('[data-virtual-name],[data-virtual-op]')){
      const id=e.dataset.virtualName||e.dataset.virtualOp;
@@ -298,6 +367,18 @@ const SDWorkspace = (() => {
    e.preventDefault();e.stopPropagation();
    const action=el.dataset.work,id=el.dataset.id,scope=el.dataset.scope;
    try{
+     // Curve point row operations edit the local form. Saving is explicit,
+     // so a blank/partially typed row must not be persisted or discarded.
+     if(action==='remove-curve-point'){
+       const row=el.closest('[data-curve-point-row]');
+       const table=el.closest('[data-curve-table]');
+       row?.remove();
+       if(table && !table.querySelector('tbody tr:last-child [data-curve-temperature]:placeholder-shown')){
+         table.querySelector('tbody')?.insertAdjacentHTML('beforeend',curvePointRow());
+       }
+       if(table)updateCurvePreview(table,S);
+       return true;
+     }
      // Preserve unsaved editor inputs when pressing Add/Remove.
      syncInputs(S);
      const cfg=S.settings;
@@ -400,5 +481,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation};
+ return {render,handle,paintSimulation,handleCurvePointInput};
 })();
