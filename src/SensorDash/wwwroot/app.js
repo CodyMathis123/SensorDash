@@ -160,24 +160,38 @@ function nvme(){
 }
 function explorer(){
  const candidates=S.sensors.filter(s=>{
-   const text=(label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase();
    const typed=S.filter==='All'||(S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(s.type))||
       s.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(s.id));
-   return typed&&text.includes(S.search.toLowerCase());
+   return typed;
  });
  candidates.sort((a,b)=>((S.settings?.pinnedSensors?.includes(b.id)?1:0)-(S.settings?.pinnedSensors?.includes(a.id)?1:0))||a.type.localeCompare(b.type)||label(a).localeCompare(label(b)));
- let s=sensor(S.selected)||candidates[0]; if(s)S.selected=s.id;
+ const selected=sensor(S.selected)||candidates[0];
+ if(selected)S.selected=selected.id;
+ const matches=candidates.filter(s=>(label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase().includes(S.search.toLowerCase())).length;
  return `<section class="panel full">
- <div class="panel-head"><div><h2>Sensor registry</h2><p>${S.sensors.length} sensors available · ${candidates.length} matching · click a row to inspect</p></div><span class="pill mute">READ-ONLY</span></div>
- <div class="toolbar"><input id="search" placeholder="Search name, ID, hardware, category…" value="${esc(S.search)}">
+ <div class="panel-head"><div><h2>Sensor registry</h2><p>${S.sensors.length} sensors available · <span id="matchCount">${matches}</span> matching · click a row to inspect</p></div><span class="pill mute">LIVE VALUES · STATIC LIST</span></div>
+ <div class="toolbar"><input id="search" placeholder="Search sensor, ID, device or type…" value="${esc(S.search)}">
    ${['Key','Temperature','Fan','Control','Power','Load','Pinned','All'].map(v=>`<button class="filter-btn ${S.filter===v?'selected':''}" data-filter="${v}">${v}</button>`).join('')}
  </div>
- <div class="table-container"><table><thead><tr><th>Sensor</th><th>Device</th><th>Type</th><th>Current</th><th>Pin</th></tr></thead><tbody>
- ${candidates.slice(0,450).map(s=>`<tr data-select="${esc(s.id)}" class="${S.selected===s.id?'chosen':''}"><td>${esc(label(s))}<small>${esc(s.id)}</small></td><td>${esc(s.device)}</td><td><span class="tag">${esc(s.type)}</span></td><td>${latest(s)}</td><td><button class="pin ${S.settings?.pinnedSensors?.includes(s.id)?'pinned':''}" data-pin="${esc(s.id)}" title="Toggle history pin">★</button></td></tr>`).join('')}
- </tbody></table>${candidates.length?'':'<div class="empty">No sensors match these filters.</div>'}</div></section>
- ${s?`<div class="full">${panel('Selected sensor · '+label(s),s.id+' · '+s.device,chart([s],typeUnit(s.type))+
-    '<div class="badge-line"><span class="note">Pin this sensor to guarantee it is recorded, even if it is not among the default telemetry types.</span><button class="btn tiny" data-pin="'+esc(s.id)+'">'+(S.settings?.pinnedSensors?.includes(s.id)?'Unpin sensor':'Pin for history')+'</button></div>')}</div>`:''}`;
+ <div class="table-container" id="sensorList"><table><thead><tr><th>Sensor / identifier</th><th>Hardware</th><th>Type</th><th>Live</th><th>Pin</th></tr></thead><tbody>
+ ${candidates.map(s=>`<tr data-select="${esc(s.id)}" data-search="${esc((label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase())}" ${(label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase().includes(S.search.toLowerCase())?'':'hidden'} class="${S.selected===s.id?'chosen':''}">
+ <td>${esc(label(s))}<small>${esc(s.id)}</small></td>
+ <td>${esc(s.device)}</td><td><span class="tag">${esc(s.type)}</span></td>
+ <td data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(typeUnit(s.type))}">${latest(s)}</td>
+ <td><button class="pin ${S.settings?.pinnedSensors?.includes(s.id)?'pinned':''}" data-pin="${esc(s.id)}" title="Toggle history pin">★</button></td></tr>`).join('')}
+ </tbody></table>${candidates.length?'':'<div class="empty">No sensors in this category.</div>'}</div></section>
+ ${selected?`<div class="full">${panel('Selected sensor · '+label(selected),selected.id+' · '+selected.device,
+   `<div class="alias-editor">
+    <div class="field"><label for="sensorAlias">Custom sensor name</label><input id="sensorAlias" maxlength="120" value="${esc(S.settings?.aliases?.[selected.id]||'')}" placeholder="${esc(selected.name)}"></div>
+    <button class="btn" data-save-alias>Save name</button>
+    <button class="btn secondary" data-clear-alias>Use original name</button>
+   </div>
+   <p class="note">This alias applies everywhere this sensor appears. Its stable sensor ID stays unchanged.</p>
+   ${chart([selected],typeUnit(selected.type))}
+   <div class="badge-line"><span class="note">Pin this sensor to keep recording it in history.</span><button class="btn tiny" data-pin="${esc(selected.id)}">${S.settings?.pinnedSensors?.includes(selected.id)?'Unpin sensor':'Pin for history'}</button></div>`)}
+ </div>`:''}`;
 }
+
 function events(){
  return `<div class="two-col">
   ${panel('Event history','Most recent alerts and recovery events',`<div class="event-list">${S.events.length?S.events.map(e=>`<div class="event ${esc(e.severity)}"><div class="dot"></div><div><b>${esc(e.message)}</b><p>${when(e.t)} · ${esc(e.sensor)}${e.value!=null?' · '+fmt(e.value):''}</p></div></div>`).join(''):'<div class="empty">No events yet. Alerts appear here when configured thresholds are crossed.</div>'}</div>`)}
@@ -187,11 +201,41 @@ function events(){
 function settingsView(){
  const cfg=S.settings;if(!cfg)return '<div class="loading">Loading settings…</div>';
  const selected=[IDS.radiator,IDS.pump,IDS.nvmeFan,IDS.cpu,IDS.gpu,IDS.hotspot,IDS.nvme];
+
+ // Keep sensor roles independent of the original CSV's hardware IDs.
+ const roles=[
+  ['cpu','CPU temperature','Temperature'],
+  ['gpu','GPU core temperature','Temperature'],
+  ['hotspot','GPU hotspot','Temperature'],
+  ['nvme','NVMe temperature','Temperature'],
+  ['radiator','ALL RADS fan tach','Fan'],
+  ['pump','DDC pump tach','Fan'],
+  ['nvmeFan','NVMe heatsink fan tach','Fan'],
+  ['fanDuty','NVMe fan control readout','Control'],
+  ['cpuPower','CPU package power','Power'],
+  ['gpuPower','GPU package power','Power']
+ ];
+ const detected=getDefaults();
+ const roleEditor=roles.map(([key,title,type])=>{
+   const saved=cfg.sensorBindings?.[key]||'';
+   const possible=S.sensors.filter(x=>x.type===type).sort((a,b)=>a.device.localeCompare(b.device)||a.name.localeCompare(b.name));
+   const unavailable=saved&&!possible.some(x=>x.id===saved);
+   const auto=detected[key]?label(detected[key])+' ('+detected[key].id+')':'no matching sensor';
+   return `<div class="field sensor-role"><label for="role-${key}">${esc(title)}</label>
+    <select id="role-${key}" data-sensor-role="${key}">
+      <option value="">Automatic · ${esc(auto)}</option>
+      ${unavailable?`<option selected value="${esc(saved)}">Unavailable: ${esc(saved)}</option>`:''}
+      ${possible.map(x=>`<option value="${esc(x.id)}" ${saved===x.id?'selected':''}>${esc(x.device+' / '+x.name+' ['+x.id+']')}</option>`).join('')}
+    </select></div>`;
+ }).join('');
  return `<div class="settings-grid">
   ${panel('Collection intervals','Adjust sensor refresh and history retention',`<div class="form-grid">
    ${[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']].map(([key,title])=>`<div class="field"><label for="${key}">${title}</label><input id="${key}" type="number" min="1" max="365" value="${cfg[key]}"></div>`).join('')}
   </div><p class="note">NVMe polling is intentionally slower than CPU/GPU polling. History is stored in your Windows user profile.</p>`)}
-  ${panel('Known sensor aliases','Names used throughout the dashboard',selected.map(id=>`<div class="alias-row"><label title="${esc(id)}">${esc(sensor(id)?.name||id)}</label><input data-alias="${esc(id)}" value="${esc(cfg.aliases?.[id]||'')}" placeholder="Friendly name"></div>`).join(''))}
+  ${panel('Sensor role assignments','Choose the actual source for each dashboard gauge; Automatic is the default',
+    '<div class="role-list">'+roleEditor+'</div><p class="note">Only sensors currently detected by LibreHardwareMonitor can be selected. If your SSD is absent, consult the Storage Diagnostics card on the NVMe page.</p>')}
+  ${panel('Sensor aliases','Edit these here, or rename ANY sensor directly from Sensor Explorer',
+    [...new Set([...selected,...Object.keys(cfg.aliases||{})])].map(id=>`<div class="alias-row"><label title="${esc(id)}">${esc(sensor(id)?.name||id)}</label><input data-alias="${esc(id)}" value="${esc(cfg.aliases?.[id]||'')}" placeholder="Friendly name"></div>`).join(''))}
   ${panel('High-temperature thresholds','Alert whenever a reading crosses its configured value',[IDS.cpu,IDS.hotspot,IDS.nvme].map(id=>`<div class="alias-row"><label title="${esc(id)}">${esc(label(sensor(id)||{id,name:id}))}</label><input type="number" min="0" max="150" step="1" data-threshold="${esc(id)}" value="${cfg.highThresholds?.[id]??''}"></div>`).join('')+'<p class="note">Pump tach warning uses a fixed safety threshold of 1,000 RPM for 20 seconds, after it has first reported a running value.</p>')}
   ${panel('Application & startup','Keep everything local','<div class="stat-row"><label>Dashboard address</label><strong>127.0.0.1:8765</strong></div><div class="stat-row"><label>Fan control</label><strong>Disabled (read-only)</strong></div><div class="stat-row"><label>Storage</label><strong>%LOCALAPPDATA%\\SensorDash</strong></div><p class="note">To start when you sign in, run Install-Startup.ps1 from the extracted release. It creates a shortcut only for your Windows user account. Remove-Startup.ps1 undoes it.</p><p class="note">If a sensor is unavailable, try starting the application as Administrator for comparison. Don’t grant elevated access to an exposed network server; this app binds to localhost.</p>')}
  </div><div class="badge-line"><p class="note">Changes apply to the live collector without restarting.</p><button class="btn" id="saveSettings">Save settings</button></div>`;
