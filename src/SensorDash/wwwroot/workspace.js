@@ -322,7 +322,7 @@ const SDWorkspace = (() => {
        const [entity,root,child]=scope.split(':');
        const obj=entity==='dashboard'?cfg.dashboards.find(d=>d.id===root)?.widgets.find(w=>w.id===child)
          :entity==='component'?cfg.coolingSystems.find(c=>c.id===root)?.components.find(c=>c.id===child)
-         :cfg.virtualSensors.find(v=>v.id===root);
+         :cfg.virtualSensors.find(v=>v.id===scope.slice('virtual:'.length));
        if(obj){
          if(action==='remove-sensor')obj.sensorIds=obj.sensorIds.filter(x=>x!==el.dataset.sensor);
          else {
