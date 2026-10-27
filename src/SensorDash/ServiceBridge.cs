@@ -92,6 +92,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                 {
                     "live" => state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Waiting for collector..."),
                     "settings" => state.Settings,
+                    "collectionGroups" => HardwareCollection.Groups,
                     "saveSettings" when req.Settings != null => Save(req.Settings),
                     "events" => db.ReadEvents(),
                     "simulation" => new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest },
