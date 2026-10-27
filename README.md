@@ -1,3 +1,38 @@
+# SensorDash 0.5.0 — Experimental Live Fan Control
+
+Fan Control (the separate app) can simply be closed. Quit its tray/background process and disable its automatic startup before commanding a channel with SensorDash. No migration integration is required. Confirm the fan remains operational under BIOS/default control.
+
+This release introduces the first writable-channel implementation, not a complete unattended replacement for Fan Control.
+
+### Supported experimental workflow
+
+1. Keep SensorDash Collector installed and running. Open http://127.0.0.1:8765/#curves.
+2. Discover actual IControl-backed hardware channels. An RPM-only Fan reading is not a writable output.
+3. Exit any competing fan-controller application and verify the chosen channel is back in Default mode. SensorDash refuses channels still in Software or Undefined mode.
+4. Select one output. Choose Manual PWM or a saved temperature curve, then a 30/60/120-second test.
+5. Acknowledge exclusive ownership and click Request elevated takeover. Windows presents UAC for a one-shot administrator helper.
+6. Observe status and fan response. Release the channel to firmware control or allow the lease to expire.
+
+### Security and limitations
+
+- No persisted fan takeovers. Every live session requires an admin-approved UAC prompt, lasts at most two minutes and commands only one channel.
+- Initial duty floor 70–100%, even when a saved curve calculates a lower duty. This is a test safety restriction, not a quiet long-term cooling profile.
+- A separate named pipe (SensorDash.Fan.Admin.v1) permits only local Windows administrators and SYSTEM to request writes. The ordinary telemetry IPC exposes read-only output inventory/status, not write commands.
+- The loopback browser command requires same-origin JSON with a custom header, and only launches the UAC helper; it cannot itself write to hardware.
+- All LibreHardwareMonitor SetSoftware/SetDefault operations run on the collector's hardware thread.
+- Authorized curves are snapshotted upon elevated acceptance, preventing ordinary settings writes from changing a privileged live lease.
+- On lease expiry, explicit release, service shutdown, sensor failure or hardware reinitialization the collector attempts firmware/default restoration. This is BEST EFFORT, not a hardware watchdog: power loss, process crash or a stalled driver can prevent it.
+- Fan RPM sensors and PWM control channels are not automatically paired. Confirm physical wiring and fan behavior before using a channel, and do not take over essential pumps until fallback behavior is verified.
+- Not yet implemented: silent startup control, unlimited continuous operation, multi-channel control, low-duty/zero-RPM stop modes, independent external watchdog, calibration and automatic RPM matching.
+
+### Validation
+
+The hardware-free self-test checks that fan controls stay disabled by default and rejects unauthorized or unknown channels. Windows MSI workflow verifies admin-only IPC, explicit UAC action, read-only inventory and service installation, without writing any fan hardware on CI.
+
+Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Historical data and saved configurations remain in ProgramData.
+
+---
+
 # SensorDash
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **simulation-only fan curves**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
