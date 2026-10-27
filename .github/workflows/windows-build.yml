@@ -1,4 +1,4 @@
-name: Windows portable build
+name: Windows MSI and portable build
 on:
   push:
     branches: [Production, "feature/**"]
@@ -44,6 +44,14 @@ jobs:
           Copy-Item packaging/Install-ElevatedStartup.cmd dist/Install-ElevatedStartup.cmd
           Copy-Item packaging/Remove-ElevatedStartup.cmd dist/Remove-ElevatedStartup.cmd
           Copy-Item README.md dist/README.txt
+      - name: Build Windows MSI installer
+        run: dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
+      - name: Confirm installer created
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse | Select-Object -First 1
+          if (!$msi) { throw 'WiX did not produce an MSI' }
+          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes)"
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
         run: |
@@ -52,6 +60,10 @@ jobs:
           $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
           New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
           Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          # Exercise both components, including named-pipe service communication,
+          # without installing a service on the CI runner.
+          $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          Start-Sleep -Seconds 3
           $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
           try {
             $ready = $false
@@ -71,10 +83,18 @@ jobs:
             if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
-            Write-Host 'Verified localhost API and browser shell'
+            $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            Write-Host 'Verified desktop + collector named pipe + browser shell'
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
           }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SensorDash-Setup-0.2.0-x64
+          path: installer-output/**/*.msi
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: SensorDash-win-x64
