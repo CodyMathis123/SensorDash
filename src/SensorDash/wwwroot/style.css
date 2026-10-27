@@ -24,3 +24,6 @@
 .sensor-role{min-width:0}
 .sensor-role select{width:100%;text-overflow:ellipsis}
 @media(max-width:800px){.alias-editor{align-items:stretch}.alias-editor .btn{flex:1}}
+
+/* Mouse crosshair and tooltip are painted on a separate transparent layer. */
+.chart-hover-overlay{position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none}
