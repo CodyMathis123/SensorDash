@@ -1,4 +1,14 @@
-# SensorDash 0.5.0 — Experimental Live Fan Control
+# SensorDash 0.5.1 — More accurate fan takeover and simpler safety UI
+
+LibreHardwareMonitor IControl reports Undefined for newly initialized controls unless its own settings say otherwise. This is an internal library state, **not a measurement of whether firmware is active or a competing fan controller exists**. SensorDash v0.5.0 mistakenly required Default and conflated mode with supported PWM range; v0.5.1 accepts Undefined, Default and Software modes after explicit user confirmation that other fan-control software is closed.
+
+Output eligibility now uses the channel's declared minimum/maximum PWM range; manual test duty must be inside the channel's supported range and the 70–100% commissioning band. A first takeover from LHM Software mode explicitly transitions through Default so a cached identical SoftwareValue cannot suppress the actual register write. Restore operations remain best-effort; an abrupt process crash cannot run cleanup.
+
+UI wording is intentionally calmer: acknowledge only that other fan-control software is closed and you wish SensorDash to control the output. The conservative 70% test floor and 120-second session limit remain until physical PWM output behavior is validated.
+
+---
+
+# SensorDash 0.5.0 — Experimental Live Fan Control (prior release notes)
 
 Fan Control (the separate app) can simply be closed. Quit its tray/background process and disable its automatic startup before commanding a channel with SensorDash. No migration integration is required. Confirm the fan remains operational under BIOS/default control.
 
@@ -8,7 +18,7 @@ This release introduces the first writable-channel implementation, not a complet
 
 1. Keep SensorDash Collector installed and running. Open http://127.0.0.1:8765/#curves.
 2. Discover actual IControl-backed hardware channels. An RPM-only Fan reading is not a writable output.
-3. Exit any competing fan-controller application and verify the chosen channel is back in Default mode. SensorDash refuses channels still in Software or Undefined mode.
+3. Exit any competing fan-controller application. The LHM control object's mode may report Undefined, Default or Software; this is not a reliable cross-process ownership indicator. Verify actual fan behavior.
 4. Select one output. Choose Manual PWM or a saved temperature curve, then a 30/60/120-second test.
 5. Acknowledge exclusive ownership and click Request elevated takeover. Windows presents UAC for a one-shot administrator helper.
 6. Observe status and fan response. Release the channel to firmware control or allow the lease to expire.
