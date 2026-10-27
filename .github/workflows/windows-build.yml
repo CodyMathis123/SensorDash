@@ -59,6 +59,27 @@ jobs:
           if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-dashboard-lock') {
             throw 'Sensor usage or dashboard locking missing'
           }
+      - name: Verify experimental fan-control security boundary
+        shell: pwsh
+        run: |
+          $backend = Get-Content 'src/SensorDash/ServiceBridge.cs' -Raw
+          $admin = Get-Content 'src/SensorDash/AdminFanControl.cs' -Raw
+          $runtime = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          if ($backend -notmatch 'fanOutputs' -or $backend -match '"arm"\s*=>') {
+            throw 'Only read-only control status may be accessible from telemetry pipe'
+          }
+          if ($admin -notmatch 'BuiltinAdministratorsSid' -or
+              $admin -match 'AuthenticatedUserSid') {
+            throw 'Hardware-control pipe must remain administrator-only'
+          }
+          if ($runtime -notmatch 'SetDefault\(' -or $runtime -notmatch 'SetSoftware\(' -or
+              $runtime -notmatch 'MaxSessionSeconds') {
+            throw 'Timed hardware ownership/release implementation missing'
+          }
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          if ($ui -notmatch 'Request elevated takeover' -or $ui -notmatch 'fan-release') {
+            throw 'Missing explicit live fan-control UI actions'
+          }
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -148,6 +169,16 @@ jobs:
           if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
           $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
           if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
+          $outputs = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/fan-control' -TimeoutSec 8
+          if (!$outputs.status -or !$outputs.experimental -or !$outputs.requiresAdministrator) {
+            throw 'Control inventory is not available or is incorrectly configured'
+          }
+          $denied = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/fan-control/authorize' -Method Post `
+            -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
+            -SkipHttpErrorCheck
+          if ($denied.StatusCode -ne 403) {
+            throw 'Cross-origin or originless write requests must be rejected before UAC'
+          }
             if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
             if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
@@ -251,7 +282,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.4.0-x64
+          name: SensorDash-Setup-0.5.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
