@@ -14,11 +14,52 @@ const SDWorkspace = (() => {
  const defaultSensors=(S,group,n=4)=>S.sensors.filter(s=>
      s.value!=null &&(group==='all'||s.type===group)
      &&s.deviceType!=='Virtual').slice(0,n);
+ const isHidden=(S,s)=>{
+  const cfg=S.settings||{};
+  return !!(cfg.hiddenSensorIds||[]).includes(s.id)
+    || !!(s.deviceId&&(cfg.hiddenDeviceIds||[]).includes(s.deviceId))
+    || (cfg.hiddenHardwareTypes||[]).some(type=>type.toLowerCase()===String(s.deviceType||'').toLowerCase());
+ };
+ // Prefix generic hardware-library labels rather than pretending the library
+ // supplied a meaningful name. This also retains discoverability for aliasing.
+ const displayName=(S,s)=>{
+   const alias=S.settings?.aliases?.[s.id];if(alias)return alias;
+   if(/^(Temperature|Fan|Control|Load|Power)\s*#\d+$/i.test(s.name||''))
+     return s.device+' · '+s.name;
+   return s.name;
+ };
+ const usageIndex=(S)=>{
+  const cfg=S.settings||{},index=new Map();
+  const add=(id,what,page,dashboardId='')=>{
+   if(!id)return;
+   const entries=index.get(id)||[];
+   entries.push({label:what,page,dashboardId});
+   index.set(id,entries);
+  };
+  for(const d of cfg.dashboards||[])
+   for(const w of d.widgets||[])for(const id of w.sensorIds||[])
+    add(id,'Dashboard: '+d.name+' / '+w.title,'dashboards',d.id);
+  for(const system of cfg.coolingSystems||[])
+   for(const part of system.components||[])for(const id of part.sensorIds||[])
+    add(id,'Cooling: '+system.name+' / '+part.name,'cooling');
+  for(const w of cfg.trayWidgets||[])add(w.sensorId,'Tray: '+(w.label||'Sensor readout'),'tray');
+  for(const v of cfg.virtualSensors||[])
+   for(const id of v.sensorIds||[])add(id,'Virtual sensor: '+v.name,'virtual');
+  for(const c of cfg.simulatedFanCurves||[]){
+   add(c.sourceSensorId,'Curve input: '+c.name,'curves');
+   add(c.outputSensorId,'Curve reference: '+c.name,'curves');
+  }
+  for(const id of cfg.pinnedSensors||[])add(id,'Pinned for history','explorer');
+  for(const [id] of Object.entries(cfg.highThresholds||{}))add(id,'Monitoring threshold','settings');
+  for(const [role,id] of Object.entries(cfg.sensorBindings||{}))add(id,'Legacy sensor role: '+role,'settings');
+  return index;
+ };
+
  const select=(S,selected='',predicate=()=>true,empty='Select sensor',id='')=>
   '<select '+id+'><option value="">'+safe(empty)+'</option>'+
-  S.sensors.filter(predicate).sort((a,b)=>a.device.localeCompare(b.device)||a.name.localeCompare(b.name))
+  S.sensors.filter(s=>(s.id===selected||!isHidden(S,s))&&predicate(s)).sort((a,b)=>a.device.localeCompare(b.device)||a.name.localeCompare(b.name))
     .map(s=>'<option value="'+attr(s.id)+'" '+(selected===s.id?'selected':'')+'>'+
-      safe(s.device+' / '+(S.settings?.aliases?.[s.id]||s.name)+' ('+s.type+')')+'</option>').join('')+'</select>';
+      safe(s.device+' / '+(S.settings?.aliases?.[s.id]||s.name)+' ('+s.type+')'+(isHidden(S,s)?' [Hidden]':''))+'</option>').join('')+'</select>';
  const button=(action,text,data='',secondary=true)=>
   '<button type="button" class="btn '+(secondary?'secondary':'')+'" data-work="'+action+'" '+data+'>'+safe(text)+'</button>';
  const card=(title,description,body)=>
@@ -39,19 +80,23 @@ const SDWorkspace = (() => {
  const nothing=(label)=>'<div class="empty">'+safe(label)+'</div>';
  const renderOverview=(S,h)=>{
    const sensorSets=[
-     ['Temperature',S.sensors.filter(s=>s.type==='Temperature'&&s.value!=null)],
-     ['Fan',S.sensors.filter(s=>s.type==='Fan'&&s.value!=null)],
-     ['Power',S.sensors.filter(s=>s.type==='Power'&&s.value!=null)]
+     ['Temperature',S.sensors.filter(s=>s.type==='Temperature'&&s.value!=null&&!isHidden(S,s)&&s.deviceType!=='Virtual')],
+     ['Fan',S.sensors.filter(s=>s.type==='Fan'&&s.value!=null&&!isHidden(S,s))],
+     ['Power',S.sensors.filter(s=>s.type==='Power'&&s.value!=null&&!isHidden(S,s))]
    ];
+   const prefer=(expr,relevant)=>relevant.filter(s=>expr.test(s.name)).slice(0,1);
+   const cpu=sensorSets[0][1].filter(s=>/cpu|ryzen|intel core|processor/i.test(s.device));
+   const gpu=sensorSets[0][1].filter(s=>/gpu|radeon|geforce/i.test(s.device));
+   const storage=sensorSets[0][1].filter(s=>/Storage/i.test(s.deviceType)||/nvme|ssd|drive/i.test(s.device));
    const featured=[
-     ...sensorSets[0][1].filter(s=>/cpu/i.test(s.device)).slice(0,1),
-     ...sensorSets[0][1].filter(s=>/gpu/i.test(s.device)).slice(0,1),
-     ...sensorSets[0][1].filter(s=>/storage|nvme|ssd/i.test(s.deviceType+' '+s.device)).slice(0,1)
+     ...prefer(/Tctl\/Tdie|CPU Package|CPU Core/i,cpu),
+     ...prefer(/GPU Core|GPU Temperature/i,gpu),
+     ...prefer(/Composite|Drive Temperature/i,storage)
    ];
    for(const group of sensorSets)for(const s of group[1])if(featured.length<4&&!featured.some(f=>f.id===s.id))featured.push(s);
-   const count=k=>S.sensors.filter(s=>s.type===k).length;
+   const count=k=>S.sensors.filter(s=>s.type===k&&!isHidden(S,s)).length;
    const metricBody=featured.slice(0,4).map(s=>
-     h.metric(S.settings?.aliases?.[s.id]||s.name,s,
+     h.metric(displayName(S,s),s,
        '#62d5ce',s.device,unit(s.type),icon[s.type]||'◈')).join('');
    const charts=featured.filter(s=>s.type==='Temperature');
    const trends=charts.length ? h.chart(charts,'°C') : nothing('Temperature sensors will appear when discovered.');
@@ -392,7 +437,7 @@ const SDWorkspace = (() => {
      if(action==='add-dashboard'){
        const template=el.dataset.template||'blank';
        const newWidget=(title,kind,ids)=>({id:uid(),title,kind,sensorIds:ids});
-       const physical=S.sensors.filter(sensor=>sensor.deviceType!=='Virtual');
+       const physical=S.sensors.filter(sensor=>sensor.deviceType!=='Virtual'&&!isHidden(S,sensor));
        const sources=template==='thermal'?physical.filter(sensor=>sensor.type==='Temperature')
          :template==='cooling'?physical.filter(sensor=>['Fan','Control','Flow'].includes(sensor.type))
          :template==='storage'?physical.filter(sensor=>sensor.deviceType==='Storage'):[];
@@ -437,7 +482,7 @@ const SDWorkspace = (() => {
        if(parent)parent.components=parent.components.filter(c=>c.id!==child);
      }
      if(action==='add-tray'){
-       const candidate=S.sensors.find(s=>s.value!=null&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
+       const candidate=S.sensors.find(s=>s.value!=null&&!isHidden(S,s)&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
        cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors[0]?.id||'',label:'',color:'#62d5ce',decimals:0});
      }
      if(action==='remove-tray')cfg.trayWidgets=cfg.trayWidgets.filter(w=>w.id!==id);
@@ -487,5 +532,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation,handleCurvePointInput};
+ return {render,handle,paintSimulation,handleCurvePointInput,isHidden,displayName,usageIndex};
 })();
