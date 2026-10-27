@@ -6,7 +6,7 @@ A locally hosted Windows hardware-monitoring dashboard powered by [LibreHardware
 1. Open **Actions → Windows portable build → most recent successful run → SensorDash-win-x64** and download the artifact ZIP.
 2. Extract **the whole folder** anywhere (e.g. \`C:\Tools\SensorDash\`).
 3. Double-click **SensorDash.exe** (or **Start-SensorDash.cmd**). It hosts the local dashboard and opens **http://127.0.0.1:8765**.
-4. Optional: Right-click **Install-Startup.ps1 → Run with PowerShell** to auto-start at Windows sign-in (without opening a browser). Remove via **Remove-Startup.ps1**.
+4. Optional: Double-click **Install-Startup.cmd** to auto-start at Windows sign-in (without opening a browser). Remove via **Remove-Startup.cmd**.
 5. To exit, use Task Manager → SensorDash or stop the process from PowerShell (\`Stop-Process -Name SensorDash\`). You can relaunch it by double-clicking.
 
 No administrator rights are required to *start* SensorDash, but certain low-level sensors/drivers might be unavailable without elevation. The dashboard shows errors rather than inventing readings. If it fails to start, look at the log in \`%LOCALAPPDATA%\SensorDash\SensorDash.log\`.
