@@ -1,3 +1,81 @@
+# SensorDash 0.3.0 — Configurable hardware workspaces (simulation-only controls)
+
+This version begins the transition from a fixed PC-specific monitoring dashboard
+to a hardware-independent configuration platform. The elevated Windows collector
+and standard-user browser/tray processes remain separated.
+
+## What's available
+
+- **Overview:** automatically selects representative readings from detected CPU,
+  GPU, storage and cooling hardware; no specific chipset or sensor IDs are required.
+- **Dashboards:** add any number of dashboards, each with metric cards,
+  multi-sensor history charts, or live sensor lists. Create blank dashboards or use
+  three starter templates: Thermal, Cooling Telemetry, or Storage.
+- **Cooling Systems:** create any number of liquid, air, or custom systems. Add
+  heat sources, radiators, pumps, fans, and generic sensors/components, then assign
+  whichever discovered physical or virtual sensors are meaningful.
+  Cooling systems are logical collections only; listing a sensor in a system does
+  not take ownership of a hardware controller.
+- **Virtual Sensors:** define Max, Min, Average and Delta using up to eight physical
+  inputs. Values are recomputed when hardware polls and can be used in dashboards,
+  tray readouts, and simulated curves. To prevent circular references, this first
+  version does not permit virtual sensors to depend on other virtual sensors.
+  Sources must share compatible sensor units; unavailable sources are skipped.
+- **Curve Sandbox:** edit temperature-to-percent points and visualize interpolated
+  target percentages. The elevated service evaluates configurations at **1 Hz**
+  using the latest timestamped measurements; stale or missing inputs produce an
+  *unavailable* target, not a hardware write. Optionally associate a measured
+  output (Control/Fan sensor) for reference only. No IControl.SetSoftware,
+  IControl.SetDefault, firmware writes, or fan ownership operations exist here.
+- **Tray Readouts:** up to six independent configurable Windows notification-area
+  icons, each bound to any detected physical or virtual sensor. Choose color,
+  caption, and zero/one decimal place. Numbers update only when their display value
+  changes, at the collector's latest available sampling cadence. Double-click any
+  readout to open the Tray settings page; exiting the tray does not stop the service.
+- **Storage:** SSD and drive sensor data is in a general Storage page and the
+  universal Sensor Explorer, not a dedicated NVMe-cooling tab.
+- **Settings:** hardware-neutral thresholds, aliases and polling intervals.
+
+The default installation contains one empty 'System dashboard'. User-created
+dashboards, cooling systems, tray readouts, virtual sensors, and curves are persisted
+in the service's \`%ProgramData%\SensorDash\settings.json\`, validated and bounded by
+the collector. Existing 0.2.x settings and telemetry are retained on MSI upgrade.
+The tray configuration is currently machine-wide on this trusted workstation;
+per-Windows-user profiles are future work.
+
+## Simulation scope and safety
+
+SensorDash **does not command fans or pumps in v0.3.0**. Continue running your
+current fan controller. A fan tachometer is a reading, not evidence that its
+corresponding output can be commanded. Independent output discovery, ownership,
+calibration, failsafe/watchdog recovery and tighter named-pipe authorization are
+required before any live-control feature ships.
+
+The service's sensor snapshot polling and the 1 Hz curve calculation are independent.
+Storage sensors carry the time they were actually polled, allowing curve staleness
+policies to reject old samples even when the main hardware frame is recent. Browser
+chart drawing is throttled/deferred during pointer interaction independently of
+polling, as in v0.1.3.
+
+## Install and upgrade
+
+Install the v0.3.0 Windows x64 MSI over the previous v0.2.x installation.
+Close the SensorDash tray first. MSI registers/removes the elevated service, all-users
+Start Menu shortcut with custom icon, and standard-user tray autostart. App data in
+ProgramData survives upgrades/uninstalls. Fan Control and PawnIO are left unchanged.
+
+## Tests and build
+
+- \`dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist\`
+- \`dist/SensorDash.exe --self-test\` runs synthetic, hardware-free evaluation tests
+  for Max virtual sensors, curve interpolation, stale/missing sensors, and config limits.
+- \`dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64\`
+- GitHub Actions compiles the app and MSI, verifies embedded JS/icons, exercises the
+  local service/desktop named pipe, performs Windows MSI installation/uninstallation,
+  and runs simulated-control tests.
+
+---
+
 # SensorDash v0.2.2 — Branded application and Start Menu shortcut
 
 Version 0.2.2 embeds the same cyan-on-navy telemetry icon used by the tray directly into **SensorDash.exe**. The per-machine MSI explicitly registers an **all-users Start Menu shortcut** called **SensorDash** in `%ProgramData%\Microsoft\Windows\Start Menu\Programs\SensorDash.lnk` and assigns the branded icon using the MSI Icon table.
