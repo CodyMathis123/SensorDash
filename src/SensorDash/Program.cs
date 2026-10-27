@@ -196,6 +196,13 @@ public sealed class DashboardSettings {
     public List<string> HiddenSensorIds { get; set; } = [];
     public List<string> HiddenDeviceIds { get; set; } = [];
     public List<string> HiddenHardwareTypes { get; set; } = [];
+    // What we archive is independent of what we display.
+    // 'in-use' writes only explicitly referenced measurements.
+    public string HistoryMode { get; set; } = "balanced";
+    public List<string> ExcludedHistoryHardwareTypes { get; set; } = [];
+    // Network collection is disabled at the hardware-group level, not sensor
+    // level, since LibreHardwareMonitor.Update() operates on entire devices.
+    public bool CollectNetworkSensors { get; set; } = true;
     // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
     public Dictionary<string, string> SensorBindings { get; set; } = new();
     public Dictionary<string, string> Aliases { get; set; } = new();
@@ -270,6 +277,7 @@ public sealed class HistoryStore {
     }
     private SqliteConnection Open() { var c = new SqliteConnection(_connectionString); c.Open(); return c; }
     public void Record(SensorFrame frame, DashboardSettings settings) {
+        var used = settings.HistoryMode == "in-use" ? WorkspaceLogic.ReferencedSensorIds(settings) : null;
         using var connection = Open();
         using var tx = connection.BeginTransaction();
         using var cmd = connection.CreateCommand();
@@ -279,18 +287,27 @@ public sealed class HistoryStore {
         var ts = cmd.Parameters.Add("$ts", SqliteType.Integer);
         var val = cmd.Parameters.Add("$v", SqliteType.Real);
         ts.Value = frame.Timestamp.ToUnixTimeMilliseconds();
-        foreach (var s in frame.Sensors) {
-            if (s.Value is not double v || !double.IsFinite(v) || !ShouldRecord(s, settings)) continue;
-            id.Value = s.Id; val.Value = v; cmd.ExecuteNonQuery();
+        foreach (var sensor in frame.Sensors) {
+            if (sensor.Value is not double v || !double.IsFinite(v) ||
+                !ShouldRecord(sensor, settings, used)) continue;
+            id.Value = sensor.Id; val.Value = v; cmd.ExecuteNonQuery();
         }
         tx.Commit();
     }
-    private static bool ShouldRecord(SensorReading s, DashboardSettings cfg) {
-        if (cfg.PinnedSensors.Contains(s.Id)) return true;
-        if (s.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput") return true;
-        if (s.Type == "Load" && !(s.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
-                                    s.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase))) return true;
-        return s.Type == "Clock" && (s.Name.Contains("Average") || s.Name is "GPU Core" or "GPU Memory");
+
+    internal static bool ShouldRecord(SensorReading sensor, DashboardSettings config, HashSet<string>? used = null) {
+        if (config.ExcludedHistoryHardwareTypes.Contains(sensor.DeviceType, StringComparer.OrdinalIgnoreCase))
+            return false;
+        if (config.HistoryMode == "all") return true;
+        if (config.HistoryMode == "in-use")
+            return (used ?? WorkspaceLogic.ReferencedSensorIds(config)).Contains(sensor.Id);
+        if (config.PinnedSensors.Contains(sensor.Id)) return true;
+        if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput") return true;
+        if (sensor.Type == "Load" &&
+            !(sensor.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
+              sensor.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase))) return true;
+        return sensor.Type == "Clock" &&
+            (sensor.Name.Contains("Average") || sensor.Name is "GPU Core" or "GPU Memory");
     }
     public List<HistorySeries> ReadHistory(string[] sensorIds, double hours) {
         var result = new List<HistorySeries>();
@@ -342,6 +359,7 @@ public sealed class HistoryStore {
 public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<SensorWorker> logger) : BackgroundService {
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
+    private bool? _networkCollectionEnabled;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
@@ -349,13 +367,21 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
             try {
+                if (_computer != null && _networkCollectionEnabled != cfg.CollectNetworkSensors) {
+                    // Changing hardware discovery requires recreating the LHM Computer.
+                    // This is not a per-sensor "polling disabled" illusion.
+                    try { _computer.Close(); } catch { }
+                    _computer = null;
+                }
                 if (_computer == null) {
                     _computer = new Computer {
                         IsCpuEnabled = true, IsGpuEnabled = true, IsMotherboardEnabled = true,
-                        IsMemoryEnabled = true, IsStorageEnabled = true, IsNetworkEnabled = true,
+                        IsMemoryEnabled = true, IsStorageEnabled = true,
+                        IsNetworkEnabled = cfg.CollectNetworkSensors,
                         IsControllerEnabled = true, IsPowerMonitorEnabled = true
                     };
                     _computer.Open();
+                    _networkCollectionEnabled = cfg.CollectNetworkSensors;
                 }
                 var now = DateTimeOffset.UtcNow;
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
