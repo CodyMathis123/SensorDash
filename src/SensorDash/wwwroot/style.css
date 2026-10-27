@@ -118,3 +118,27 @@
 .w-curve-table .btn{padding:7px 0;width:30px;height:33px;line-height:1}
 .w-curve-feedback{min-height:19px;font-size:12px;color:#9fc7c8;margin:5px 0 16px}
 @media(max-width:700px){.w-curve-table th,.w-curve-table td{padding:8px}.w-curve-table input[type=number]{font-size:14px}}
+
+/* Sensor Explorer management: grouped, searchable readings with usage context */
+.explorer-toolbar{flex-wrap:wrap}
+.explorer-tools{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin:10px 0 16px}
+.explorer-tools>label{display:grid;gap:6px;color:#9cb4c7;font-size:12px;flex:1;min-width:190px;max-width:420px}
+.explorer-tools select{width:100%;min-width:0;max-width:100%}
+.explorer-tools .explorer-check{display:flex;align-items:center;gap:8px;min-width:170px;max-width:none}
+.explorer-check input{appearance:auto;width:16px;height:16px;flex:none}
+#sensorList table{min-width:760px}
+#sensorList tr.explorer-group td{background:#192e3a;border-top:1px solid #345260;padding:10px 13px;color:#85d7d1;font-size:12px;font-weight:700;letter-spacing:.035em}
+#sensorList tr.explorer-group[hidden],#sensorList tr[data-select][hidden]{display:none}
+#sensorList tr.sensor-hidden td{color:#8e9da9}
+#sensorList .explorer-count{text-align:center;font-variant-numeric:tabular-nums}
+#sensorList .explorer-count b{display:inline-grid;place-items:center;min-width:22px;padding:4px 6px;border-radius:6px;background:#28505a;color:#d3fff7}
+#sensorList button[data-hide-sensor]{min-width:54px}
+.explorer-visibility-actions{display:flex;flex-wrap:wrap;gap:9px;margin:10px 0 14px}
+.sensor-used-title{font-size:13px;margin:16px 0 8px}
+.sensor-use-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 18px}
+.sensor-use-link{text-align:left;border:1px solid #385868;color:#aed7e8;background:#192c3d;border-radius:7px;font-size:12px;line-height:1.5;padding:8px 11px;max-width:100%}
+.sensor-use-link:hover{border-color:var(--cyan);color:#eeffff;background:#23444b}
+.w-dashboard-toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:14px 0}
+.w-dashboard-toolbar .w-field{min-width:200px;max-width:460px}
+.w-dashboard-toolbar>.note{margin:auto 0}
+@media(max-width:740px){.explorer-tools>label{max-width:none;width:100%}.w-dashboard-toolbar .w-field{min-width:100%}}
