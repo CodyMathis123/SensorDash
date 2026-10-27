@@ -7,15 +7,21 @@ const IDS = {
  radiator:'/lpc/it8688e/0/fan/0', pump:'/lpc/it8688e/0/fan/1', nvmeFan:'/lpc/it8688e/0/fan/2',
  fanDuty:'/lpc/it8688e/0/control/2'
 };
-const titles={overview:['SYSTEM OVERVIEW','Hardware at a glance','Live CPU, GPU, cooling and storage telemetry'],
- cooling:['THERMAL ANALYSIS','Water Cooling','A shared CPU + GPU loop · radiator fan bank · DDC pump tach'],
- nvme:['STORAGE COOLING','NVMe Cooling','SSD composite temperature, PWM readout and dedicated heatsink fan'],
- explorer:['SENSOR LIBRARY','Sensor Explorer','Every sensor reported by LibreHardwareMonitor, with stable sensor IDs'],
- events:['HISTORY & ALERTS','Event Log','Thermal threshold changes and pump-tach warnings'],
- settings:['CONFIGURATION','Settings','Polling, storage, sensor aliases and alert thresholds']};
+const titles={
+ overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
+ dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
+ cooling:['COOLING','Cooling systems','Model any number of air, liquid or custom cooling systems'],
+ curves:['SIMULATION','Fan curves','Calculate fan targets without writing hardware outputs'],
+ virtual:['DERIVED','Virtual sensors','Define maximum, minimum, average and difference sensors'],
+ tray:['NOTIFICATION AREA','Tray readouts','Configure up to six simultaneous Windows tray sensor icons'],
+ storage:['HARDWARE','Storage sensors','SSD and drive telemetry in the unified sensor catalog'],
+ explorer:['SENSOR LIBRARY','Sensor Explorer','Discover, rename, search and pin sensor data'],
+ events:['HISTORY','Event log','Configurable threshold-crossing events'],
+ settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
+};
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:IDS.cpu,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -251,7 +257,9 @@ function render(){
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
  const frame=S.frame;
  const error=frame?.error?`<div class="help" style="border-left-color:#ec8792">Sensor collector: ${esc(frame.error)}. The web app is running; readings may require administrator access or a supported hardware driver.</div>`:'';
- const content=({overview,cooling,nvme,explorer,events,settings:settingsView})[S.view]();
+ const content=['overview','dashboards','cooling','curves','tray','virtual','storage'].includes(S.view)
+  ? SDWorkspace.render(S,S.view,{metric,panel,chart})
+  : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
  byId('content').innerHTML=error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
@@ -282,6 +290,7 @@ function updateLiveValues(){
    const t=getDefaults().nvme?.value,rendered=fmt(t==null?null:60-t);
    if(h.textContent!==rendered)h.textContent=rendered;
  }
+ SDWorkspace.paintSimulation(S);
 }
 // Graph history draws at most once every 8 seconds. While a graph is being
 // inspected/dragged, freeze its base paint so the hover remains uninterrupted.
@@ -318,7 +327,7 @@ async function loadDiagnostics(shouldRender=true){
  try {
   const previous=JSON.stringify(S.diagnostics);
   S.diagnostics=await fetchJSON('/api/diagnostics');
-  if(shouldRender&&S.view==='nvme'&&previous!==JSON.stringify(S.diagnostics))render();
+  if(shouldRender&&S.view==='storage'&&previous!==JSON.stringify(S.diagnostics))render();
  }catch(e){console.warn('Storage diagnostics unavailable:',e.message);}
 }
 async function saveAlias(clear=false){
@@ -446,6 +455,11 @@ function drawCanvasOverlay(ctx,series,layout,desired){
  ctx.font='11px Segoe UI';ctx.textAlign='left';ctx.fillStyle='#a8bdc9';ctx.fillText(shorttime(values[0].t),tipX+9,tipY+16);
  values.forEach((q,i)=>{ctx.fillStyle=series[i].color;ctx.fillText(fmt(q.v,1),tipX+9,tipY+34+i*18)});
 }
+async function loadSimulation(){
+ if(S.view!=='curves')return;
+ try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
+ catch(e){console.warn('Simulation preview:',e.message);}
+}
 async function saveSettings(){
  const cfg=structuredClone(S.settings);
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
@@ -468,7 +482,8 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
- const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='nvme')loadDiagnostics().catch(()=>{});render();return}
+ const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});render();return}
+ if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
  const f=e.target.closest('[data-filter]');if(f){S.filter=f.dataset.filter;render();return}
  const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
  const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
@@ -504,11 +519,12 @@ setInterval(()=>{
 async function bootstrap(){
  try{
    const [cfg,frame]=await Promise.all([fetchJSON('/api/settings'),fetchJSON('/api/live')]);
-   S.settings=cfg;updateFrame(frame);render();loadEvents();loadDiagnostics(false);
+   S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
    setInterval(loadEvents,30000);
+   setInterval(loadSimulation,2000);
    setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
