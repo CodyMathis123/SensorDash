@@ -67,7 +67,7 @@ app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8")
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
-    app = "SensorDash", version = "0.2.0", mode = "desktop",
+    app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
     collectorOnline = state.Latest is { Error: null },
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
