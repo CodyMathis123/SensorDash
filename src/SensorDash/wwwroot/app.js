@@ -31,7 +31,8 @@ function resolveRole(key,legacy,type,namePattern,devicePattern) {
  if(assigned) return sensor(assigned)||null;
  const preferred=sensor(legacy);
  if(preferred?.type===type && namePattern.test(preferred.name) &&
-    (!devicePattern || devicePattern.test(preferred.device+' '+preferred.deviceType))) return preferred;
+    (!devicePattern || devicePattern.test(preferred.device+' '+preferred.deviceType)) &&
+    (type!=='Temperature' || preferred.value==null || preferred.value>0)) return preferred;
  const compatible=S.sensors.filter(v=>v.type===type &&
    namePattern.test(v.name) && (!devicePattern||devicePattern.test(v.device+' '+v.deviceType)));
  return compatible.find(v=>v.value!=null && (type!=='Temperature'||v.value>0))||compatible[0]||preferred||null;
@@ -53,7 +54,7 @@ function getDefaults(){
  cpu:resolveRole('cpu',IDS.cpu,'Temperature',/Tctl\/Tdie|CPU Package|CPU Core/i,/CPU|Ryzen|AMD/i),
  gpu:resolveRole('gpu',IDS.gpu,'Temperature',/GPU Core/i,/GPU|Radeon/i),
  hotspot:resolveRole('hotspot',IDS.hotspot,'Temperature',/Hot.?Spot/i,/GPU|Radeon/i),
- nvme:resolveRole('nvme',IDS.nvme,'Temperature',/Composite|Drive Temperature|Temperature/i,/Storage|NVMe|SSD|FireCuda|Seagate|Samsung|WD|Western Digital/i),
+ nvme:resolveRole('nvme',IDS.nvme,'Temperature',/Composite|^Drive Temperature$|^Temperature(?: #?[0-9]+)?$/i,/Storage|NVMe|SSD|FireCuda|Seagate|Samsung|WD|Western Digital/i),
  radiator:resolveRole('radiator',IDS.radiator,'Fan',/^Fan #1$|Radiator/i,/LPC|IT8688|Motherboard/i),
  pump:resolveRole('pump',IDS.pump,'Fan',/^Fan #2$|Pump/i,/LPC|IT8688|Motherboard/i),
  nvmeFan:resolveRole('nvmeFan',IDS.nvmeFan,'Fan',/^Fan #3$|NVMe/i,/LPC|IT8688|Motherboard/i),
