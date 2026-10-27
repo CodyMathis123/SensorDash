@@ -19,13 +19,14 @@ public sealed class FanControlRuntime
     public const int MaxSessionSeconds = 120;
     private readonly object _sync = new();
     private IReadOnlyList<FanOutputInfo> _outputs = [];
-    private FanCommand? _pending;
+    private Pending? _pending;
     private Session? _session;
     private FanControlStatus _status = new("off", "", "", "", null, null,
         "Firmware/default fan control is in charge.");
 
+    private sealed record Pending(FanCommand Command, SimulatedFanCurveConfig? AuthorizedCurve);
     private sealed record Session(string ChannelId, string CurveId, string Mode,
-        double ManualDuty, DateTimeOffset Expires);
+        double ManualDuty, DateTimeOffset Expires, SimulatedFanCurveConfig? AuthorizedCurve);
 
     public bool IsActive
     {
@@ -51,7 +52,7 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "A hardware operation is still pending." };
             if (command.Action == "release")
             {
-                _pending = command;
+                _pending = new Pending(command, null);
                 return new { accepted = true, message = "Firmware-default restoration queued." };
             }
             if (_session != null)
@@ -64,13 +65,24 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "Invalid channel, duration or duty." };
             if (!_outputs.Any(o => o.Id == command.ChannelId && o.Writable))
                 return new { accepted = false, message = "Selected channel is not a supported writable output." };
-            if (command.CurveId.Length > 0 &&
-                !settings.SimulatedFanCurves.Any(c => c.Id == command.CurveId))
+            var approved = command.CurveId.Length > 0
+                ? settings.SimulatedFanCurves.FirstOrDefault(c => c.Id == command.CurveId) : null;
+            if (command.CurveId.Length > 0 && approved == null)
                 return new { accepted = false, message = "Curve not found in saved settings." };
+            // Snapshot the authorized configuration so routine unprivileged
+            // settings changes cannot silently alter an active control curve.
+            var snapshot = approved == null ? null : new SimulatedFanCurveConfig
+            {
+                Id = approved.Id, Name = approved.Name,
+                SourceSensorId = approved.SourceSensorId,
+                MaxSampleAgeSeconds = approved.MaxSampleAgeSeconds,
+                Points = approved.Points.Select(p => new CurvePointConfig
+                    { Temperature = p.Temperature, Percent = p.Percent }).ToList()
+            };
             if (command.CurveId.Length == 0 &&
                 (command.Percent < MinExperimentalDuty || command.Percent > 100))
                 return new { accepted = false, message = "Experimental manual duty must be 70–100%." };
-            _pending = command;
+            _pending = new Pending(command, snapshot);
             _status = new("pending", command.ChannelId, command.CurveId,
                 command.CurveId.Length > 0 ? "curve" : "manual", null, null,
                 "Waiting for the hardware collection thread.");
@@ -111,15 +123,16 @@ public sealed class FanControlRuntime
             foreach (var child in hardware.SubHardware) Visit(child);
         }
         foreach (var hardware in computer.Hardware) Visit(hardware);
-        FanCommand? request;
+        Pending? pending;
         lock (_sync)
         {
             _outputs = listing.OrderBy(o => o.Device).ThenBy(o => o.Name).ToArray();
-            request = _pending;
+            pending = _pending;
             _pending = null;
         }
-        if (request != null)
+        if (pending != null)
         {
+            var request = pending.Command;
             if (request.Action == "release")
                 Release(controls, "Released by user.");
             else if (_session != null)
@@ -132,7 +145,7 @@ public sealed class FanControlRuntime
             else
                 _session = new Session(request.ChannelId, request.CurveId,
                     request.CurveId.Length > 0 ? "curve" : "manual",
-                    request.Percent, now.AddSeconds(request.DurationSeconds));
+                    request.Percent, now.AddSeconds(request.DurationSeconds), pending.AuthorizedCurve);
         }
         if (_session is not { } session) return;
         if (now >= session.Expires)
@@ -145,11 +158,19 @@ public sealed class FanControlRuntime
             Release(controls, "Output disappeared; default restoration attempted.");
             return;
         }
+        if (listing.FirstOrDefault(o => o.Id == session.ChannelId) is { } entry &&
+            settings.DisabledCollectionDeviceIds.Contains(entry.DeviceId))
+        {
+            Release(controls, "Output collection was paused; firmware-default restored.");
+            return;
+        }
         double duty = session.ManualDuty;
         if (session.Mode == "curve")
         {
-            var sample = WorkspaceLogic.Evaluate(frame, settings, now)
-                .FirstOrDefault(x => x.Id == session.CurveId);
+            var approved = session.AuthorizedCurve;
+            var sample = approved == null ? null :
+                WorkspaceLogic.Evaluate(frame, new DashboardSettings
+                    { SimulatedFanCurves = [approved] }, now).FirstOrDefault();
             if (sample?.State != "simulated" || sample.TargetPercent is not double target ||
                 !double.IsFinite(target))
             {
