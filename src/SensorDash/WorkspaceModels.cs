@@ -82,6 +82,32 @@ public static class WorkspaceLogic
     private static List<string> Ids(List<string>? ids, int limit = 16) =>
         (ids ?? []).Where(s => !string.IsNullOrWhiteSpace(s) && s.Length <= 256).Distinct().Take(limit).ToList();
 
+    public static HashSet<string> ReferencedSensorIds(DashboardSettings cfg)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        void Include(IEnumerable<string>? ids)
+        {
+            if(ids == null)return;
+            foreach(var id in ids)if(!string.IsNullOrWhiteSpace(id))used.Add(id);
+        }
+        Include(cfg.PinnedSensors);
+        Include(cfg.HighThresholds?.Keys);
+        Include(cfg.SensorBindings?.Values);
+        foreach(var dashboard in cfg.Dashboards ?? [])
+            foreach(var widget in dashboard.Widgets ?? [])Include(widget.SensorIds);
+        foreach(var system in cfg.CoolingSystems ?? [])
+            foreach(var part in system.Components ?? [])Include(part.SensorIds);
+        foreach(var tray in cfg.TrayWidgets ?? [])Include([tray.SensorId]);
+        foreach(var derived in cfg.VirtualSensors ?? [])
+        {
+            Include([derived.Id]);
+            Include(derived.SensorIds);
+        }
+        foreach(var curve in cfg.SimulatedFanCurves ?? [])
+            Include([curve.SourceSensorId, curve.OutputSensorId]);
+        return used;
+    }
+
     public static void Normalize(DashboardSettings cfg)
     {
         // Hiding a sensor is presentation-only. It never removes the sensor from
@@ -89,6 +115,11 @@ public static class WorkspaceLogic
         cfg.HiddenSensorIds = Ids(cfg.HiddenSensorIds, 2000);
         cfg.HiddenDeviceIds = Ids(cfg.HiddenDeviceIds, 250);
         cfg.HiddenHardwareTypes = (cfg.HiddenHardwareTypes ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x.Length <= 80)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();
+        cfg.HistoryMode = cfg.HistoryMode is "balanced" or "in-use" or "all"
+            ? cfg.HistoryMode : "balanced";
+        cfg.ExcludedHistoryHardwareTypes = (cfg.ExcludedHistoryHardwareTypes ?? [])
             .Where(x => !string.IsNullOrWhiteSpace(x) && x.Length <= 80)
             .Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();
         cfg.CoolingSystems = (cfg.CoolingSystems ?? []).Take(20).Select(system => {
