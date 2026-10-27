@@ -29,7 +29,7 @@ const label=s=>{
 };
 const sensor=id=>S.byId.get(id);
 const val=id=>sensor(id)?.value??null;
-const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id==='__calculated__'?'data-live-calc="nvmeHeadroom"':s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
+const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
 const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(unit||typeUnit(s?.type))}"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
 const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
@@ -483,11 +483,7 @@ async function saveSettings(){
     !confirm('Disable collection for '+(newlyDisabledGroups.length+newlyPausedDevices.length)+
        ' hardware families/devices? Dependent live dashboards, tray icons and simulated curves will lose those readings.'))
    return;
- cfg.sensorBindings=cfg.sensorBindings||{};
- document.querySelectorAll('[data-sensor-role]').forEach(el=>{
-   if(el.value)cfg.sensorBindings[el.dataset.sensorRole]=el.value;
-   else delete cfg.sensorBindings[el.dataset.sensorRole];
- });
+
  document.querySelectorAll('[data-alias]').forEach(el=>{if(el.value.trim())cfg.aliases[el.dataset.alias]=el.value.trim();else delete cfg.aliases[el.dataset.alias]});
  document.querySelectorAll('[data-threshold]').forEach(el=>{if(el.value.trim())cfg.highThresholds[el.dataset.threshold]=Number(el.value);else delete cfg.highThresholds[el.dataset.threshold]});
  try{S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});toast('Settings saved');render()}
