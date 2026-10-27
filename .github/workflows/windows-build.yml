@@ -29,6 +29,10 @@ jobs:
           Copy-Item packaging/Start-SensorDash.cmd dist/Start-SensorDash.cmd
           Copy-Item packaging/Install-Startup.cmd dist/Install-Startup.cmd
           Copy-Item packaging/Remove-Startup.cmd dist/Remove-Startup.cmd
+          Copy-Item packaging/Install-ElevatedStartup.ps1 dist/Install-ElevatedStartup.ps1
+          Copy-Item packaging/Remove-ElevatedStartup.ps1 dist/Remove-ElevatedStartup.ps1
+          Copy-Item packaging/Install-ElevatedStartup.cmd dist/Install-ElevatedStartup.cmd
+          Copy-Item packaging/Remove-ElevatedStartup.cmd dist/Remove-ElevatedStartup.cmd
           Copy-Item README.md dist/README.txt
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
@@ -53,6 +57,8 @@ jobs:
             if ($page.Content -notmatch 'Hardware telemetry') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
             if ($script.Content -notmatch 'function overview') { throw 'Missing embedded dashboard JS' }
+            if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
+            if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             Write-Host 'Verified localhost API and browser shell'
