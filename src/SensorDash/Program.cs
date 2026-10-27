@@ -3,113 +3,150 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Windows.Forms;
 using LibreHardwareMonitor.Hardware;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
-var home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
-Directory.CreateDirectory(home);
-// A second double-click opens the dashboard already running instead of failing the port bind.
-// Startup shortcuts use --no-browser to silently reuse an existing process.
-try {
-    using var check = new HttpClient { Timeout = TimeSpan.FromMilliseconds(650) };
-    using var response = await check.GetAsync("http://127.0.0.1:8765/api/status");
-    if (response.IsSuccessStatusCode) {
-        if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase)) {
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
-            catch { }
-        }
+// Same signed executable, two separate Windows processes.
+// Windows Service (--collector) owns elevated sensor hardware access and the database.
+// Desktop (default) owns the tray icon + loopback web server, never opens the hardware.
+if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
+{
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
+    Directory.CreateDirectory(data);
+    var service = Host.CreateDefaultBuilder(args)
+        .UseWindowsService(options => options.ServiceName = "SensorDashCollector")
+        .ConfigureServices(services =>
+        {
+            services.AddSingleton(new DashboardState(data));
+            services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
+            services.AddHostedService<SensorWorker>();
+            services.AddHostedService<CollectorPipeServer>();
+        }).Build();
+    await service.RunAsync();
+    return;
+}
+
+// An existing tray process owns localhost:8765. Double-click only opens its UI.
+try
+{
+    using var probe = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
+    using var response = await probe.GetAsync("http://127.0.0.1:8765/api/status");
+    if (response.IsSuccessStatusCode)
+    {
+        if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
+            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); } catch { }
         return;
     }
-} catch (HttpRequestException) { /* no active instance */ }
-  catch (TaskCanceledException) { /* not responding */ }
-// Published portable builds must serve assets relative to their executable, even when
-// Windows launches them with another working directory.
-var root = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))
-    ? AppContext.BaseDirectory : Directory.GetCurrentDirectory();
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions {
-    Args = args, ContentRootPath = root
+}
+catch (HttpRequestException) { }
+catch (TaskCanceledException) { }
+
+var userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
+Directory.CreateDirectory(userDir);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory
 });
 builder.WebHost.UseUrls("http://127.0.0.1:8765");
-builder.Services.AddSingleton(new DashboardState(home));
-builder.Services.AddSingleton(new HistoryStore(Path.Combine(home, "telemetry.db")));
-builder.Services.AddHostedService<SensorWorker>();
+builder.Services.AddSingleton(new DashboardState(userDir));
+builder.Services.AddHostedService<DashboardBridgeWorker>();
 var app = builder.Build();
-// Serve compiled-in web assets so the executable works even if only SensorDash.exe
-// is copied to a new folder or launched from an unrelated working directory.
-IResult BuiltInAsset(string name, string mediaType) {
+IResult Resource(string name, string mediaType)
+{
     var resource = typeof(DashboardState).Assembly.GetManifestResourceStream("SensorDash.Web." + name);
-    return resource == null
-        ? Results.Problem("Embedded dashboard resource missing: " + name, statusCode: 500)
+    return resource is null
+        ? Results.Problem("Missing embedded dashboard resource: " + name, statusCode: 500)
         : Results.Stream(resource, contentType: mediaType);
 }
-app.MapGet("/", () => BuiltInAsset("index.html", "text/html; charset=utf-8"));
-app.MapGet("/index.html", () => BuiltInAsset("index.html", "text/html; charset=utf-8"));
-app.MapGet("/app.js", () => BuiltInAsset("app.js", "text/javascript; charset=utf-8"));
-app.MapGet("/style.css", () => BuiltInAsset("style.css", "text/css; charset=utf-8"));
-app.MapGet("/api/status", (DashboardState state) => Results.Ok(new {
-    app = "SensorDash", version = "0.1.0", localOnly = true,
-    started = state.Started, now = DateTimeOffset.UtcNow, dataDirectory = home,
+app.MapGet("/", () => Resource("index.html", "text/html; charset=utf-8"));
+app.MapGet("/index.html", () => Resource("index.html", "text/html; charset=utf-8"));
+app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8"));
+app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
+app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
+{
+    app = "SensorDash", version = "0.2.0", mode = "desktop",
+    collectorOnline = state.Latest is { Error: null },
+    localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
-    lastSample = state.Latest?.Timestamp, error = state.Latest?.Error
+    lastSample = state.Latest?.Timestamp,
+    error = state.Latest?.Error
 }));
-app.MapGet("/api/live", (DashboardState state) => Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Starting sensor collector…")));
-app.MapGet("/api/diagnostics", (DashboardState state) => {
-    var frame = state.Latest;
-    var storage = frame?.Devices?.Where(d => d.Type == "Storage").ToArray() ?? [];
-    var readings = frame?.Sensors.Where(s => s.DeviceType == "Storage").ToArray() ?? [];
-    return Results.Ok(new {
-        isAdministrator = SecurityInfo.IsAdministrator(),
-        storageEnabled = true,
-        storagePollSeconds = state.Settings.StoragePollSeconds,
-        storageDevices = storage,
-        storageSensorCount = readings.Length,
-        storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
-        storageLastPolled = state.LastStoragePoll,
-        note = storage.Length == 0
-            ? "LibreHardwareMonitorLib discovered no storage devices. Compare with Run as administrator; the separate Libre Hardware Monitor application may have different permissions."
-            : readings.All(s => s.Type != "Temperature")
-            ? "Storage devices were detected but no temperature sensors were exposed by this library."
-            : "Storage temperature sensors were discovered. Assign the preferred sensor under Settings → Sensor roles."
-    });
+app.MapGet("/api/live", (DashboardState state) =>
+    Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
+app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("diagnostics"), ct));
+app.MapGet("/api/settings", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("settings"), ct));
+app.MapPut("/api/settings", async (HttpContext ctx) =>
+{
+    try
+    {
+        var updated = await JsonSerializer.DeserializeAsync<DashboardSettings>(
+            ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
+        return updated == null
+            ? Results.BadRequest("Invalid settings.")
+            : await ProxyAsync(new PipeCommand("saveSettings", Settings: updated), ctx.RequestAborted);
+    }
+    catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
 });
-app.MapGet("/api/settings", (DashboardState state) => Results.Ok(state.Settings));
-app.MapPut("/api/settings", async (HttpContext ctx, DashboardState state) => {
-    var settings = await JsonSerializer.DeserializeAsync<DashboardSettings>(ctx.Request.Body, JsonSerializerOptions.Web);
-    if (settings == null) return Results.BadRequest("Invalid settings");
-    state.UpdateSettings(settings);
-    return Results.Ok(state.Settings);
+app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken ct) =>
+{
+    var sensors = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct().Take(12).ToArray();
+    return await ProxyAsync(new PipeCommand("history", sensors, hours), ct);
 });
-app.MapGet("/api/history", (string? ids, double? hours, HistoryStore db) => {
-    var sensorIds = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().Take(12).ToArray();
-    return Results.Ok(new { series = db.ReadHistory(sensorIds, Math.Clamp(hours ?? 1, 0.1, 24 * 30)) });
-});
-app.MapGet("/api/events", (HistoryStore db) => Results.Ok(db.ReadEvents()));
-app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) => {
+app.MapGet("/api/events", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("events"), ct));
+async Task<IResult> ProxyAsync(PipeCommand request, CancellationToken ct)
+{
+    try { return Results.Json(await CollectorClient.AskAsync(request, ct), JsonSerializerOptions.Web); }
+    catch (Exception ex) when (ex is IOException or TimeoutException or OperationCanceledException)
+    {
+        return Results.Problem("Collector service unavailable: " + ex.Message, statusCode: 503);
+    }
+}
+app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
+{
     ctx.Response.Headers.CacheControl = "no-cache, no-transform";
-    ctx.Response.Headers.ContentType = "text/event-stream";
-    ctx.Response.Headers.Connection = "keep-alive";
-    await ctx.Response.WriteAsync(": connected\n\n", ctx.RequestAborted);
+    ctx.Response.ContentType = "text/event-stream";
     var (id, reader) = state.Subscribe();
-    try {
+    try
+    {
         if (state.Latest is { } initial)
             await ctx.Response.WriteAsync("data: " + JsonSerializer.Serialize(initial, JsonSerializerOptions.Web) + "\n\n", ctx.RequestAborted);
-        await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
-        await foreach (var snapshot in reader.ReadAllAsync(ctx.RequestAborted)) {
+        await foreach (var snapshot in reader.ReadAllAsync(ctx.RequestAborted))
+        {
             await ctx.Response.WriteAsync("data: " + snapshot + "\n\n", ctx.RequestAborted);
             await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
         }
-    } catch (OperationCanceledException) { }
+    }
+    catch (OperationCanceledException) { }
     catch (IOException) { }
     finally { state.Unsubscribe(id); }
 });
-app.Lifetime.ApplicationStarted.Register(() => {
-    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase)) {
-        _ = Task.Run(async () => {
-            await Task.Delay(1000);
+
+// A dedicated STA UI thread supplies the notification-area menu.
+// The ASP.NET host runs asynchronously and never requires elevated privileges.
+var trayThread = new Thread(() =>
+{
+    Application.EnableVisualStyles();
+    using var context = new SensorDashTray(app.Lifetime);
+    Application.Run(context);
+}) { IsBackground = true, Name = "SensorDash Tray" };
+trayThread.SetApartmentState(ApartmentState.STA);
+trayThread.Start();
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(350);
             try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
-            catch { /* browser is optional */ }
+            catch { }
         });
-    }
 });
 await app.RunAsync();
 
