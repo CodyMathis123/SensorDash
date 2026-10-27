@@ -200,9 +200,11 @@ public sealed class DashboardSettings {
     // 'in-use' writes only explicitly referenced measurements.
     public string HistoryMode { get; set; } = "balanced";
     public List<string> ExcludedHistoryHardwareTypes { get; set; } = [];
-    // Network collection is disabled at the hardware-group level, not sensor
-    // level, since LibreHardwareMonitor.Update() operates on entire devices.
-    public bool CollectNetworkSensors { get; set; } = true;
+    // Hardware-family switches control LHM discovery before Computer.Open().
+    // Device IDs let users pause a specific detected device's Update() call.
+    // Neither setting changes a sensor's visibility preferences.
+    public List<string> DisabledCollectionGroups { get; set; } = [];
+    public List<string> DisabledCollectionDeviceIds { get; set; } = [];
     // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
     public Dictionary<string, string> SensorBindings { get; set; } = new();
     public Dictionary<string, string> Aliases { get; set; } = new();
@@ -359,7 +361,7 @@ public sealed class HistoryStore {
 public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<SensorWorker> logger) : BackgroundService {
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
-    private bool? _networkCollectionEnabled;
+    private string? _activeCollectionSignature;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
@@ -367,29 +369,28 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
             try {
-                if (_computer != null && _networkCollectionEnabled != cfg.CollectNetworkSensors) {
-                    // Changing hardware discovery requires recreating the LHM Computer.
-                    // This is not a per-sensor "polling disabled" illusion.
+                var collectionSignature = HardwareCollection.Signature(cfg);
+                if (_computer != null && _activeCollectionSignature != collectionSignature) {
+                    // LHM's Computer family flags are applied during discovery.
+                    // Reopen only when those flags change, not when users toggle
+                    // a sensor's visibility, history or a specific device's polls.
                     try { _computer.Close(); } catch { }
                     _computer = null;
                 }
                 if (_computer == null) {
-                    _computer = new Computer {
-                        IsCpuEnabled = true, IsGpuEnabled = true, IsMotherboardEnabled = true,
-                        IsMemoryEnabled = true, IsStorageEnabled = true,
-                        IsNetworkEnabled = cfg.CollectNetworkSensors,
-                        IsControllerEnabled = true, IsPowerMonitorEnabled = true
-                    };
+                    _computer = HardwareCollection.CreateComputer(cfg);
                     _computer.Open();
-                    _networkCollectionEnabled = cfg.CollectNetworkSensors;
+                    _activeCollectionSignature = collectionSignature;
                 }
                 var now = DateTimeOffset.UtcNow;
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
+                var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
                 foreach (var hardware in _computer.Hardware)
-                    Scan(hardware, readings, devices, refreshStorage, now, _lastStorage);
+                    Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
+                        pausedDevices);
                 var baseFrame = new SensorFrame(now, readings, null, devices);
                 readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
                 var frame = new SensorFrame(now, readings, null, devices);
@@ -416,21 +417,27 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
         try { _computer?.Close(); } catch { }
     }
     private static void Scan(IHardware hardware, List<SensorReading> target, List<HardwareDevice> devices,
-        bool refreshStorage, DateTimeOffset now, DateTimeOffset lastStorage) {
-        // Sensor metadata stays discoverable even when the latest reading is null.
-        // Only perform storage I/O on the separately configurable slower interval.
-        if (hardware.HardwareType != HardwareType.Storage || refreshStorage) hardware.Update();
-        devices.Add(new HardwareDevice(hardware.Identifier.ToString(), hardware.Name,
+        bool refreshStorage, DateTimeOffset now, DateTimeOffset lastStorage,
+        HashSet<string> pausedDeviceIds, bool parentPaused = false) {
+        // The device remains discoverable and its sensor metadata stays visible.
+        // But a paused device (or child of one) is never updated and has null
+        // readings, so charts and simulation cannot mistake cached values for live data.
+        var hardwareId = hardware.Identifier.ToString();
+        var paused = parentPaused || pausedDeviceIds.Contains(hardwareId);
+        if (!paused && (hardware.HardwareType != HardwareType.Storage || refreshStorage))
+            hardware.Update();
+        devices.Add(new HardwareDevice(hardwareId, hardware.Name,
             hardware.HardwareType.ToString(), hardware.Sensors.Count()));
         foreach (var sensor in hardware.Sensors) {
-            double? value = sensor.Value is float x && float.IsFinite(x) ? x : null;
+            double? value = !paused && sensor.Value is float x && float.IsFinite(x) ? x : null;
             target.Add(new SensorReading(sensor.Identifier.ToString(), sensor.Name, hardware.Name,
                 hardware.HardwareType.ToString(), sensor.SensorType.ToString(), value,
-                hardware.HardwareType == HardwareType.Storage ? lastStorage : now,
-                hardware.Identifier.ToString()));
+                !paused ? (hardware.HardwareType == HardwareType.Storage ? lastStorage : now) : null,
+                hardwareId));
         }
         foreach (var child in hardware.SubHardware)
-            Scan(child, target, devices, refreshStorage, now, lastStorage);
+            Scan(child, target, devices, refreshStorage, now, lastStorage,
+                pausedDeviceIds, paused);
     }
     private void CheckEvents(SensorFrame frame, DashboardSettings cfg) {
         var byId = frame.Sensors.ToDictionary(s => s.Id, s => s);
