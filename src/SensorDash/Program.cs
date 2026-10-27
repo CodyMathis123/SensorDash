@@ -96,6 +96,8 @@ app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("diagnostics"), ct));
 app.MapGet("/api/settings", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("settings"), ct));
+app.MapGet("/api/collection-groups", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("collectionGroups"), ct));
 app.MapPut("/api/settings", async (HttpContext ctx) =>
 {
     try
