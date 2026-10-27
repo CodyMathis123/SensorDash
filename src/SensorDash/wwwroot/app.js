@@ -357,8 +357,18 @@ function ensureHistory(){
  if(key===S.historyKey&&now-S.historyFetch<20000){drawAll();return}
  if(S.historyPending&&key===S.historyKey){drawAll();return}
  S.historyKey=key;S.historyFetch=now;S.historyPending=true;
- fetchJSON('/api/history?ids='+encodeURIComponent(ids.join(','))+'&hours='+encodeURIComponent(S.hours))
-   .then(data=>{if(S.historyKey!==key)return;S.history=Object.fromEntries((data.series||[]).map(s=>[s.id,s.points]));scheduleChartPaint()})
+ // The IPC history endpoint intentionally caps each request at 12 sensor IDs.
+ // Batch dynamic cooling systems and custom dashboards instead of silently
+ // dropping every chart after the first twelve sensors.
+ const batches=[];
+ for(let i=0;i<ids.length;i+=12)batches.push(ids.slice(i,i+12));
+ Promise.all(batches.map(batch=>fetchJSON('/api/history?ids='+
+    encodeURIComponent(batch.join(','))+'&hours='+encodeURIComponent(S.hours))))
+   .then(results=>{
+     if(S.historyKey!==key)return;
+     S.history=Object.fromEntries(results.flatMap(data=>(data.series||[]).map(row=>[row.id,row.points])));
+     scheduleChartPaint();
+   })
    .catch(err=>{console.warn('History fetch:',err.message)}).finally(()=>{S.historyPending=false});
  drawAll();
 }
