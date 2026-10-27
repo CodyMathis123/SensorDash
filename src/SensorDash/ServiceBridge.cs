@@ -171,11 +171,24 @@ public sealed class DashboardBridgeWorker(DashboardState display, ILogger<Dashbo
 public sealed class SensorDashTray : ApplicationContext
 {
     private readonly NotifyIcon _icon;
+    private readonly Icon _trayImage;
+    private readonly ToolStripMenuItem _collectorStatus;
+    private readonly System.Windows.Forms.Timer _statusTimer;
+    private bool _checking;
+    private bool _disposed;
+
     public SensorDashTray(IHostApplicationLifetime lifetime)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open SensorDash", null, (_, _) => Open());
-        menu.Items.Add("Collector service: SensorDashCollector", null, (_, _) => Open());
+        var openItem = new ToolStripMenuItem("Open SensorDash", null, (_, _) => Open())
+        {
+            Font = new Font(SystemFonts.MenuFont, FontStyle.Bold)
+        };
+        menu.Items.Add(openItem);
+
+        // A read-only indicator, not a second copy of "Open SensorDash".
+        _collectorStatus = new ToolStripMenuItem("Collector: Connecting…") { Enabled = false };
+        menu.Items.Add(_collectorStatus);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit tray and dashboard", null, (_, _) =>
         {
@@ -183,23 +196,80 @@ public sealed class SensorDashTray : ApplicationContext
             lifetime.StopApplication();
             ExitThread();
         });
+
+        _trayImage = TrayIconFactory.Create();
         _icon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
-            Text = "SensorDash — Local Hardware Telemetry",
+            Icon = _trayImage,
+            Text = "SensorDash — Checking collector",
             ContextMenuStrip = menu,
             Visible = true
         };
         _icon.DoubleClick += (_, _) => Open();
+
+        // Poll just the lightweight service status every 10 seconds. This is
+        // unrelated to the actual fast sensor or NVMe collection intervals.
+        // Windows Forms runs the timer on the tray's STA message loop.
+        _statusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _statusTimer.Tick += async (_, _) =>
+        {
+            _statusTimer.Interval = 10_000;
+            await RefreshCollectorStatusAsync();
+        };
+        _statusTimer.Start();
     }
+
+    private async Task RefreshCollectorStatusAsync()
+    {
+        if (_disposed || _checking) return;
+        _checking = true;
+        try
+        {
+            var response = await CollectorClient.AskAsync(new PipeCommand("status"));
+            if (_disposed) return;
+            var count = response.TryGetProperty("sensorCount", out var sensors) &&
+                sensors.ValueKind == JsonValueKind.Number ? sensors.GetInt32() : 0;
+            var error = response.TryGetProperty("error", out var errorProp) &&
+                errorProp.ValueKind == JsonValueKind.String ? errorProp.GetString() : null;
+            _collectorStatus.Text = !string.IsNullOrEmpty(error)
+                ? "Collector: Running (sensor error)"
+                : count > 0 ? $"Collector: Online ({count} sensors)" : "Collector: Online (discovering sensors)";
+            _icon.Text = !string.IsNullOrEmpty(error)
+                ? "SensorDash — Collector sensor error"
+                : $"SensorDash — Collector online ({count} sensors)";
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException)
+        {
+            if (_disposed) return;
+            _collectorStatus.Text = "Collector: Offline";
+            _icon.Text = "SensorDash — Collector offline";
+        }
+        finally { _checking = false; }
+    }
+
     private static void Open()
     {
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://127.0.0.1:8765")
+            {
+                UseShellExecute = true
+            });
+        }
         catch { }
     }
+
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _icon.Visible = false; _icon.Dispose(); }
+        if (disposing && !_disposed)
+        {
+            _disposed = true;
+            _statusTimer.Stop();
+            _statusTimer.Dispose();
+            _icon.Visible = false;
+            _icon.Dispose();
+            _trayImage.Dispose();
+        }
         base.Dispose(disposing);
     }
 }
