@@ -142,3 +142,13 @@
 .w-dashboard-toolbar .w-field{min-width:200px;max-width:460px}
 .w-dashboard-toolbar>.note{margin:auto 0}
 @media(max-width:740px){.explorer-tools>label{max-width:none;width:100%}.w-dashboard-toolbar .w-field{min-width:100%}}
+
+/* Explicit collection controls, visually separate from merely hiding sensors. */
+.w-history-controls{display:flex;flex-wrap:wrap;align-items:end;gap:16px;padding:7px 0}
+.w-history-controls>label:first-child{display:grid;gap:8px;flex:2;min-width:260px;max-width:720px}
+.w-history-controls select{display:block;width:100%;min-width:0;max-width:100%}
+.collection-toggle{display:flex;align-items:center;gap:9px;font-size:12px;line-height:1.5;color:#bfd3e3;cursor:pointer}
+.collection-toggle input[type=checkbox]{appearance:auto;flex:none;margin:0;width:16px;height:16px}
+.w-history-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;
+ background:#101e2c;border:1px solid #314757;border-radius:9px;padding:13px;margin:10px 0}
+@media(max-width:710px){.w-history-controls>label:first-child{min-width:100%}.w-history-types{grid-template-columns:repeat(2,minmax(0,1fr))}}
