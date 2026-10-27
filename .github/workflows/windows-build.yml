@@ -31,6 +31,13 @@ jobs:
           if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
       - name: Publish portable Windows build
         run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
+      - name: Validate generic models and simulation engine
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path 'dist/SensorDash.exe').Path
+          $test = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Workspace self-test failed: $($test.ExitCode)" }
+          Write-Host 'Virtual sensors, curve interpolation, stale-input behavior and tray limits verified'
       - name: Verify executable and assets
         shell: pwsh
         run: |
