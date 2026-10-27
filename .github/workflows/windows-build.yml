@@ -101,7 +101,7 @@ jobs:
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
-            if ($page.Content -notmatch 'Hardware telemetry') { throw 'Missing dashboard HTML' }
+            if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
             if ($script.Content -notmatch 'function overview') { throw 'Missing embedded dashboard JS' }
           $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
