@@ -142,12 +142,13 @@ const SDWorkspace = (() => {
    return card('Notification-area sensors','Choose up to six independent, live Windows tray badges',
       '<p class="note">Each badge shows a compact number. Hover in Windows for the sensor name, value and unit; double-click to open this screen. Windows decides whether icons appear on the taskbar or in the overflow menu.</p>'+
       options+list.map((w,i)=>
-        '<div class="w-tray-row"><strong>'+(i+1)+'</strong>'+
-        select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+
-        '<label>Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
-        '<label>Color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(w.color||'#62d5ce')+'"></label>'+
-        '<label>Precision<select data-tray-decimals="'+attr(w.id)+'">'+opts(['0','1'],String(w.decimals))+'</select></label>'+
-        button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div>').join('')+
+        '<div class="w-tray-row"><span class="w-tray-index">'+(i+1)+'</span>'+
+        '<label class="w-tray-sensor">Sensor'+
+        select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+'</label>'+
+        '<label class="w-tray-label">Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
+        '<label class="w-tray-color">Color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(w.color||'#62d5ce')+'"></label>'+
+        '<label class="w-tray-precision">Precision<select data-tray-decimals="'+attr(w.id)+'">'+opts(['0','1'],String(w.decimals))+'</select></label>'+
+        '<div class="w-tray-remove">'+button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div></div>').join('')+
       '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
       (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
