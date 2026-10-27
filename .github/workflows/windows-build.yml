@@ -21,6 +21,18 @@ jobs:
         run: |
           node --check src/SensorDash/wwwroot/app.js
           node --check src/SensorDash/wwwroot/workspace.js
+      - name: Check tray editor and fan curve UI contracts
+        shell: pwsh
+        run: |
+          $workspace = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $css = Get-Content 'src/SensorDash/wwwroot/style.css' -Raw
+          if ($workspace -notmatch 'data-curve-temperature' -or $workspace -notmatch 'data-curve-percentage') {
+            throw 'Missing numeric curve point editor'
+          }
+          if ($workspace -match 'data-curve-points=') { throw 'Comma-separated fan curve editor should be removed' }
+          if ($css -notmatch 'grid-template-areas:"index sensor label color precision remove"') {
+            throw 'Tray precision/color controls lack dedicated layout tracks'
+          }
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -206,7 +218,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.3.0-x64
+          name: SensorDash-Setup-0.3.1-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
