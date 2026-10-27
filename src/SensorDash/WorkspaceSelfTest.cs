@@ -89,6 +89,31 @@ internal static class WorkspaceSelfTest
         if (cfg.HistoryMode != "balanced")
             throw new Exception("Unknown history policy was not normalized");
 
+        // Validate the complete generic collection-switch model without
+        // opening any hardware or creating an administrator process.
+        cfg.DisabledCollectionGroups = ["Network", "Storage", "NotARealGroup"];
+        cfg.DisabledCollectionDeviceIds = ["device-0"];
+        WorkspaceLogic.Normalize(cfg);
+        if (cfg.DisabledCollectionGroups.Count != 2 ||
+            cfg.DisabledCollectionGroups.Contains("NotARealGroup") ||
+            cfg.DisabledCollectionDeviceIds.Count != 1)
+            throw new Exception("Hardware collection config normalization failed");
+        if (HardwareCollection.Enabled(cfg, "Network") ||
+            HardwareCollection.Enabled(cfg, "Storage") ||
+            !HardwareCollection.Enabled(cfg, "Cpu"))
+            throw new Exception("Collection family enabled state was incorrect");
+        var disabledSignature = HardwareCollection.Signature(cfg);
+        var computer = HardwareCollection.CreateComputer(cfg);
+        if (computer.IsNetworkEnabled || computer.IsStorageEnabled ||
+            !computer.IsCpuEnabled || !computer.IsMotherboardEnabled)
+            throw new Exception("LHM computer switches did not match collection settings");
+        cfg.DisabledCollectionGroups = ["Gpu"];
+        WorkspaceLogic.Normalize(cfg);
+        if (HardwareCollection.Signature(cfg) == disabledSignature)
+            throw new Exception("A changed hardware family must reopen collector discovery");
+        if (HardwareCollection.Groups.Length != 8)
+            throw new Exception("The complete list of LHM hardware collection families is missing");
+
         // Windows notification icons must remain legible when rasterized at 16px.
         if (TraySensorIcon.Compact("24.0", 16) != "24"
             || TraySensorIcon.Compact("24.0", 24) != "24.0"
