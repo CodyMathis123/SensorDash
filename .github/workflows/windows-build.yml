@@ -21,6 +21,8 @@ jobs:
         run: |
           node --check src/SensorDash/wwwroot/app.js
           node --check src/SensorDash/wwwroot/workspace.js
+      - name: Test configurable cooling systems and sensor usage
+        run: node scripts/test-workspace.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
@@ -77,7 +79,7 @@ jobs:
             if (Test-Path $log) { Get-Content $log }
             throw "Workspace self-test failed: $($test.ExitCode)"
           }
-          Write-Host 'Virtual sensors, curve interpolation, stale-input behavior and tray limits verified'
+          Write-Host 'Validated virtual sensors, curves, generic hardware collection, cooling references, history rules and tray icons'
       - name: Verify executable and assets
         shell: pwsh
         run: |
