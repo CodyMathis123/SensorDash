@@ -1,3 +1,13 @@
+# SensorDash v0.2.1 — Tray usability update
+
+The tray menu now contains **Open SensorDash**, a **disabled collector status indicator** (Online with the discovered sensor count, Discovering, Sensor error, or Offline), and **Exit tray and dashboard**. The previous "Collector service: SensorDashCollector" entry had incorrectly duplicated Open Dashboard.
+
+SensorDash now renders a bespoke turquoise-on-navy pulse/monitoring icon for the Windows notification area. No external icon file is needed—the icon is generated in the client process with GDI+, and its native handle is cleaned up correctly. The tray polls only the collector's lightweight IPC status every 10 seconds, independently of full sensor sampling, and reports connection problems without modifying fan control.
+
+Install **SensorDash-Setup-0.2.1-x64.msi** over 0.2.0 to upgrade; MSI major-upgrade registration handles the existing installation. The collector history under %ProgramData%\\SensorDash is preserved. To see the new tray UI immediately, exit any existing SensorDash tray process and launch it from the Start Menu after installing. Rebooting or signing out and in also starts the updated version.
+
+---
+
 
 # SensorDash 0.2.0 — MSI / Windows service / tray dashboard
 
