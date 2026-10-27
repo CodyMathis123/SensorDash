@@ -114,7 +114,7 @@ jobs:
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
             if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
-            if ($script.Content -notmatch 'function overview') { throw 'Missing embedded dashboard JS' }
+            if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
           $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
           if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
           $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
