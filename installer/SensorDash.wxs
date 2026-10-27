@@ -6,16 +6,16 @@
     <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of SensorDash is already installed." />
     <MediaTemplate EmbedCab="yes" />
-    <!-- WiX Icon table explicitly assigns the icon to the advertised Start Menu shortcut.
-         The same icon is compiled into SensorDash.exe via ApplicationIcon. -->
-    <Icon Id="SensorDashAppIcon" SourceFile="$(var.PublishDir)\..\src\SensorDash\Assets\SensorDash.ico" />
+    <!-- Advertised EXE shortcuts require icon data in PE format with an .exe Icon ID.
+         The tiny build-only carrier contains the same icon as SensorDash.exe. -->
+    <Icon Id="SensorDashShortcutIcon.exe" SourceFile="$(var.PublishDir)\..\installer-assets\SensorDashShortcutIcon.exe" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="SensorDash">
         <Component Id="SensorDashExecutable" Guid="*">
           <File Id="SensorDashExe" Source="$(var.PublishDir)\SensorDash.exe" KeyPath="yes">
             <Shortcut Id="OpenSensorDash" Directory="ProgramMenuFolder" Name="SensorDash"
-                      Description="Open SensorDash hardware dashboard" Advertise="yes" Icon="SensorDashAppIcon" WorkingDirectory="INSTALLFOLDER" />
+                      Description="Open SensorDash hardware dashboard" Advertise="yes" Icon="SensorDashShortcutIcon.exe" WorkingDirectory="INSTALLFOLDER" />
           </File>
           <ServiceInstall Id="InstallSensorDashCollector" Name="SensorDashCollector"
                           DisplayName="SensorDash Collector"
