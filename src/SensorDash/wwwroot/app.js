@@ -13,7 +13,7 @@ const titles={
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -161,16 +161,7 @@ function settingsView(){
  // These switches correspond to the LHM Computer's eight hardware families.
  // They are general collection capabilities, not special handling for a
  // particular user's motherboard, GPU, SSD or network card.
- const collectionGroups=[
-   ['Cpu','Processors','CPU package, per-core readings and related telemetry'],
-   ['Gpu','Graphics adapters','Supported graphics processors and cooling sensors'],
-   ['Motherboard','Motherboard / Super I/O','Board thermals, fan tachometers and chipsets'],
-   ['Memory','Memory','Supported memory telemetry'],
-   ['Storage','Storage devices','SSDs, hard drives and drive health'],
-   ['Network','Network adapters','Interface traffic and utilization'],
-   ['Controller','Hardware controllers','Supported auxiliary and cooling controllers'],
-   ['PowerMonitor','Power monitors','Separate power-monitoring devices']
- ];
+ const collectionGroups=S.collectionGroups;
  const liveDevices=S.frame?.devices||[];
  const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
    .sort((a,b)=>a.name.localeCompare(b.name));
@@ -189,7 +180,7 @@ function settingsView(){
  '</select></label>'+
  '</div>'+
  '<h3 class="sensor-used-title">Hardware family collection</h3>'+
- '<div class="w-collection-groups">'+collectionGroups.map(([id,name,description])=>
+ '<div class="w-collection-groups">'+collectionGroups.map(({id,name,description})=>
    '<label class="w-collection-group"><input type="checkbox" data-collect-group="'+esc(id)+'" '+
       (!(cfg.disabledCollectionGroups||[]).includes(id)?'checked':'')+'>'+
    '<span><strong>'+esc(name)+'</strong><small>'+esc(description)+'</small></span></label>'
@@ -566,7 +557,10 @@ setInterval(()=>{
 },30000);
 async function bootstrap(){
  try{
-   const [cfg,frame]=await Promise.all([fetchJSON('/api/settings'),fetchJSON('/api/live')]);
+   const [cfg,frame,groups]=await Promise.all([
+     fetchJSON('/api/settings'),fetchJSON('/api/live'),fetchJSON('/api/collection-groups')
+   ]);
+   S.collectionGroups=groups;
    S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
