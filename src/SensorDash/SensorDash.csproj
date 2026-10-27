@@ -17,7 +17,6 @@
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
     <EmbeddedResource Include="wwwroot/index.html" LogicalName="SensorDash.Web.index.html" />
     <EmbeddedResource Include="wwwroot/app.js" LogicalName="SensorDash.Web.app.js" />
     <EmbeddedResource Include="wwwroot/style.css" LogicalName="SensorDash.Web.style.css" />
