@@ -58,6 +58,17 @@ internal static class WorkspaceSelfTest
         WorkspaceLogic.Normalize(cfg);
         if(cfg.TrayWidgets.Count!=6)throw new Exception("Tray widget limit not enforced");
         if(cfg.Dashboards[0].Widgets.Count!=1)throw new Exception("Dashboard configuration lost");
+        // Windows notification icons must remain legible when rasterized at 16px.
+        if (TraySensorIcon.Compact("24.0", 16) != "24"
+            || TraySensorIcon.Compact("24.0", 24) != "24.0"
+            || TraySensorIcon.Compact("1340", 16) != "1k"
+            || TraySensorIcon.Compact("--", 16) != "--")
+            throw new Exception("Tiny tray-icon number formatting is not readable");
+        using (var icon = TraySensorIcon.Create("42", "#ff4040"))
+        {
+            if (icon.Width < 16 || icon.Height < 16)
+                throw new Exception("Tray icon could not be generated");
+        }
         // The simulation engine makes no reference to ISensor.Control or IControl.
         // The absence of any write entry point remains an intentional safety boundary.
     }
