@@ -153,9 +153,10 @@ jobs:
             if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
-            # JSON arrays returned by Invoke-RestMethod can be wrapped as a
-            # single object by @($groups); capture the objects explicitly.
-            $groups = @(Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8)
+            # Invoke-RestMethod deserializes the JSON array into a PowerShell
+            # array. Count that array directly; wrapping it in @() would treat
+            # the entire array as one pipeline object on some PS versions.
+            $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
             if ($groups.Count -ne 8) { throw "Expected eight collection families, got $($groups.Count)" }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
