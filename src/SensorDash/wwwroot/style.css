@@ -14,3 +14,13 @@
 .field{display:grid;gap:6px}.field label{font-weight:650;color:#a7bed0;font-size:11px}.settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:17px}.setting-group{margin-bottom:16px}.setting-group h3{margin:0 0 14px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}.alias-row{display:grid;grid-template-columns:1fr minmax(140px,1.2fr);align-items:center;gap:12px;margin:10px 0}.alias-row label{font-size:11px;color:#92a8ba;min-width:0;word-break:break-all}.alias-row input{width:100%}.curve-svg{width:100%;height:auto}.curve-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.curve-point{background:#1c2d3a;padding:9px;border-radius:8px;text-align:center}.curve-point b{display:block;color:var(--cyan)}.curve-point small{color:var(--muted)}footer{margin-top:28px;color:#657f92;font-size:11px;border-top:1px solid #202f3e;padding-top:20px}
 #toast{position:fixed;bottom:22px;right:25px;background:#24404b;border:1px solid #497a7d;color:#d5fef8;padding:13px 17px;border-radius:10px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}#toast.show{opacity:1;transform:none}
 @media(max-width:1250px){.metrics{grid-template-columns:repeat(2,1fr)}.two-col{grid-template-columns:1fr}.mini-rows{grid-template-columns:repeat(3,1fr)}}@media(max-width:800px){.sidebar{width:72px;padding:20px 9px}.brand{padding:0 7px 35px}.brand div:nth-child(2),.group-title,.nav{font-size:0}.nav{justify-content:center;padding:13px 4px}.nav>span:first-child{font-size:23px}.nav-number,.sidebar-foot{display:none}.workspace .topbar{padding:0 16px}.content-wrap{padding:24px 15px}.connection{display:none}.settings-grid,.half-col{grid-template-columns:1fr}.mini-rows{grid-template-columns:1fr 1fr}.page-head h1{font-size:25px}}@media(max-width:510px){.metrics{grid-template-columns:1fr 1fr;gap:9px}.metric{padding:15px}.metric-num b{font-size:28px}.mini-rows{grid-template-columns:1fr}.top-actions select{width:145px}.small-date{display:none}.form-grid{grid-template-columns:1fr}}
+
+/* Stable sensor explorer: hidden rows are filtered without replacing the table. */
+#sensorList tr[hidden]{display:none}
+.alias-editor{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:12px 0 16px}
+.alias-editor>.field{flex:1;min-width:240px}
+.alias-editor input{width:100%}
+.role-list{display:grid;grid-template-columns:1fr;gap:13px}
+.sensor-role{min-width:0}
+.sensor-role select{width:100%;text-overflow:ellipsis}
+@media(max-width:800px){.alias-editor{align-items:stretch}.alias-editor .btn{flex:1}}
