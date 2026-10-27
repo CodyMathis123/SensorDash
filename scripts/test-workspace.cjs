@@ -101,6 +101,34 @@ const h={
  assert.equal(S.view,'dashboards');
  assert.ok(app.includes('data-usage-component')&&app.includes('scrollIntoView'));
  assert.ok(css.includes('.w-referenced-component'));
+ // Exercise the actual Explorer renderer, not only the index helper.
+ const explorerSource=app.slice(app.indexOf('function explorer(){'),app.indexOf('function events(){'));
+ S.filter='In use';S.search='';S.selected='coolant';S.deviceFilter='';
+ S.explorerGrouping='hardware';S.showHidden=false;
+ const escapeHtml=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+   .replace(/"/g,'&quot;').replace(/>/g,'&gt;');
+ const browser={
+  S,SDWorkspace:workspace,esc:escapeHtml,
+  panel:h.panel,chart:h.chart,latest:s=>String(s?.value),
+  typeUnit:type=>type==='Temperature'?'°C':type
+ };
+ const explorer=vm.runInNewContext(explorerSource+'\nexplorer;',browser);
+ const explorerHtml=explorer();
+ assert.ok(explorerHtml.includes('data-usage-system="loop-1"'));
+ assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
+ assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
+ assert.ok(explorerHtml.includes('data-select="coolant"'));
+ // Layout locks are presentation-only: edit actions disappear, metrics remain.
+ S.workspaceDashboardId=board.id;
+ board.locked=true;
+ const locked=workspace.render(S,'dashboards',h);
+ assert.ok(locked.includes('Unlock layout'));
+ assert.ok(!locked.includes('data-widget-title'));
+ assert.ok(locked.includes('Coolant reading')||locked.includes('Current readings'));
+ assert.ok(css.includes('grid-template-areas:"index sensor label color precision remove"'));
+ assert.ok(script.includes('data-curve-temperature')&&script.includes('data-curve-percentage'));
+ assert.ok(!script.includes('data-curve-points='));
+
  assert.ok(!backend.includes('SensorBindings')&&!app.includes('sensorBindings'));
  assert.ok(!model.includes('"radiator" or "fan" or "sensor"'));
  assert.ok(app.includes('for(let i=0;i<ids.length;i+=12)'),
