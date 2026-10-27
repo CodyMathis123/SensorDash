@@ -10,7 +10,10 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="SensorDash">
         <Component Id="SensorDashExecutable" Guid="*">
-          <File Id="SensorDashExe" Source="$(var.PublishDir)\SensorDash.exe" KeyPath="yes" />
+          <File Id="SensorDashExe" Source="$(var.PublishDir)\SensorDash.exe" KeyPath="yes">
+            <Shortcut Id="OpenSensorDash" Directory="ProgramMenuFolder" Name="SensorDash"
+                      Description="Open SensorDash hardware dashboard" Advertise="yes" WorkingDirectory="INSTALLFOLDER" />
+          </File>
           <ServiceInstall Id="InstallSensorDashCollector" Name="SensorDashCollector"
                           DisplayName="SensorDash Collector"
                           Description="Elevated read-only hardware telemetry collector; local named-pipe IPC only."
@@ -30,23 +33,9 @@
       </Directory>
     </StandardDirectory>
 
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="SensorDashPrograms" Name="SensorDash">
-        <Component Id="ShortcutComponent" Guid="*">
-          <Shortcut Id="OpenSensorDash" Name="SensorDash" Description="Open SensorDash hardware dashboard"
-                    Target="[INSTALLFOLDER]SensorDash.exe" Arguments="--desktop"
-                    WorkingDirectory="INSTALLFOLDER" />
-          <RemoveFolder Id="RemoveProgramsFolder" On="uninstall" />
-          <RegistryValue Root="HKLM" Key="SOFTWARE\SensorDash"
-                         Name="Installed" Type="integer" Value="1" KeyPath="yes"/>
-        </Component>
-      </Directory>
-    </StandardDirectory>
-
     <Feature Id="Complete" Title="SensorDash" Level="1">
       <ComponentRef Id="SensorDashExecutable" />
       <ComponentRef Id="TrayAutoStart" />
-      <ComponentRef Id="ShortcutComponent" />
     </Feature>
   </Package>
 </Wix>
