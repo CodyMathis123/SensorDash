@@ -168,7 +168,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 await app.RunAsync();
 
-public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null);
+public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null, string? DeviceId = null);
 public sealed record HardwareDevice(string Id, string Name, string Type, int SensorCount);
 public sealed record SensorFrame(DateTimeOffset Timestamp, List<SensorReading> Sensors, string? Error, List<HardwareDevice>? Devices = null);
 public static class SecurityInfo {
@@ -191,6 +191,11 @@ public sealed class DashboardSettings {
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
     public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
     public List<SimulatedFanCurveConfig> SimulatedFanCurves { get; set; } = [];
+    // Visibility affects default views and sensor pickers, not collection,
+    // history, configured charts, alerts or simulated curves.
+    public List<string> HiddenSensorIds { get; set; } = [];
+    public List<string> HiddenDeviceIds { get; set; } = [];
+    public List<string> HiddenHardwareTypes { get; set; } = [];
     // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
     public Dictionary<string, string> SensorBindings { get; set; } = new();
     public Dictionary<string, string> Aliases { get; set; } = new();
@@ -395,7 +400,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
             double? value = sensor.Value is float x && float.IsFinite(x) ? x : null;
             target.Add(new SensorReading(sensor.Identifier.ToString(), sensor.Name, hardware.Name,
                 hardware.HardwareType.ToString(), sensor.SensorType.ToString(), value,
-                hardware.HardwareType == HardwareType.Storage ? lastStorage : now));
+                hardware.HardwareType == HardwareType.Storage ? lastStorage : now,
+                hardware.Identifier.ToString()));
         }
         foreach (var child in hardware.SubHardware)
             Scan(child, target, devices, refreshStorage, now, lastStorage);
