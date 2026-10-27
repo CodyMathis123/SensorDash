@@ -102,7 +102,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, I
                     "diagnostics" => Diagnostics(),
                     "status" => new
                     {
-                        app = "SensorDash", version = "0.2.0", mode = "service",
+                        app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "service",
                         started = state.Started, now = DateTimeOffset.UtcNow,
                         sensorCount = state.Latest?.Sensors.Count ?? 0,
                         lastSample = state.Latest?.Timestamp, error = state.Latest?.Error,
