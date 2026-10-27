@@ -21,6 +21,7 @@ public sealed class WorkspaceDashboardConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "New dashboard";
+    public bool Locked { get; set; } = false; // UI editing lock, not an authorization barrier
     public List<WorkspaceWidgetConfig> Widgets { get; set; } = [];
 }
 public sealed class WorkspaceWidgetConfig
@@ -83,6 +84,13 @@ public static class WorkspaceLogic
 
     public static void Normalize(DashboardSettings cfg)
     {
+        // Hiding a sensor is presentation-only. It never removes the sensor from
+        // collector polling or breaks configured alert/control simulations.
+        cfg.HiddenSensorIds = Ids(cfg.HiddenSensorIds, 2000);
+        cfg.HiddenDeviceIds = Ids(cfg.HiddenDeviceIds, 250);
+        cfg.HiddenHardwareTypes = (cfg.HiddenHardwareTypes ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x.Length <= 80)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();
         cfg.CoolingSystems = (cfg.CoolingSystems ?? []).Take(20).Select(system => {
             system.Id = Short(system.Id, 80);
             system.Name = Short(system.Name);
