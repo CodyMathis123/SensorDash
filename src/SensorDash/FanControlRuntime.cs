@@ -1,0 +1,214 @@
+using LibreHardwareMonitor.Hardware;
+
+// Experimental live control is never enabled by persisted settings. Only a
+// local elevated, administrator-authorized helper can request a timed session.
+// All LHM hardware access stays serialized on SensorWorker's collection thread.
+public sealed record FanCommand(
+    string Action, string ChannelId = "", string CurveId = "",
+    double Percent = 100, int DurationSeconds = 60, bool ConfirmExclusiveOwnership = false);
+
+public sealed record FanOutputInfo(string Id, string Name, string Device, string DeviceId,
+    float Minimum, float Maximum, string Mode, bool Writable);
+
+public sealed record FanControlStatus(string State, string ChannelId, string CurveId,
+    string Mode, double? Target, DateTimeOffset? Expires, string Message);
+
+public sealed class FanControlRuntime
+{
+    public const int MinExperimentalDuty = 70;
+    public const int MaxSessionSeconds = 120;
+    private readonly object _sync = new();
+    private IReadOnlyList<FanOutputInfo> _outputs = [];
+    private FanCommand? _pending;
+    private Session? _session;
+    private FanControlStatus _status = new("off", "", "", "", null, null,
+        "Firmware/default fan control is in charge.");
+
+    private sealed record Session(string ChannelId, string CurveId, string Mode,
+        double ManualDuty, DateTimeOffset Expires);
+
+    public bool IsActive
+    {
+        get { lock (_sync) return _pending != null || _session != null; }
+    }
+
+    public object Snapshot()
+    {
+        lock (_sync) return new {
+            outputs = _outputs.ToArray(), status = _status,
+            minimumDuty = MinExperimentalDuty, maximumSessionSeconds = MaxSessionSeconds,
+            requiresAdministrator = true, experimental = true
+        };
+    }
+
+    public object Request(FanCommand? command, DashboardSettings settings)
+    {
+        if (command == null || command.Action is not ("arm" or "release"))
+            return new { accepted = false, message = "Unsupported fan-control request." };
+        lock (_sync)
+        {
+            if (_pending != null)
+                return new { accepted = false, message = "A hardware operation is still pending." };
+            if (command.Action == "release")
+            {
+                _pending = command;
+                return new { accepted = true, message = "Firmware-default restoration queued." };
+            }
+            if (_session != null)
+                return new { accepted = false, message = "Release the current session first." };
+            if (!command.ConfirmExclusiveOwnership)
+                return new { accepted = false, message = "You must confirm no other software controls this output." };
+            if (command.ChannelId.Length is < 3 or > 256 ||
+                command.DurationSeconds is < 15 or > MaxSessionSeconds ||
+                !double.IsFinite(command.Percent))
+                return new { accepted = false, message = "Invalid channel, duration or duty." };
+            if (!_outputs.Any(o => o.Id == command.ChannelId && o.Writable))
+                return new { accepted = false, message = "Selected channel is not a supported writable output." };
+            if (command.CurveId.Length > 0 &&
+                !settings.SimulatedFanCurves.Any(c => c.Id == command.CurveId))
+                return new { accepted = false, message = "Curve not found in saved settings." };
+            if (command.CurveId.Length == 0 &&
+                (command.Percent < MinExperimentalDuty || command.Percent > 100))
+                return new { accepted = false, message = "Experimental manual duty must be 70–100%." };
+            _pending = command;
+            _status = new("pending", command.ChannelId, command.CurveId,
+                command.CurveId.Length > 0 ? "curve" : "manual", null, null,
+                "Waiting for the hardware collection thread.");
+            return new { accepted = true, message = "Short live-control session queued." };
+        }
+    }
+
+    private static Dictionary<string, IControl> FindControls(Computer computer)
+    {
+        var found = new Dictionary<string, IControl>(StringComparer.Ordinal);
+        void Visit(IHardware hardware)
+        {
+            foreach (var sensor in hardware.Sensors)
+                if (sensor.SensorType == SensorType.Control && sensor.Control != null)
+                    found[sensor.Identifier.ToString()] = sensor.Control;
+            foreach (var child in hardware.SubHardware) Visit(child);
+        }
+        foreach (var hardware in computer.Hardware) Visit(hardware);
+        return found;
+    }
+
+    public void Tick(Computer computer, SensorFrame frame, DashboardSettings settings, DateTimeOffset now)
+    {
+        // Called only from the hardware collection thread.
+        var controls = FindControls(computer);
+        var listing = new List<FanOutputInfo>();
+        void Visit(IHardware hardware)
+        {
+            foreach (var sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType != SensorType.Control || sensor.Control == null) continue;
+                var c = sensor.Control;
+                listing.Add(new FanOutputInfo(sensor.Identifier.ToString(), sensor.Name,
+                    hardware.Name, hardware.Identifier.ToString(), c.MinSoftwareValue,
+                    c.MaxSoftwareValue, c.ControlMode.ToString(),
+                    c.MinSoftwareValue <= MinExperimentalDuty && c.MaxSoftwareValue >= 100));
+            }
+            foreach (var child in hardware.SubHardware) Visit(child);
+        }
+        foreach (var hardware in computer.Hardware) Visit(hardware);
+        FanCommand? request;
+        lock (_sync)
+        {
+            _outputs = listing.OrderBy(o => o.Device).ThenBy(o => o.Name).ToArray();
+            request = _pending;
+            _pending = null;
+        }
+        if (request != null)
+        {
+            if (request.Action == "release")
+                Release(controls, "Released by user.");
+            else if (_session != null)
+                Set(new("refused", request.ChannelId, "", "", null, null, "Another session is active."));
+            else if (!controls.TryGetValue(request.ChannelId, out var control) ||
+                     control.ControlMode != ControlMode.Default ||
+                     control.MinSoftwareValue > MinExperimentalDuty || control.MaxSoftwareValue < 100)
+                Set(new("refused", request.ChannelId, "", "", null, null,
+                    "Channel must support 70–100% duty and currently be in firmware-default mode."));
+            else
+                _session = new Session(request.ChannelId, request.CurveId,
+                    request.CurveId.Length > 0 ? "curve" : "manual",
+                    request.Percent, now.AddSeconds(request.DurationSeconds));
+        }
+        if (_session is not { } session) return;
+        if (now >= session.Expires)
+        {
+            Release(controls, "Session expired; restored firmware-default control.");
+            return;
+        }
+        if (!controls.TryGetValue(session.ChannelId, out var selected))
+        {
+            Release(controls, "Output disappeared; default restoration attempted.");
+            return;
+        }
+        double duty = session.ManualDuty;
+        if (session.Mode == "curve")
+        {
+            var sample = WorkspaceLogic.Evaluate(frame, settings, now)
+                .FirstOrDefault(x => x.Id == session.CurveId);
+            if (sample?.State != "simulated" || sample.TargetPercent is not double target ||
+                !double.IsFinite(target))
+            {
+                Release(controls, "Missing/stale curve input; firmware-default restored.");
+                return;
+            }
+            duty = target;
+        }
+        duty = Math.Clamp(duty, MinExperimentalDuty, 100);
+        try
+        {
+            // Only write when necessary. Never write to RPM-only sensors.
+            if (selected.ControlMode != ControlMode.Software ||
+                Math.Abs(selected.SoftwareValue - duty) >= 0.5)
+                selected.SetSoftware((float)duty);
+            Set(new("active", session.ChannelId, session.CurveId, session.Mode,
+                duty, session.Expires, "Timed experimental control; release to restore default."));
+        }
+        catch (Exception ex)
+        {
+            Release(controls, "Hardware write failed (" + ex.GetType().Name + "); restore attempted.");
+        }
+    }
+
+    // Must be called before the Computer is reinitialized/closed or service exits.
+    public void ReleaseBeforeClose(Computer? computer, string reason)
+    {
+        Dictionary<string, IControl> channels;
+        try { channels = computer == null ? [] : FindControls(computer); }
+        catch { channels = []; }
+        Release(channels, reason);
+    }
+
+    private void Release(Dictionary<string, IControl> controls, string message)
+    {
+        var session = _session;
+        _session = null;
+        if (session == null)
+        {
+            Set(new("off", "", "", "", null, null, "No SensorDash control session active."));
+            return;
+        }
+        try
+        {
+            if (!controls.TryGetValue(session.ChannelId, out var control))
+                throw new InvalidOperationException("Control object is no longer accessible");
+            control.SetDefault();
+            Set(new("released", session.ChannelId, session.CurveId, session.Mode,
+                null, null, message));
+        }
+        catch (Exception ex)
+        {
+            Set(new("restore-unconfirmed", session.ChannelId, session.CurveId, session.Mode,
+                null, null, "WARNING: firmware restore could not be verified: " + ex.Message));
+        }
+    }
+
+    private void Set(FanControlStatus result)
+    {
+        lock (_sync) _status = result;
+    }
+}
