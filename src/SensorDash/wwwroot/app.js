@@ -158,6 +158,22 @@ function settingsView(){
  const choices=S.sensors.filter(s=>['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type));
  const types=[...new Set([...S.sensors.map(s=>s.deviceType).filter(Boolean),
     ...(cfg.excludedHistoryHardwareTypes||[])])].sort((a,b)=>a.localeCompare(b));
+ // These switches correspond to the LHM Computer's eight hardware families.
+ // They are general collection capabilities, not special handling for a
+ // particular user's motherboard, GPU, SSD or network card.
+ const collectionGroups=[
+   ['Cpu','Processors','CPU package, per-core readings and related telemetry'],
+   ['Gpu','Graphics adapters','Supported graphics processors and cooling sensors'],
+   ['Motherboard','Motherboard / Super I/O','Board thermals, fan tachometers and chipsets'],
+   ['Memory','Memory','Supported memory telemetry'],
+   ['Storage','Storage devices','SSDs, hard drives and drive health'],
+   ['Network','Network adapters','Interface traffic and utilization'],
+   ['Controller','Hardware controllers','Supported auxiliary and cooling controllers'],
+   ['PowerMonitor','Power monitors','Separate power-monitoring devices']
+ ];
+ const liveDevices=S.frame?.devices||[];
+ const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
+   .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
@@ -171,10 +187,24 @@ function settingsView(){
   ['all','All sensor readings · largest database']].map(([val,text])=>
    '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
  '</select></label>'+
- '<label class="collection-toggle"><input type="checkbox" id="collectNetworkSensors" '+
-  (cfg.collectNetworkSensors!==false?'checked':'')+
- '> Collect network hardware sensors</label></div>'+
- '<p class="note">Network polling is a whole-device hardware switch. Turning it off removes network readings until re-enabled and makes dependent dashboards/curves show missing data. Sensor-level visibility is separate.</p>'+
+ '</div>'+
+ '<h3 class="sensor-used-title">Hardware family collection</h3>'+
+ '<div class="w-collection-groups">'+collectionGroups.map(([id,name,description])=>
+   '<label class="w-collection-group"><input type="checkbox" data-collect-group="'+esc(id)+'" '+
+      (!(cfg.disabledCollectionGroups||[]).includes(id)?'checked':'')+'>'+
+   '<span><strong>'+esc(name)+'</strong><small>'+esc(description)+'</small></span></label>'
+ ).join('')+'</div>'+
+ '<p class="note">Disabling a family closes and reopens the hardware collector with that entire family disabled. Its sensors will stop appearing until you re-enable it.</p>'+
+ '<h3 class="sensor-used-title">Individual discovered devices</h3>'+
+ '<div class="w-collection-devices">'+
+   (uniqueDevices.length?uniqueDevices.map(device=>
+     '<label class="w-collection-group"><input type="checkbox" data-collect-device="'+esc(device.id)+'" '+
+       (!(cfg.disabledCollectionDeviceIds||[]).includes(device.id)?'checked':'')+'>'+
+     '<span><strong>'+esc(device.name)+'</strong><small>'+esc(device.type)+
+       ' · '+device.sensorCount+' detected sensors</small></span></label>'
+   ).join(''):'<p class="note">No devices discovered. Family options remain available.</p>')+
+ '</div>'+
+ '<p class="note">Pausing a device skips its periodic Update call where supported, but preserves its sensor names with unavailable readings. Parent hardware may still perform shared work. Active charts, tray readouts and curves may lose their inputs.</p>'+
  '<h3 class="sensor-used-title">Skip SQLite history for hardware categories</h3>'+
  '<div class="w-history-types">'+types.map(t=>
   '<label class="collection-toggle"><input type="checkbox" data-history-exclude="'+esc(t)+'" '+
@@ -440,8 +470,21 @@ async function saveSettings(){
  const cfg=structuredClone(S.settings);
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
  cfg.historyMode=byId('historyMode')?.value||'balanced';
- cfg.collectNetworkSensors=byId('collectNetworkSensors')?.checked!==false;
+ cfg.disabledCollectionGroups=[...document.querySelectorAll('[data-collect-group]:not(:checked)')]
+   .map(el=>el.dataset.collectGroup);
+ const seenDevices=[...document.querySelectorAll('[data-collect-device]')];
+ const seenIds=new Set(seenDevices.map(el=>el.dataset.collectDevice));
+ cfg.disabledCollectionDeviceIds=[
+   ...(cfg.disabledCollectionDeviceIds||[]).filter(id=>!seenIds.has(id)),
+   ...seenDevices.filter(el=>!el.checked).map(el=>el.dataset.collectDevice)
+ ];
  cfg.excludedHistoryHardwareTypes=[...document.querySelectorAll('[data-history-exclude]:checked')].map(el=>el.dataset.historyExclude);
+ const newlyDisabledGroups=cfg.disabledCollectionGroups.filter(id=>!(S.settings.disabledCollectionGroups||[]).includes(id));
+ const newlyPausedDevices=cfg.disabledCollectionDeviceIds.filter(id=>!(S.settings.disabledCollectionDeviceIds||[]).includes(id));
+ if((newlyDisabledGroups.length||newlyPausedDevices.length)&&
+    !confirm('Disable collection for '+(newlyDisabledGroups.length+newlyPausedDevices.length)+
+       ' hardware families/devices? Dependent live dashboards, tray icons and simulated curves will lose those readings.'))
+   return;
  cfg.sensorBindings=cfg.sensorBindings||{};
  document.querySelectorAll('[data-sensor-role]').forEach(el=>{
    if(el.value)cfg.sensorBindings[el.dataset.sensorRole]=el.value;
