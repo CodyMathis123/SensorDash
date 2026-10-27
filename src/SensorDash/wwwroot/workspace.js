@@ -420,23 +420,21 @@ const SDWorkspace = (() => {
     '<td>'+safe(o.name)+'<small>'+safe(o.id)+'</small></td>'+
     '<td>'+safe(o.mode)+'</td>'+
     '<td>'+safe(o.minimum)+'–'+safe(o.maximum)+'%</td>'+
-    '<td>'+(!o.writable?'Unavailable':o.mode==='Default'?'Ready for explicit takeover':
-      o.mode==='Software'?'Already software-controlled':'Inspect hardware support')+'</td></tr>'
+    '<td>'+(!o.writable?'Outside test PWM range':'Ready (confirm other apps are closed)')+'</td></tr>'
   ).join('');
   const curveOptions=(S.settings?.simulatedFanCurves||[]).map(c=>
     '<option value="'+attr(c.id)+'">'+safe(c.name)+'</option>').join('');
-  return card('Experimental live fan control','Elevated, time-limited sessions · disabled by default',
-    '<p class="help">Exit any other fan-controller application before using this. '+
-     'Select a discovered writable output, not an RPM sensor. '+
-     'Windows will request administrator approval for every takeover or release. '+
-     'The initial implementation limits duty to 70–100% and restores firmware/default mode at lease expiry. '+
-     'Do not use this experimental mode to control an essential pump without verified firmware fallback.</p>'+
+  return card('Live fan control · first tests','Select one output · 30–120-second tests · 70–100% PWM',
+    '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and approve Windows elevation. '+
+      'A channel can show Undefined, Default, or Software: these are LibreHardwareMonitor local states, '+
+      'not a reliable indication of whether another application is running. '+
+      'Avoid essential pump outputs until their safe behavior is verified.</p>'+
     '<div class="w-live-status"><strong>Control state: <span data-fan-status>'+
        safe(state.state||'Loading…')+'</span></strong>'+
      '<span data-fan-message>'+safe(state.message||'Looking for writable outputs…')+'</span>'+
      '<span data-fan-expiry>'+safe(state.expires?'Expires '+new Date(state.expires).toLocaleTimeString():'')+'</span></div>'+
     '<div class="table-container"><table class="w-output-table"><thead><tr>'+
-      '<th>Hardware</th><th>Writable output</th><th>Mode</th><th>Duty range</th><th>Availability</th>'+
+      '<th>Hardware</th><th>Writable output</th><th>LHM mode</th><th>Duty range</th><th>Test eligibility</th>'+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="w-actions">'+
       '<label>Writable channel<select id="liveFanChannel">'+
@@ -453,15 +451,14 @@ const SDWorkspace = (() => {
         '<option value="120">120 seconds</option></select></label>'+
     '</div>'+
     '<label class="w-fan-ack"><input id="liveFanExclusive" type="checkbox" />'+
-    '<span>I have exited other fan-control software, confirmed this channel, and understand '+
-    'that firmware recovery after a power loss or hard crash cannot be guaranteed.</span></label>'+
+    '<span>I have closed other fan-control software and want SensorDash to control this output.</span></label>'+
     '<div class="w-actions">'+
        button('fan-authorize','Request elevated takeover','',false)+
        button('fan-release','Release to firmware control')+
      '</div>'+
-    '<p class="note">Live curve control uses the same saved curves as the sandbox, with a temporary 70% duty floor. '+
-    'If a curve input disappears or becomes stale, SensorDash attempts to return the channel to firmware/default control. '+
-    'This is not yet a background watchdog or permanent controller.</p>');
+    '<p class="note">For these short tests, SensorDash limits duty to at least 70% (or a higher channel minimum) '+
+    'and releases control at the timer, on a stale input, or when you press Release. '+
+    'Abrupt crashes may prevent cleanup; firmware behavior varies by motherboard.</p>');
  };
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
