@@ -1,12 +1,4 @@
 'use strict';
-const IDS = {
- cpu:'/amdcpu/0/temperature/2', ccd1:'/amdcpu/0/temperature/3', ccd2:'/amdcpu/0/temperature/4',
- gpu:'/gpu-amd/0/temperature/0', hotspot:'/gpu-amd/0/temperature/7', vram:'/gpu-amd/0/temperature/1',
- nvme:'/nvme/0/temperature/0', cpuPower:'/amdcpu/0/power/0', gpuPower:'/gpu-amd/0/power/3',
- cpuLoad:'/amdcpu/0/load/0', gpuLoad:'/gpu-amd/0/load/0', ram:'/ram/load/0',
- radiator:'/lpc/it8688e/0/fan/0', pump:'/lpc/it8688e/0/fan/1', nvmeFan:'/lpc/it8688e/0/fan/2',
- fanDuty:'/lpc/it8688e/0/control/2'
-};
 const titles={
  overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
  dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
@@ -20,7 +12,7 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
-const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:IDS.cpu,
+const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',
  hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -30,20 +22,6 @@ const shorttime=t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minu
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>S.settings?.aliases?.[s?.id]||s?.name||'Unavailable';
 const sensor=id=>S.byId.get(id);
-// A saved role binding takes priority; otherwise discover by metadata rather than
-// assuming that current hardware has the exact sensor IDs from an old CSV log.
-function resolveRole(key,legacy,type,namePattern,devicePattern) {
- const assigned=S.settings?.sensorBindings?.[key];
- if(assigned) return sensor(assigned)||null;
- const preferred=sensor(legacy);
- if(preferred?.type===type && namePattern.test(preferred.name) &&
-    (!devicePattern || devicePattern.test(preferred.device+' '+preferred.deviceType)) &&
-    (type!=='Temperature' || preferred.value==null || preferred.value>0)) return preferred;
- const compatible=S.sensors.filter(v=>v.type===type &&
-   namePattern.test(v.name) && (!devicePattern||devicePattern.test(v.device+' '+v.deviceType)));
- return compatible.find(v=>v.value!=null && (type!=='Temperature'||v.value>0))||compatible[0]||preferred||null;
-}
-
 const val=id=>sensor(id)?.value??null;
 const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id==='__calculated__'?'data-live-calc="nvmeHeadroom"':s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
@@ -55,116 +33,6 @@ function chart(ids,unit='',small=false){
  return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
 }
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
-function getDefaults(){
- return {
- cpu:resolveRole('cpu',IDS.cpu,'Temperature',/Tctl\/Tdie|CPU Package|CPU Core/i,/CPU|Ryzen|AMD/i),
- gpu:resolveRole('gpu',IDS.gpu,'Temperature',/GPU Core/i,/GPU|Radeon/i),
- hotspot:resolveRole('hotspot',IDS.hotspot,'Temperature',/Hot.?Spot/i,/GPU|Radeon/i),
- nvme:resolveRole('nvme',IDS.nvme,'Temperature',/Composite|^Drive Temperature$|^Temperature(?: #?[0-9]+)?$/i,/Storage|NVMe|SSD|FireCuda|Seagate|Samsung|WD|Western Digital/i),
- radiator:resolveRole('radiator',IDS.radiator,'Fan',/^Fan #1$|Radiator/i,/LPC|IT8688|Motherboard/i),
- pump:resolveRole('pump',IDS.pump,'Fan',/^Fan #2$|Pump/i,/LPC|IT8688|Motherboard/i),
- nvmeFan:resolveRole('nvmeFan',IDS.nvmeFan,'Fan',/^Fan #3$|NVMe/i,/LPC|IT8688|Motherboard/i),
- cpuPower:resolveRole('cpuPower',IDS.cpuPower,'Power',/Package/i,/CPU|Ryzen|AMD/i),
- gpuPower:resolveRole('gpuPower',IDS.gpuPower,'Power',/GPU Package|Total Board/i,/GPU|Radeon/i),
- ram:resolveRole('ram',IDS.ram,'Load',/Memory/i,/Memory|RAM/i),
- ccd1:sensor(IDS.ccd1),ccd2:sensor(IDS.ccd2),vram:sensor(IDS.vram),
- fanDuty:resolveRole('fanDuty',IDS.fanDuty,'Control',/Fan #3|Fan/i,/LPC|IT8688|Motherboard/i),
- cpuLoad:sensor(IDS.cpuLoad),gpuLoad:sensor(IDS.gpuLoad)
- };
-}
-
-function overview(){
- const d=getDefaults();
- const out=`<div class="metrics">
-  ${metric('CPU temperature',d.cpu,'#62d5ce','Ryzen processor · Tctl/Tdie','°C','◉')}
-  ${metric('GPU core',d.gpu,'#6fa7ed','Radeon water block','°C','▣')}
-  ${metric('GPU hotspot',d.hotspot,'#f2bd6d','GPU junction temperature','°C','♨')}
-  ${metric('NVMe SSD',d.nvme,'#a991e8','Composite temperature','°C','▰')}
- </div>
- <div class="two-col">
-  ${panel('Thermal timeline','The temperature story, not just the latest number',chart([d.cpu,d.gpu,d.hotspot,d.nvme],'°C'))}
-  ${panel('Cooling hardware','Live fan and pump tachometers',
-    stat('ALL RADS · shared fan bank',d.radiator,'RPM')+
-    stat('DDC pump · monitoring only',d.pump,'RPM')+
-    stat('NVMe heatsink fan',d.nvmeFan,'RPM')+
-    '<div class="help">Fan Control owns the curves and output. SensorDash only reads the resulting RPM and exposed control values.</div>'
-  )}
- </div>
- <div class="mini-rows">
-  <div class="mini"><div class="label">CPU PACKAGE POWER</div><strong>${fmt(d.cpuPower?.value)} W</strong><small>Heat entering your CPU block</small></div>
-  <div class="mini"><div class="label">GPU PACKAGE POWER</div><strong>${fmt(d.gpuPower?.value)} W</strong><small>Heat entering your GPU block</small></div>
-  <div class="mini"><div class="label">SYSTEM MEMORY</div><strong>${fmt(d.ram?.value)} %</strong><small>Reported utilization</small></div>
- </div>
- <div class="two-col">
-  ${panel('Power over time','CPU + GPU package power',chart([d.cpuPower,d.gpuPower],'W',true))}
-  ${panel('Live component load','Useful context for thermal peaks',stat('CPU total load',d.cpuLoad,'%')+stat('GPU core load',d.gpuLoad,'%')+stat('GPU memory temperature',d.vram,'°C')+stat('CPU CCD 1',d.ccd1,'°C')+stat('CPU CCD 2',d.ccd2,'°C'))}
- </div>`;
- return out;
-}
-function cooling(){
- const d=getDefaults();
- return `<div class="metrics">
-  ${metric('CPU',d.cpu,'#62d5ce','Core Tctl/Tdie','°C','◉')}
-  ${metric('GPU hotspot',d.hotspot,'#f2bd6d','GPU junction','°C','♨')}
-  ${metric('Radiator bank',d.radiator,'#6fa7ed','Fan Control · ALL RADS','RPM','❋')}
-  ${metric('DDC pump',d.pump,'#67caa2','Tach only · non-PWM','RPM','◌')}
- </div>
- <div class="full">${panel('Core thermal behavior','CPU, GPU core and hotspot temperatures',chart([d.cpu,d.gpu,d.hotspot],'°C'))}</div>
- <div class="half-col">
-  ${panel('Cooling RPM history','Radiator fans versus pump tachometer',chart([d.radiator,d.pump],'RPM',true))}
-  ${panel('Heat input','CPU and GPU package power',chart([d.cpuPower,d.gpuPower],'W',true))}
- </div>
- <div class="half-col">
-  ${panel('Cooling snapshot','All measurements sourced from hardware sensors',
-    stat('Radiator fans',d.radiator,'RPM')+stat('DDC pump tach',d.pump,'RPM')+
-    stat('GPU core temperature',d.gpu,'°C')+stat('GPU hotspot temperature',d.hotspot,'°C')+
-    stat('GPU hotspot - core Δ',d.gpu?.value!=null&&d.hotspot?.value!=null?{value:d.hotspot.value-d.gpu.value,type:'Temperature'}:null,'°C'))}
-  ${panel('Loop diagnostics','How to interpret these readings',
-    '<div class="help">The CPU and GPU share a water loop. Your <b>ALL RADS</b> bank follows Fan Control’s maximum of CPU and GPU temperature curves.</div>'+
-    '<p class="note">Pump RPM is telemetry only. A zero tach reading can indicate an unavailable sensor or disconnected tach cable; it does not by itself prove the pump stopped. A coolant temperature probe would give a better indication of sustained radiator load.</p>')}
- </div>`;
-}
-function nvme(){
- const d=getDefaults();const curve=[[35,30],[40,30],[45,40],[50,55],[55,75],[60,100]];
- const poly=curve.map(([t,p])=>((t-30)/35*350+40)+','+(178-p/100*140)).join(' ');
- const diag=S.diagnostics;
- const storage=(diag?.storageDevices||[]).map(x=>x.name);
- const temps=diag?.storageTemperatures||[];
- const diagnostic=diag?panel('Storage sensor diagnostics','What the embedded LibreHardwareMonitor library discovers',
-    '<div class="stat-row"><label>Windows administrator access</label><strong>'+ (diag.isAdministrator?'Yes':'No (standard user)')+'</strong></div>'+
-    '<div class="stat-row"><label>Detected storage devices</label><strong>'+storage.length+'</strong></div>'+
-    '<div class="stat-row"><label>Storage temperature sensors</label><strong>'+temps.length+'</strong></div>'+
-    '<div class="stat-row"><label>Storage poll interval</label><strong>'+diag.storagePollSeconds+' seconds</strong></div>'+
-    (storage.length?'<p class="note">'+storage.map(esc).join(' · ')+'</p>':'')+
-    (temps.length?'<div class="note">'+temps.map(x=>esc(x.device+' · '+x.name+' ['+x.id+'] = '+(x.value??'N/A'))).join('<hr>')+'</div>':'')+
-    '<div class="help">'+esc(diag.note)+'</div>'+
-    (!diag.isAdministrator?'<p class="note">For a diagnostic comparison, close SensorDash and run it once as Administrator. You can still keep everyday startup under your normal user account.</p>':''))
-    :'<div class="help">Loading storage inventory and access diagnostics…</div>';
- return `<div class="metrics">
-  ${metric('SSD composite',d.nvme,'#a991e8','Measured storage temperature','°C','▰')}
-  ${metric('NVMe heatsink',d.nvmeFan,'#62d5ce','Fan tachometer','RPM','❋')}
-  ${metric('Reported fan duty',d.fanDuty,'#6fa7ed','Motherboard channel, if exposed','%','◉')}
-  ${metric('Thermal headroom',d.nvme?.value!=null?{value:60-d.nvme.value,type:'Temperature',id:'__calculated__'}:null,'#f2bd6d','Below your 60°C curve endpoint','°C','◈')}
- </div>
- <div class="half-col">
-  ${panel('NVMe thermal timeline','SSD composite temperature',chart([d.nvme],'°C'))}
-  ${panel('NVMe fan tachometer','Measured RPM',chart([d.nvmeFan],'RPM'))}
- </div>
- <div class="half-col">
-  ${panel('Current suggested curve','Visualization only · controlled separately in Fan Control',
-   `<svg class="curve-svg" viewBox="0 0 450 220" role="img" aria-label="NVMe target fan curve">
-      ${[0,25,50,75,100].map(p=>`<line x1="40" y1="${178-p/100*140}" x2="420" y2="${178-p/100*140}" stroke="#334b5d" stroke-dasharray="3 7"/><text x="6" y="${182-p/100*140}" fill="#94aabd" font-size="11">${p}%</text>`).join('')}
-      <polyline fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${poly}"/>
-      ${curve.map(([t,p])=>`<circle cx="${(t-30)/35*350+40}" cy="${178-p/100*140}" r="4" fill="#62d5ce"/><text x="${(t-30)/35*350+40}" y="203" fill="#94aabd" text-anchor="middle" font-size="11">${t}°</text>`).join('')}
-    </svg><div class="curve-grid">${curve.map(([t,p])=>`<div class="curve-point"><b>${t}°C</b><small>${p}%</small></div>`).join('')}</div>`
-  )}
-  ${panel('Fan observations','Storage temperature versus fan control',stat('SSD composite',d.nvme,'°C')+
-    stat('NVMe heatsink fan',d.nvmeFan,'RPM')+
-    stat('Reported control duty',d.fanDuty,'%')+
-    '<div class="help">Suggested Fan Control settings: storage polling <b>10 seconds</b>, hysteresis <b>2°C</b>, response time <b>5 seconds</b>. Verify reliable startup at 30% duty.</div>'+
-    '<p class="note">The graph represents the proposed Fan Control curve, not a curve stored or applied by SensorDash. The reported control sensor may not correspond to the NVMe fan on every board.</p>')}
- </div><div class="full">${diagnostic}</div>`;
-}
 function explorer(){
  const candidates=S.sensors.filter(s=>{
    const typed=S.filter==='All'||(S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(s.type))||
@@ -280,11 +148,6 @@ function updateLiveValues(){
     // in the large explorer table (hundreds of rows). Only mutate changed values.
     if(el.textContent!==rendered)el.textContent=rendered;
  });
- const h=document.querySelector('[data-live-calc="nvmeHeadroom"]');
- if(h){
-   const t=getDefaults().nvme?.value,rendered=fmt(t==null?null:60-t);
-   if(h.textContent!==rendered)h.textContent=rendered;
- }
  SDWorkspace.paintSimulation(S);
 }
 // Graph history draws at most once every 8 seconds. While a graph is being
