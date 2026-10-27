@@ -90,6 +90,35 @@ jobs:
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify MSI installation and uninstallation on Windows
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem installer-output -Filter '*.msi' -Recurse | Select-Object -First 1).FullName
+          if (!$msi) { throw 'No MSI found' }
+          $installLog = Join-Path $env:RUNNER_TEMP 'sensordash-install.log'
+          $uninstallLog = Join-Path $env:RUNNER_TEMP 'sensordash-uninstall.log'
+          & msiexec.exe /i $msi /qn /norestart "/L*v" $installLog
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content $installLog -Tail 100
+            throw "MSI install failed: $LASTEXITCODE"
+          }
+          $service = Get-Service -Name 'SensorDashCollector' -ErrorAction Stop
+          if ($service.Status -ne 'Running') { throw "Installed collector did not start: $($service.Status)" }
+          $startup = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction Stop
+          if (!$startup.SensorDash) { throw 'MSI did not create tray autostart entry' }
+          if (!(Test-Path "$env:ProgramFiles\SensorDash\SensorDash.exe")) { throw 'MSI did not install executable' }
+          & msiexec.exe /x $msi /qn /norestart "/L*v" $uninstallLog
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content $uninstallLog -Tail 100
+            throw "MSI uninstall failed: $LASTEXITCODE"
+          }
+          if (Get-Service -Name 'SensorDashCollector' -ErrorAction SilentlyContinue) {
+            throw 'Uninstall left collector service registered'
+          }
+          if (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction SilentlyContinue) {
+            throw 'Uninstall left tray startup entry registered'
+          }
+          Write-Host 'MSI installed and removed service, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
           name: SensorDash-Setup-0.2.0-x64
