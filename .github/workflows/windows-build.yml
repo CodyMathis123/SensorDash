@@ -33,6 +33,30 @@ jobs:
           if ($css -notmatch 'grid-template-areas:"index sensor label color precision remove"') {
             throw 'Tray precision/color controls lack dedicated layout tracks'
           }
+      - name: Check generic collection and visibility editor contracts
+        shell: pwsh
+        run: |
+          $appJs = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          $workspace = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $model = Get-Content 'src/SensorDash/HardwareCollection.cs' -Raw
+          $collector = Get-Content 'src/SensorDash/Program.cs' -Raw
+          if ($appJs -notmatch 'data-collect-group' -or $appJs -notmatch 'data-collect-device') {
+            throw 'Generic hardware collection controls missing'
+          }
+          if ($appJs -match 'collectNetworkSensors' -or $collector -match 'CollectNetworkSensors') {
+            throw 'Legacy network-only collection switch must not be used'
+          }
+          if ($model -notmatch 'IsCpuEnabled' -or $model -notmatch 'IsNetworkEnabled' -or
+              $model -notmatch 'IsPowerMonitorEnabled' -or $model -notmatch 'IsStorageEnabled') {
+            throw 'Missing LHM family hardware switches'
+          }
+          if ($collector -notmatch 'HardwareCollection.CreateComputer' -or
+              $collector -notmatch 'DisabledCollectionDeviceIds') {
+            throw 'Service collection must use the generic hardware/group switch'
+          }
+          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-dashboard-lock') {
+            throw 'Sensor usage or dashboard locking missing'
+          }
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -218,7 +242,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.3.1-x64
+          name: SensorDash-Setup-0.4.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
