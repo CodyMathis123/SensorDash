@@ -14,7 +14,7 @@ public sealed class CoolingComponentConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Component";
-    public string Kind { get; set; } = "sensor"; // heat-source, pump, radiator, fan, sensor, other
+    public string Kind { get; set; } = "other"; // heat-source, fan-group, pump, temperature-probe, flow-meter, other (+ legacy)
     public List<string> SensorIds { get; set; } = [];
 }
 public sealed class WorkspaceDashboardConfig
@@ -131,7 +131,9 @@ public static class WorkspaceLogic
             system.Components = (system.Components ?? []).Take(32).Select(component => {
                 component.Id = Short(component.Id, 80);
                 component.Name = Short(component.Name);
-                component.Kind = component.Kind is "heat-source" or "pump" or "radiator" or "fan" or "sensor" or "other" ? component.Kind : "other";
+                component.Kind = component.Kind is "heat-source" or "fan-group" or "pump" or
+                    "temperature-probe" or "flow-meter" or "other" or
+                    "radiator" or "fan" or "sensor" ? component.Kind : "other";
                 component.SensorIds = Ids(component.SensorIds);
                 return component;
             }).ToList();
