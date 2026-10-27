@@ -196,7 +196,7 @@ public sealed class SensorDashTray : ApplicationContext
         menu.Items.Add("Configure tray sensors", null, (_, _) => Open("tray"));
         menu.Items.Add("Exit tray and dashboard", null, (_, _) =>
         {
-            _icon.Visible = false;
+            if (_icon is not null) _icon.Visible = false;
             lifetime.StopApplication();
             ExitThread();
         });
