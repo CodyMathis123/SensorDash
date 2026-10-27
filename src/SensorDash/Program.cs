@@ -8,6 +8,20 @@ using Microsoft.Data.Sqlite;
 
 var home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
 Directory.CreateDirectory(home);
+// A second double-click opens the dashboard already running instead of failing the port bind.
+// Startup shortcuts use --no-browser to silently reuse an existing process.
+try {
+    using var check = new HttpClient { Timeout = TimeSpan.FromMilliseconds(650) };
+    using var response = await check.GetAsync("http://127.0.0.1:8765/api/status");
+    if (response.IsSuccessStatusCode) {
+        if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase)) {
+            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
+            catch { }
+        }
+        return;
+    }
+} catch (HttpRequestException) { /* no active instance */ }
+  catch (TaskCanceledException) { /* not responding */ }
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:8765");
 builder.Services.AddSingleton(new DashboardState(home));
