@@ -207,8 +207,6 @@ public sealed class DashboardSettings {
     // Neither setting changes a sensor's visibility preferences.
     public List<string> DisabledCollectionGroups { get; set; } = [];
     public List<string> DisabledCollectionDeviceIds { get; set; } = [];
-    // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
-    public Dictionary<string, string> SensorBindings { get; set; } = new();
     public Dictionary<string, string> Aliases { get; set; } = new();
     public List<string> PinnedSensors { get; set; } = [];
     public Dictionary<string, double> HighThresholds { get; set; } = new();
@@ -236,11 +234,9 @@ public sealed class DashboardState {
         requested.RetentionDays = Math.Clamp(requested.RetentionDays, 1, 365);
         requested.Aliases ??= new();
         requested.PinnedSensors ??= [];
-        requested.SensorBindings ??= new();
         requested.HighThresholds ??= new();
         requested.Aliases = requested.Aliases.Where(kv => kv.Key.Length <= 256).Take(500).ToDictionary(kv => kv.Key, kv => kv.Value.Length > 120 ? kv.Value[..120] : kv.Value);
         requested.PinnedSensors = requested.PinnedSensors.Where(s => s.Length <= 256).Distinct().Take(100).ToList();
-        requested.SensorBindings = requested.SensorBindings.Where(kv => kv.Key.Length <= 64 && kv.Value.Length <= 256).Take(32).ToDictionary();
         requested.HighThresholds = requested.HighThresholds.Where(kv => kv.Key.Length <= 256 && double.IsFinite(kv.Value)).Take(100).ToDictionary();
         WorkspaceLogic.Normalize(requested);
         var temp = _settingsPath + ".tmp";
