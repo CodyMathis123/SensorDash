@@ -42,7 +42,7 @@ public sealed class AdminFanControlPipeServer(
         permissions.AddAccessRule(new PipeAccessRule(
             new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null),
             PipeAccessRights.ReadWrite,AccessControlType.Allow));
-        // Unlike the telemetry pipe: no AuthenticatedUserSid allow rule.
+        // Unlike the telemetry pipe, there is no general-user allow rule.
         while(!stoppingToken.IsCancellationRequested)
         {
             NamedPipeServerStream? server=null;
