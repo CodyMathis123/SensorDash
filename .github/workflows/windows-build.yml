@@ -28,6 +28,26 @@ jobs:
           Copy-Item packaging/Remove-Startup.ps1 dist/Remove-Startup.ps1
           Copy-Item packaging/Start-SensorDash.cmd dist/Start-SensorDash.cmd
           Copy-Item README.md dist/README.txt
+      - name: Smoke-test local HTTP API and dashboard
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path "dist/SensorDash.exe") -ArgumentList '--no-browser' -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/status' -TimeoutSec 2
+                if ($status.app -eq 'SensorDash') { $ready = $true; break }
+              } catch { }
+            }
+            if (!$ready) { throw 'SensorDash did not open its local API' }
+            $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
+            if ($page.Content -notmatch 'Hardware telemetry') { throw 'Missing dashboard HTML' }
+            Write-Host 'Verified localhost API and browser shell'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: SensorDash-win-x64
