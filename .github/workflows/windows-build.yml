@@ -157,10 +157,6 @@ jobs:
             if (@($groups).Count -ne 8) { throw 'Hardware collection family descriptors are missing' }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
-            $groups = @(Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8)
-            if ($groups.Count -ne 8) {
-              throw "Expected all eight hardware collection families, got $($groups.Count)"
-            }
             if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
               throw 'Missing Network from generic hardware collection capabilities'
             }
