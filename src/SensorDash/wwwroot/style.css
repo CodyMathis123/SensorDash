@@ -152,3 +152,24 @@
 .w-history-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;
  background:#101e2c;border:1px solid #314757;border-radius:9px;padding:13px;margin:10px 0}
 @media(max-width:710px){.w-history-controls>label:first-child{min-width:100%}.w-history-types{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Hardware collection is generic: all eight LHM families and every discovered
+   device use exactly the same on/off affordance. */
+.w-collection-groups,.w-collection-devices{
+ display:grid;
+ grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+ gap:10px;margin:12px 0 16px;
+}
+.w-collection-group{
+ display:flex;align-items:start;gap:11px;min-width:0;
+ background:#132635;border:1px solid #314a5b;border-radius:10px;
+ padding:13px;cursor:pointer;
+}
+.w-collection-group:hover{border-color:#5b8e98;background:#18313e}
+.w-collection-group input[type=checkbox]{
+ appearance:auto;width:17px;height:17px;flex:none;margin-top:1px;cursor:pointer;
+}
+.w-collection-group span{display:grid;gap:5px;min-width:0}
+.w-collection-group strong{font-size:13px;color:#e6f3fa;line-height:1.3}
+.w-collection-group small{color:#9fb8c7;font-size:11px;line-height:1.5}
+@media(max-width:680px){.w-collection-groups,.w-collection-devices{grid-template-columns:1fr}}
