@@ -1,3 +1,4 @@
+<!-- One-time 0.5.1 Windows validation of LHM control-mode regression. -->
 # SensorDash 0.5.1 — More accurate fan takeover and simpler safety UI
 
 LibreHardwareMonitor IControl reports Undefined for newly initialized controls unless its own settings say otherwise. This is an internal library state, **not a measurement of whether firmware is active or a competing fan controller exists**. SensorDash v0.5.0 mistakenly required Default and conflated mode with supported PWM range; v0.5.1 accepts Undefined, Default and Software modes after explicit user confirmation that other fan-control software is closed.
