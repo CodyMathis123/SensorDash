@@ -152,6 +152,8 @@ jobs:
             if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
+            $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
+            if (@($groups).Count -ne 8) { throw 'Hardware collection family descriptors are missing' }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
             $groups = @(Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8)
@@ -171,7 +173,7 @@ jobs:
             })
             $settings.coolingSystems = @(@{
               id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
-                @{id='ci-comp';name='Radiator fans';kind='fan';sensorIds=@('/ci/fan')}
+                @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
               )
             })
             $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
@@ -183,6 +185,9 @@ jobs:
             })
             $body = ConvertTo-Json $settings -Depth 30 -Compress
             $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
+              throw 'Cooling component role not persisted correctly'
+            }
             if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
               throw 'Generic workspace settings did not round-trip through named pipe'
             }
