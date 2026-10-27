@@ -10,17 +10,12 @@ const SDWorkspace = (() => {
   {id:'pump',name:'Pump',hint:'Pump RPM, optional flow meter and output duty'},
   {id:'temperature-probe',name:'Temperature probe',hint:'Coolant, ambient, inlet, outlet or any other temperature'},
   {id:'flow-meter',name:'Flow meter',hint:'Flow sensor readings for circulation monitoring'},
-  {id:'other',name:'Other hardware',hint:'Any supported sensor or device'},
-  // Retain older stored configurations without forcing automatic migrations.
-  {id:'radiator',name:'Radiator (legacy)',hint:'Physical hardware with no direct reading; use a Fan group instead'},
-  {id:'fan',name:'Fan (legacy)',hint:'Legacy fan component; a Fan group is recommended'},
-  {id:'sensor',name:'Sensor (legacy)',hint:'Legacy generic sensor component'}
+  {id:'other',name:'Other hardware',hint:'Any supported sensor or device'}
+
  ];
  const kinds=componentKinds.map(x=>x.id);
  const componentLabel=kind=>componentKinds.find(x=>x.id===kind)?.name||kind;
- const componentOptions=kind=>componentKinds
-   .filter(x=>!['radiator','fan','sensor'].includes(x.id)||x.id===kind)
-   .map(x=>'<option value="'+attr(x.id)+'" '+(x.id===kind?'selected':'')+'>'+
+ const componentOptions=kind=>componentKinds.map(x=>'<option value="'+attr(x.id)+'" '+(x.id===kind?'selected':'')+'>'+
    safe(x.name)+'</option>').join('');
  const typesByComponent={
   'heat-source':['Temperature','Power','Load','Clock'],
@@ -78,7 +73,6 @@ const SDWorkspace = (() => {
   }
   for(const id of cfg.pinnedSensors||[])add(id,'Pinned for history','explorer');
   for(const [id] of Object.entries(cfg.highThresholds||{}))add(id,'Monitoring threshold','settings');
-  for(const [role,id] of Object.entries(cfg.sensorBindings||{}))add(id,'Legacy sensor role: '+role,'settings');
   return index;
  };
 
