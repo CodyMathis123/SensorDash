@@ -180,17 +180,9 @@ public sealed class DashboardSettings {
     public List<SimulatedFanCurveConfig> SimulatedFanCurves { get; set; } = [];
     // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
     public Dictionary<string, string> SensorBindings { get; set; } = new();
-    public Dictionary<string, string> Aliases { get; set; } = new() {
-        ["/lpc/it8688e/0/fan/0"] = "Radiator Fan Bank (ALL RADS)",
-        ["/lpc/it8688e/0/fan/1"] = "DDC Pump (tach only)",
-        ["/lpc/it8688e/0/fan/2"] = "NVMe Heatsink Fan"
-    };
+    public Dictionary<string, string> Aliases { get; set; } = new();
     public List<string> PinnedSensors { get; set; } = [];
-    public Dictionary<string, double> HighThresholds { get; set; } = new() {
-        ["/amdcpu/0/temperature/2"] = 90,
-        ["/gpu-amd/0/temperature/7"] = 100,
-        ["/nvme/0/temperature/0"] = 65
-    };
+    public Dictionary<string, double> HighThresholds { get; set; } = new();
 }
 public sealed class DashboardState {
     private readonly string _settingsPath;
@@ -332,8 +324,6 @@ public sealed class HistoryStore {
 public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<SensorWorker> logger) : BackgroundService {
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
-    private bool _pumpObserved;
-    private DateTimeOffset? _pumpMissingSince;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
@@ -410,21 +400,6 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
                 _alarms[id] = false;
             }
         }
-        const string pumpId = "/lpc/it8688e/0/fan/1";
-        if (byId.TryGetValue(pumpId, out var pump) && pump.Value is double rpm) {
-            if (rpm > 1000) {
-                _pumpObserved = true; _pumpMissingSince = null;
-                if (_alarms.GetValueOrDefault("pump")) {
-                    db.Event("info", pumpId, "Pump tachometer reading recovered", rpm);
-                    _alarms["pump"] = false;
-                }
-            } else if (_pumpObserved) {
-                _pumpMissingSince ??= frame.Timestamp;
-                if (!_alarms.GetValueOrDefault("pump") && (frame.Timestamp - _pumpMissingSince.Value).TotalSeconds >= 20) {
-                    db.Event("warning", pumpId, "Pump tach below 1000 RPM for 20 seconds; verify tach wiring and pump operation", rpm);
-                    _alarms["pump"] = true;
-                }
-            }
-        }
+
     }
 }
