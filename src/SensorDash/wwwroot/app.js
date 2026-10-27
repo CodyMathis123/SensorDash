@@ -156,12 +156,31 @@ function settingsView(){
  const aliases=Object.entries(cfg.aliases||{}).sort((a,b)=>a[0].localeCompare(b[0]));
  const thresholds=Object.entries(cfg.highThresholds||{});
  const choices=S.sensors.filter(s=>['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type));
+ const types=[...new Set([...S.sensors.map(s=>s.deviceType).filter(Boolean),
+    ...(cfg.excludedHistoryHardwareTypes||[])])].sort((a,b)=>a.localeCompare(b));
  return '<div class="settings-grid">'+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
  ['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']]
  .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="1" max="365" value="'+cfg[key]+'"></div>').join('')+
  '</div><p class="note">The simulation engine evaluates curves at 1 Hz using the newest timestamped samples. Storage can poll independently.</p>')+
+ panel('Collection and history footprint','Decide which hardware to sample and which readings deserve archived history',
+ '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
+ [['balanced','Balanced · temperatures, fans, power and useful load readings'],
+  ['in-use','Only in use · dashboards, cooling systems, tray, curves, alerts and pinned sensors'],
+  ['all','All sensor readings · largest database']].map(([val,text])=>
+   '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
+ '</select></label>'+
+ '<label class="collection-toggle"><input type="checkbox" id="collectNetworkSensors" '+
+  (cfg.collectNetworkSensors!==false?'checked':'')+
+ '> Collect network hardware sensors</label></div>'+
+ '<p class="note">Network polling is a whole-device hardware switch. Turning it off removes network readings until re-enabled and makes dependent dashboards/curves show missing data. Sensor-level visibility is separate.</p>'+
+ '<h3 class="sensor-used-title">Skip SQLite history for hardware categories</h3>'+
+ '<div class="w-history-types">'+types.map(t=>
+  '<label class="collection-toggle"><input type="checkbox" data-history-exclude="'+esc(t)+'" '+
+  ((cfg.excludedHistoryHardwareTypes||[]).includes(t)?'checked':'')+'>'+
+  esc(t)+'</label>').join('')+'</div>'+
+ '<p class="note">Checked categories remain visible and available to live dashboards and simulations, but new database samples are not saved. Existing history is preserved until normal retention cleanup. Explicit history exclusions take priority even over pinned sensors.</p>')+
  panel('Sensor aliases','Rename any physical or virtual sensor',
  aliases.length?aliases.map(([id,name])=>
  '<div class="alias-row"><label title="'+esc(id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
@@ -420,6 +439,9 @@ async function changeThreshold(id,remove=false){
 async function saveSettings(){
  const cfg=structuredClone(S.settings);
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
+ cfg.historyMode=byId('historyMode')?.value||'balanced';
+ cfg.collectNetworkSensors=byId('collectNetworkSensors')?.checked!==false;
+ cfg.excludedHistoryHardwareTypes=[...document.querySelectorAll('[data-history-exclude]:checked')].map(el=>el.dataset.historyExclude);
  cfg.sensorBindings=cfg.sensorBindings||{};
  document.querySelectorAll('[data-sensor-role]').forEach(el=>{
    if(el.value)cfg.sensorBindings[el.dataset.sensorRole]=el.value;
