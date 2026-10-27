@@ -58,6 +58,37 @@ internal static class WorkspaceSelfTest
         WorkspaceLogic.Normalize(cfg);
         if(cfg.TrayWidgets.Count!=6)throw new Exception("Tray widget limit not enforced");
         if(cfg.Dashboards[0].Widgets.Count!=1)throw new Exception("Dashboard configuration lost");
+        // Cooling systems define meaningful component roles, not passive
+        // radiators. Associations must participate in lean history references.
+        cfg.CoolingSystems = [new CoolingSystemConfig {
+            Id = "loop-a", Name = "Primary cooling system", Kind = "liquid",
+            Components = [
+                new CoolingComponentConfig {
+                    Id = "heat", Name = "GPU heat source", Kind = "heat-source",
+                    SensorIds = ["gpu", "gpu-power"] },
+                new CoolingComponentConfig {
+                    Id = "fans", Name = "Fan bank", Kind = "fan-group",
+                    SensorIds = ["fan-rpm", "fan-duty"] },
+                new CoolingComponentConfig {
+                    Id = "probe", Name = "Coolant sensor", Kind = "temperature-probe",
+                    SensorIds = ["coolant-in"] },
+                new CoolingComponentConfig {
+                    Id = "invalid", Name = "Invalid type", Kind = "old-radiator",
+                    SensorIds = [] }
+            ]
+        }];
+        WorkspaceLogic.Normalize(cfg);
+        if (cfg.CoolingSystems[0].Components[1].Kind != "fan-group" ||
+            cfg.CoolingSystems[0].Components[2].Kind != "temperature-probe" ||
+            cfg.CoolingSystems[0].Components[3].Kind != "other")
+            throw new Exception("Cooling component roles were not validated");
+        var referenced = WorkspaceLogic.ReferencedSensorIds(cfg);
+        if (!referenced.Contains("gpu-power") ||
+            !referenced.Contains("fan-rpm") ||
+            !referenced.Contains("coolant-in") ||
+            !referenced.Contains("cpu"))
+            throw new Exception("Cooling system sensor associations were not included in in-use history");
+
         // Hide is presentation-only; it must not change database eligibility.
         cfg.HiddenSensorIds = ["cpu"];
         cfg.HiddenDeviceIds = ["network-adapter"];
