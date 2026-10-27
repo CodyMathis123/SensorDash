@@ -14,7 +14,7 @@ public sealed class CoolingComponentConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Component";
-    public string Kind { get; set; } = "other"; // heat-source, fan-group, pump, temperature-probe, flow-meter, other (+ legacy)
+    public string Kind { get; set; } = "other"; // heat-source, fan-group, pump, temperature-probe, flow-meter, other
     public List<string> SensorIds { get; set; } = [];
 }
 public sealed class WorkspaceDashboardConfig
@@ -92,7 +92,6 @@ public static class WorkspaceLogic
         }
         Include(cfg.PinnedSensors);
         Include(cfg.HighThresholds?.Keys);
-        Include(cfg.SensorBindings?.Values);
         foreach(var dashboard in cfg.Dashboards ?? [])
             foreach(var widget in dashboard.Widgets ?? [])Include(widget.SensorIds);
         foreach(var system in cfg.CoolingSystems ?? [])
@@ -132,8 +131,7 @@ public static class WorkspaceLogic
                 component.Id = Short(component.Id, 80);
                 component.Name = Short(component.Name);
                 component.Kind = component.Kind is "heat-source" or "fan-group" or "pump" or
-                    "temperature-probe" or "flow-meter" or "other" or
-                    "radiator" or "fan" or "sensor" ? component.Kind : "other";
+                    "temperature-probe" or "flow-meter" or "other" ? component.Kind : "other";
                 component.SensorIds = Ids(component.SensorIds);
                 return component;
             }).ToList();
