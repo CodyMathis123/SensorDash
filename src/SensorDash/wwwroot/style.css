@@ -200,3 +200,17 @@
  scroll-margin:130px;
 }
 .w-cooling-configuration[data-cooling-system-id]{scroll-margin:110px}
+
+/* Live fan-control commissioning deliberately stays separate from curve simulation.
+   Controls are explicit, constrained, and require a Windows elevation prompt. */
+.w-live-status{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:14px 0;
+ padding:14px;background:#102b35;border:1px solid #35626b;border-radius:9px;color:#dcf7f5}
+.w-live-status strong{color:#70e0d2;font-size:13px}
+.w-live-status span{font-size:12px;line-height:1.5}
+.w-output-table{width:100%;min-width:650px}
+.w-output-table th,.w-output-table td{padding:11px;text-align:left}
+.w-output-table td small{display:block;color:#8da8b8;overflow-wrap:anywhere;font-size:10px;margin-top:5px}
+.w-fan-ack{display:flex;align-items:flex-start;gap:12px;line-height:1.55;color:#ecdbca;
+ background:#3c3024;border:1px solid #7a6346;border-radius:9px;padding:13px;margin:12px 0}
+.w-fan-ack input[type=checkbox]{appearance:auto;width:19px;height:19px;flex:none;margin-top:2px}
+.w-fan-ack span{font-size:12px}
