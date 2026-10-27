@@ -12,7 +12,7 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
-const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',
+const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
  hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -34,37 +34,106 @@ function chart(ids,unit='',small=false){
 }
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function explorer(){
- const candidates=S.sensors.filter(s=>{
-   const typed=S.filter==='All'||(S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(s.type))||
-      s.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(s.id));
-   return typed;
+ const usage=SDWorkspace.usageIndex(S);
+ const hidden=x=>SDWorkspace.isHidden(S,x);
+ const display=x=>SDWorkspace.displayName(S,x);
+ const key=x=>x.deviceId||x.deviceType+'|'+x.device;
+ const devices=[...new Map(S.sensors.map(x=>[key(x),x])).entries()].sort((a,b)=>a[1].device.localeCompare(b[1].device));
+ const filterChoices=['Key','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
+ const candidates=S.sensors.filter(x=>{
+  const type=S.filter==='All'||S.filter==='In use'||S.filter==='Hidden'||
+   (S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
+   x.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(x.id));
+  const visible=S.filter==='Hidden'?hidden(x):S.filter==='In use'?usage.has(x.id):S.showHidden||!hidden(x);
+  return type&&visible&&(!S.deviceFilter||key(x)===S.deviceFilter);
  });
- candidates.sort((a,b)=>((S.settings?.pinnedSensors?.includes(b.id)?1:0)-(S.settings?.pinnedSensors?.includes(a.id)?1:0))||a.type.localeCompare(b.type)||label(a).localeCompare(label(b)));
- const selected=sensor(S.selected)||candidates[0];
- if(selected)S.selected=selected.id;
- const matches=candidates.filter(s=>(label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase().includes(S.search.toLowerCase())).length;
- return `<section class="panel full">
- <div class="panel-head"><div><h2>Sensor registry</h2><p>${S.sensors.length} sensors available · <span id="matchCount">${matches}</span> matching · click a row to inspect</p></div><span class="pill mute">LIVE VALUES · STATIC LIST</span></div>
- <div class="toolbar"><input id="search" placeholder="Search sensor, ID, device or type…" value="${esc(S.search)}">
-   ${['Key','Temperature','Fan','Control','Power','Load','Pinned','All'].map(v=>`<button class="filter-btn ${S.filter===v?'selected':''}" data-filter="${v}">${v}</button>`).join('')}
- </div>
- <div class="table-container" id="sensorList"><table><thead><tr><th>Sensor / identifier</th><th>Hardware</th><th>Type</th><th>Live</th><th>Pin</th></tr></thead><tbody>
- ${candidates.map(s=>`<tr data-select="${esc(s.id)}" data-search="${esc((label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase())}" ${(label(s)+' '+s.id+' '+s.device+' '+s.type).toLowerCase().includes(S.search.toLowerCase())?'':'hidden'} class="${S.selected===s.id?'chosen':''}">
- <td>${esc(label(s))}<small>${esc(s.id)}</small></td>
- <td>${esc(s.device)}</td><td><span class="tag">${esc(s.type)}</span></td>
- <td data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(typeUnit(s.type))}">${latest(s)}</td>
- <td><button class="pin ${S.settings?.pinnedSensors?.includes(s.id)?'pinned':''}" data-pin="${esc(s.id)}" title="Toggle history pin">★</button></td></tr>`).join('')}
- </tbody></table>${candidates.length?'':'<div class="empty">No sensors in this category.</div>'}</div></section>
- ${selected?`<div class="full">${panel('Selected sensor · '+label(selected),selected.id+' · '+selected.device,
-   `<div class="alias-editor">
-    <div class="field"><label for="sensorAlias">Custom sensor name</label><input id="sensorAlias" maxlength="120" value="${esc(S.settings?.aliases?.[selected.id]||'')}" placeholder="${esc(selected.name)}"></div>
-    <button class="btn" data-save-alias>Save name</button>
-    <button class="btn secondary" data-clear-alias>Use original name</button>
-   </div>
-   <p class="note">This alias applies everywhere this sensor appears. Its stable sensor ID stays unchanged.</p>
-   ${chart([selected],typeUnit(selected.type))}
-   <div class="badge-line"><span class="note">Pin this sensor to keep recording it in history.</span><button class="btn tiny" data-pin="${esc(selected.id)}">${S.settings?.pinnedSensors?.includes(selected.id)?'Unpin sensor':'Pin for history'}</button></div>`)}
- </div>`:''}`;
+ candidates.sort((a,b)=>{
+  if(S.explorerGrouping==='hardware'){
+   const group=(a.deviceType+' '+a.device).localeCompare(b.deviceType+' '+b.device);
+   if(group)return group;
+  }else if(S.explorerGrouping==='type'){
+   const group=a.type.localeCompare(b.type);if(group)return group;
+  }
+  const pinned=Number(S.settings?.pinnedSensors?.includes(b.id))-Number(S.settings?.pinnedSensors?.includes(a.id));
+  return pinned||a.type.localeCompare(b.type)||display(a).localeCompare(display(b));
+ });
+ const chosen=S.byId.get(S.selected)||candidates[0];
+ if(chosen)S.selected=chosen.id;
+ const indexText=x=>(display(x)+' '+x.id+' '+x.device+' '+x.deviceType+' '+x.type+' '+
+   (usage.get(x.id)||[]).map(u=>u.label).join(' ')).toLowerCase();
+ const counts={used:[...usage.keys()].filter(id=>S.byId.has(id)).length,hidden:S.sensors.filter(hidden).length};
+ const matches=candidates.filter(x=>indexText(x).includes(S.search.toLowerCase())).length;
+ const headingGroup=x=>S.explorerGrouping==='hardware'?key(x):S.explorerGrouping==='type'?x.type:'';
+ const groupName=x=>S.explorerGrouping==='hardware'?x.device+' · '+x.deviceType:x.type;
+ let rows='',lastGroup=null;
+ for(const x of candidates){
+  const group=headingGroup(x),searchText=indexText(x),selected=x.id===S.selected;
+  if(S.explorerGrouping!=='none'&&group!==lastGroup){
+   rows+='<tr class="explorer-group" data-explorer-group="'+esc(group)+'"><td colspan="7">'+
+     esc(groupName(x))+'</td></tr>';
+   lastGroup=group;
+  }
+  const references=usage.get(x.id)||[],hide=hidden(x);
+  const pinned=S.settings?.pinnedSensors?.includes(x.id);
+  rows+='<tr class="'+(selected?'chosen ':'')+(hide?'sensor-hidden':'')+'" data-select="'+esc(x.id)+
+   '" data-group-key="'+esc(group)+'" data-search="'+esc(searchText)+'" '+
+   (searchText.includes(S.search.toLowerCase())?'':'hidden')+'>'+
+   '<td>'+esc(display(x))+(hide?' <span class="tag">Hidden</span>':'')+'<small>'+esc(x.id)+'</small></td>'+
+   '<td>'+esc(x.device)+'</td><td><span class="tag">'+esc(x.type)+'</span></td>'+
+   '<td data-live-reading="'+esc(x.id)+'" data-live-format="unit" data-live-unit="'+esc(typeUnit(x.type))+'">'+latest(x)+'</td>'+
+   '<td class="explorer-count">'+(references.length?'<b>'+references.length+'</b>':'—')+'</td>'+
+   '<td><button class="pin '+(pinned?'pinned':'')+'" data-pin="'+esc(x.id)+'" title="Toggle history pin">★</button></td>'+
+   '<td><button class="btn tiny secondary" data-hide-sensor="'+esc(x.id)+'">'+(hide?'Show':'Hide')+'</button></td></tr>';
+ }
+ const tools='<div class="toolbar explorer-toolbar">'+
+  '<input id="search" placeholder="Search sensor, ID, hardware or usage…" value="'+esc(S.search)+'">'+
+  filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'">'+
+    esc(v)+(v==='In use'?' ('+counts.used+')':v==='Hidden'?' ('+counts.hidden+')':'')+'</button>').join('')+
+  '</div><div class="explorer-tools">'+
+  '<label>Hardware<select id="explorerDevice"><option value="">All devices</option>'+
+   devices.map(([k,x])=>'<option value="'+esc(k)+'" '+(S.deviceFilter===k?'selected':'')+'>'+
+    esc(x.device+' · '+x.deviceType)+'</option>').join('')+'</select></label>'+
+  '<label>Group by<select id="explorerGroup">'+
+   [['hardware','Hardware'],['type','Sensor type'],['none','None']].map(([value,text])=>
+    '<option value="'+value+'" '+(S.explorerGrouping===value?'selected':'')+'>'+text+'</option>').join('')+
+  '</select></label>'+
+  '<label class="explorer-check"><input type="checkbox" id="explorerShowHidden" '+(S.showHidden?'checked':'')+
+  '> Include hidden sensors</label></div>';
+ const selected=chosen?(()=>{
+  const uses=usage.get(chosen.id)||[];
+  const deviceId=chosen.deviceId||'';
+  const direct=(S.settings?.hiddenSensorIds||[]).includes(chosen.id);
+  const hideDevice=deviceId&&(S.settings?.hiddenDeviceIds||[]).includes(deviceId);
+  const hideType=(S.settings?.hiddenHardwareTypes||[]).includes(chosen.deviceType);
+  const referenceList=uses.length?'<div class="sensor-use-list">'+uses.map(u=>
+   '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+'">'+
+   esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not referenced by any saved dashboard, cooling component, tray icon, virtual sensor or curve.</p>';
+  return '<div class="full">'+panel('Selected sensor · '+display(chosen),chosen.id+' · '+chosen.device,
+   '<div class="alias-editor">'+
+    '<div class="field"><label for="sensorAlias">Display name</label><input id="sensorAlias" maxlength="120" value="'+
+      esc(S.settings?.aliases?.[chosen.id]||'')+'" placeholder="'+esc(chosen.name)+'"></div>'+
+    '<button class="btn" data-save-alias>Save name</button>'+
+    '<button class="btn secondary" data-clear-alias>Use original name</button></div>'+
+   '<div class="explorer-visibility-actions">'+
+    '<button class="btn secondary" data-hide-sensor="'+esc(chosen.id)+'">'+(direct?'Unhide sensor':'Hide sensor')+'</button>'+
+    (deviceId?'<button class="btn secondary" data-hide-device="'+esc(deviceId)+'">'+(hideDevice?'Show this hardware':'Hide this hardware')+'</button>':'')+
+    '<button class="btn secondary" data-hide-type="'+esc(chosen.deviceType)+'">'+(hideType?'Show all '+chosen.deviceType:'Hide all '+chosen.deviceType)+'</button></div>'+
+   '<p class="note">Visibility changes only the interface and sensor pickers; collection, configured widgets, history and simulations continue. Hidden sensors can be managed in the Hidden filter.</p>'+
+   '<h3 class="sensor-used-title">Used in '+uses.length+' place'+(uses.length===1?'':'s')+'</h3>'+referenceList+
+   chart([chosen],typeUnit(chosen.type))+
+   '<div class="badge-line"><span class="note">Pin keeps this reading in history even if it would otherwise be excluded.</span>'+
+    '<button class="btn tiny" data-pin="'+esc(chosen.id)+'">'+
+     (S.settings?.pinnedSensors?.includes(chosen.id)?'Unpin history':'Pin for history')+'</button></div>')+'</div>';
+ })():'';
+ return '<section class="panel full"><div class="panel-head"><div><h2>Sensor registry</h2>'+
+  '<p>'+S.sensors.length+' discovered · '+counts.used+' in use · '+counts.hidden+
+  ' hidden · <span id="matchCount">'+matches+'</span> matching</p></div>'+
+  '<span class="pill mute">LIVE VALUES · STABLE ROWS</span></div>'+
+  tools+
+  '<div class="table-container" id="sensorList"><table><thead><tr><th>Sensor / ID</th><th>Hardware</th>'+
+  '<th>Type</th><th>Live</th><th>Used</th><th>Pin</th><th>Visibility</th></tr></thead><tbody>'+
+  rows+'</tbody></table>'+(candidates.length?'':'<div class="empty">No matching sensors. Try All, Hidden or reset the hardware filter.</div>')+'</div></section>'+
+  selected;
 }
 
 function events(){
@@ -318,6 +387,17 @@ async function loadSimulation(){
  try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
  catch(e){console.warn('Simulation preview:',e.message);}
 }
+async function changeVisibility(field,value){
+ if(!value||!S.settings)return;
+ const draft=structuredClone(S.settings);
+ draft[field]=draft[field]||[];
+ const has=draft[field].includes(value);
+ draft[field]=has?draft[field].filter(s=>s!==value):[...draft[field],value];
+ try{
+  S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});
+  render();toast((has?'Showing':'Hiding')+' '+value);
+ }catch(e){toast('Cannot update visibility: '+e.message)}
+}
 async function changeThreshold(id,remove=false){
  if(!id)return;
  const cfg=structuredClone(S.settings);cfg.highThresholds=cfg.highThresholds||{};
@@ -355,6 +435,17 @@ let toastTimer;function toast(message){const el=byId('toast');el.textContent=mes
 document.addEventListener('click',e=>{
  const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});render();return}
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
+ const usages=e.target.closest('[data-usage-target]');if(usages){
+   const target=usages.dataset.usageTarget;if(target==='dashboards'&&usages.dataset.usageDashboard)
+     S.workspaceDashboardId=usages.dataset.usageDashboard;
+   S.view=target;history.replaceState(null,'','#'+target);S.historyKey='';render();return;
+ }
+ const hSensor=e.target.closest('[data-hide-sensor]');
+ if(hSensor){e.stopPropagation();changeVisibility('hiddenSensorIds',hSensor.dataset.hideSensor);return;}
+ const hDevice=e.target.closest('[data-hide-device]');
+ if(hDevice){e.stopPropagation();changeVisibility('hiddenDeviceIds',hDevice.dataset.hideDevice);return;}
+ const hType=e.target.closest('[data-hide-type]');
+ if(hType){e.stopPropagation();changeVisibility('hiddenHardwareTypes',hType.dataset.hideType);return;}
  const f=e.target.closest('[data-filter]');if(f){S.filter=f.dataset.filter;render();return}
  const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
  const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
@@ -373,8 +464,18 @@ document.addEventListener('input',e=>{
   document.querySelectorAll('#sensorList tr[data-select]').forEach(row=>{
    const visible=row.dataset.search.includes(query);row.hidden=!visible;if(visible)shown++;
   });
+  document.querySelectorAll('#sensorList tr[data-explorer-group]').forEach(header=>{
+    const key=header.dataset.explorerGroup;
+    header.hidden=![...document.querySelectorAll('#sensorList tr[data-select]')].some(row=>
+      !row.hidden&&row.dataset.groupKey===key);
+  });
   if(byId('matchCount'))byId('matchCount').textContent=shown;
  }
+});
+document.addEventListener('change',e=>{
+ if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
+ if(e.target.id==='explorerGroup'){S.explorerGrouping=e.target.value;render()}
+ if(e.target.id==='explorerShowHidden'){S.showHidden=e.target.checked;render()}
 });
 byId('range').addEventListener('change',e=>{S.hours=Number(e.target.value);S.historyKey='';render()});
 byId('refresh').addEventListener('click',()=>{S.historyKey='';loadEvents();render();toast('Refreshing sensor history')});
