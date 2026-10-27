@@ -64,3 +64,7 @@
 .w-sim-preview strong{font-size:20px;font-variant-numeric:tabular-nums;color:var(--cyan)}
 @media(max-width:1100px){.w-widget-grid{grid-template-columns:1fr}.w-tray-row{grid-template-columns:1fr 2fr 2fr;align-items:center}.w-tray-row .btn{width:fit-content}}
 @media(max-width:700px){.w-grid{grid-template-columns:1fr}.w-tray-row{display:flex;flex-wrap:wrap}.w-tray-row>select{min-width:200px;flex:1}.w-sim-preview{grid-template-columns:1fr}.w-actions label{min-width:100%;flex:1}}
+
+.w-chip b{font-weight:700;color:#fbfcff;white-space:nowrap;margin-left:5px;font-variant-numeric:tabular-nums}
+.w-curve-plot{display:block;width:100%;max-width:740px;min-height:180px;margin:10px 0 18px;
+ background:#0e1b29;border:1px solid #2a4051;border-radius:10px;padding:10px}
