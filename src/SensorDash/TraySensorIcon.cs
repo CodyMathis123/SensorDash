@@ -78,8 +78,14 @@ internal static class TraySensorIcon
                 : (number / 1000).ToString("0.#", CultureInfo.InvariantCulture);
             return shortValue + "k";
         }
-        if (value.Length <= 3) return value;
-        if (Math.Abs(number) >= 10) return Math.Round(number, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+        if (value.Length <= 3 || (size >= 24 && value.Length <= 4)) return value;
+        if (Math.Abs(number) >= 10)
+        {
+            var whole = Math.Round(number, MidpointRounding.AwayFromZero);
+            if (Math.Abs(whole) >= 1000)
+                return (whole / 1000).ToString("0", CultureInfo.InvariantCulture) + "k";
+            return whole.ToString("0", CultureInfo.InvariantCulture);
+        }
         // Single-digit readings can accommodate a decimal point.
         if (Math.Abs(number) < 10) return number.ToString("0.#", CultureInfo.InvariantCulture);
         return value;
