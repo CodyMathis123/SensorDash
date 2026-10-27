@@ -125,6 +125,41 @@ jobs:
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+
+            # Save real workspace configurations across the UI -> named pipe -> service.
+            $settings.dashboards = @(@{
+              id='ci-dashboard'; name='CI Workspace';
+              widgets=@(@{id='ci-widget';title='CPU history';kind='chart';sensorIds=@('/ci/temperature')})
+            })
+            $settings.coolingSystems = @(@{
+              id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
+                @{id='ci-comp';name='Radiator fans';kind='fan';sensorIds=@('/ci/fan')}
+              )
+            })
+            $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
+            $settings.virtualSensors = @(@{id='virtual:ci-max';name='CI Max';operation='max';sensorIds=@('/ci/temperature')})
+            $settings.simulatedFanCurves = @(@{
+              id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
+              outputSensorId='';maxSampleAgeSeconds=30;
+              points=@(@{temperature=30;percent=25},@{temperature=75;percent=100})
+            })
+            $body = ConvertTo-Json $settings -Depth 30 -Compress
+            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
+              throw 'Generic workspace settings did not round-trip through named pipe'
+            }
+            $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if ($persisted.dashboards[0].widgets[0].kind -ne 'chart' -or $persisted.simulatedFanCurves[0].id -ne 'ci-curve') {
+              throw 'Collector did not persist workspace and simulated curve configuration'
+            }
+            Start-Sleep -Seconds 2
+            $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+            $curve = @($preview.results | Where-Object { $_.id -eq 'ci-curve' })
+            if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
+              throw 'Missing-input simulated curve must produce no hardware target'
+            }
+            Write-Host 'Verified configurable cooling systems, dashboards, tray icons, virtual sensors and simulated curves'
+
             Write-Host 'Verified desktop + collector named pipe + browser shell'
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
