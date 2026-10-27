@@ -21,12 +21,21 @@ public sealed class FanControlRuntime
     private IReadOnlyList<FanOutputInfo> _outputs = [];
     private Pending? _pending;
     private Session? _session;
+    private bool _firstWritePending;
     private FanControlStatus _status = new("off", "", "", "", null, null,
         "Firmware/default fan control is in charge.");
 
     private sealed record Pending(FanCommand Command, SimulatedFanCurveConfig? AuthorizedCurve);
     private sealed record Session(string ChannelId, string CurveId, string Mode,
         double ManualDuty, DateTimeOffset Expires, SimulatedFanCurveConfig? AuthorizedCurve);
+    internal static bool SupportsTestRange(float minimum, float maximum) =>
+        float.IsFinite(minimum) && float.IsFinite(maximum) && minimum <= maximum &&
+        Math.Max((double)minimum, MinExperimentalDuty) <= Math.Min((double)maximum, 100);
+
+    internal static bool CanApplyManualDuty(float minimum, float maximum, double percent) =>
+        SupportsTestRange(minimum, maximum) && double.IsFinite(percent) &&
+        percent >= Math.Max((double)minimum, MinExperimentalDuty) &&
+        percent <= Math.Min((double)maximum, 100);
 
     public bool IsActive
     {
@@ -63,8 +72,13 @@ public sealed class FanControlRuntime
                 command.DurationSeconds is < 15 or > MaxSessionSeconds ||
                 !double.IsFinite(command.Percent))
                 return new { accepted = false, message = "Invalid channel, duration or duty." };
-            if (!_outputs.Any(o => o.Id == command.ChannelId && o.Writable))
+            var selected = _outputs.FirstOrDefault(o => o.Id == command.ChannelId);
+            if (selected == null || !selected.Writable)
                 return new { accepted = false, message = "Selected channel is not a supported writable output." };
+            if (command.CurveId.Length == 0 &&
+                !CanApplyManualDuty(selected.Minimum, selected.Maximum, command.Percent))
+                return new { accepted = false,
+                    message = $"Requested duty {command.Percent:0.#}% is outside this channel's supported test range ({Math.Max(selected.Minimum,MinExperimentalDuty):0.#}–{Math.Min(selected.Maximum,100):0.#}%)." };
             var approved = command.CurveId.Length > 0
                 ? settings.SimulatedFanCurves.FirstOrDefault(c => c.Id == command.CurveId) : null;
             if (command.CurveId.Length > 0 && approved == null)
@@ -118,7 +132,7 @@ public sealed class FanControlRuntime
                 listing.Add(new FanOutputInfo(sensor.Identifier.ToString(), sensor.Name,
                     hardware.Name, hardware.Identifier.ToString(), c.MinSoftwareValue,
                     c.MaxSoftwareValue, c.ControlMode.ToString(),
-                    c.MinSoftwareValue <= MinExperimentalDuty && c.MaxSoftwareValue >= 100));
+                    SupportsTestRange(c.MinSoftwareValue, c.MaxSoftwareValue)));
             }
             foreach (var child in hardware.SubHardware) Visit(child);
         }
@@ -134,23 +148,34 @@ public sealed class FanControlRuntime
         {
             var request = pending.Command;
             if (request.Action == "release")
-                Release(controls, "Released by user.");
+                Release(controls, "Released by user; firmware-default restoration requested.");
             else if (_session != null)
                 Set(new("refused", request.ChannelId, "", "", null, null, "Another session is active."));
-            else if (!controls.TryGetValue(request.ChannelId, out var control) ||
-                     control.ControlMode != ControlMode.Default ||
-                     control.MinSoftwareValue > MinExperimentalDuty || control.MaxSoftwareValue < 100)
+            else if (!controls.TryGetValue(request.ChannelId, out var control))
                 Set(new("refused", request.ChannelId, "", "", null, null,
-                    "Channel must support 70–100% duty and currently be in firmware-default mode."));
+                    "Writable output is no longer available."));
+            else if (!SupportsTestRange(control.MinSoftwareValue, control.MaxSoftwareValue))
+                Set(new("refused", request.ChannelId, "", "", null, null,
+                    $"This output supports {control.MinSoftwareValue:0.#}–{control.MaxSoftwareValue:0.#}% PWM, which does not overlap the safe 70–100% test range."));
+            else if (request.CurveId.Length == 0 &&
+                     !CanApplyManualDuty(control.MinSoftwareValue, control.MaxSoftwareValue, request.Percent))
+                Set(new("refused", request.ChannelId, "", "", null, null,
+                    $"Requested {request.Percent:0.#}% is outside the available {Math.Max(control.MinSoftwareValue,MinExperimentalDuty):0.#}–{Math.Min(control.MaxSoftwareValue,100):0.#}% test range."));
             else
+            {
+                // Undefined is LibreHardwareMonitor's normal initial mode, not
+                // an indication that a control is unavailable. Software is
+                // also a local LHM state, not evidence another app still owns it.
                 _session = new Session(request.ChannelId, request.CurveId,
                     request.CurveId.Length > 0 ? "curve" : "manual",
                     request.Percent, now.AddSeconds(request.DurationSeconds), pending.AuthorizedCurve);
+                _firstWritePending = true;
+            }
         }
         if (_session is not { } session) return;
         if (now >= session.Expires)
         {
-            Release(controls, "Session expired; restored firmware-default control.");
+            Release(controls, "Session expired; firmware-default restoration requested.");
             return;
         }
         if (!controls.TryGetValue(session.ChannelId, out var selected))
@@ -179,13 +204,22 @@ public sealed class FanControlRuntime
             }
             duty = target;
         }
-        duty = Math.Clamp(duty, MinExperimentalDuty, 100);
+        // Preserve hardware-specific supported PWM bounds, while retaining a
+        // conservative commissioning floor for this short test.
+        duty = Math.Clamp(duty, Math.Max(MinExperimentalDuty, selected.MinSoftwareValue),
+            Math.Min(100, selected.MaxSoftwareValue));
         try
         {
-            // Only write when necessary. Never write to RPM-only sensors.
-            if (selected.ControlMode != ControlMode.Software ||
+            // An old LHM Software mode/value can be left in local settings.
+            // Its setter is a no-op if the new value equals the cached value,
+            // so force a fresh control-mode transition on first takeover.
+            // This is deliberately confined to the explicitly authorized output.
+            if (_firstWritePending && selected.ControlMode == ControlMode.Software)
+                selected.SetDefault();
+            if (_firstWritePending || selected.ControlMode != ControlMode.Software ||
                 Math.Abs(selected.SoftwareValue - duty) >= 0.5)
                 selected.SetSoftware((float)duty);
+            _firstWritePending = false;
             Set(new("active", session.ChannelId, session.CurveId, session.Mode,
                 duty, session.Expires, "Timed experimental control; release to restore default."));
         }
@@ -208,6 +242,7 @@ public sealed class FanControlRuntime
     {
         var session = _session;
         _session = null;
+        _firstWritePending = false;
         if (session == null)
         {
             Set(new("off", "", "", "", null, null, "No SensorDash control session active."));
