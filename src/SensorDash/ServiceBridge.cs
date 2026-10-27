@@ -1,3 +1,5 @@
+using System.Windows.Forms;
+using System.Drawing;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
