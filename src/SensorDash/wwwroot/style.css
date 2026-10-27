@@ -191,3 +191,12 @@
 .w-cooling-configuration .w-component>.note{margin:7px 0 11px;line-height:1.5}
 @media(max-width:1050px){.w-cooling-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.w-cooling-charts{grid-template-columns:1fr}}
 @media(max-width:570px){.w-cooling-summary{grid-template-columns:1fr 1fr;gap:8px}.w-cooling-stat{padding:10px}.w-cooling-stat>strong{font-size:18px}}
+
+/* Exact Sensor Explorer → Cooling System reference destination. */
+.w-component.w-referenced-component{
+ border-color:#62d5ce;
+ background:#1c3a44;
+ box-shadow:inset 3px 0 #62d5ce,0 0 0 1px #62d5ce55;
+ scroll-margin:130px;
+}
+.w-cooling-configuration[data-cooling-system-id]{scroll-margin:110px}
