@@ -66,6 +66,7 @@ IResult Resource(string name, string mediaType)
 app.MapGet("/", () => Resource("index.html", "text/html; charset=utf-8"));
 app.MapGet("/index.html", () => Resource("index.html", "text/html; charset=utf-8"));
 app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8"));
+app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
