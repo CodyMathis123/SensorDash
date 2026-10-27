@@ -33,7 +33,12 @@ jobs:
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath (Resolve-Path "dist/SensorDash.exe") -ArgumentList '--no-browser' -PassThru
+          # Prove that the executable serves its UI with NO external webroot,
+          # and with a completely unrelated working directory.
+          $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
+          New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
+          Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
           try {
             $ready = $false
             for ($i = 0; $i -lt 40; $i++) {
@@ -46,6 +51,10 @@ jobs:
             if (!$ready) { throw 'SensorDash did not open its local API' }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
             if ($page.Content -notmatch 'Hardware telemetry') { throw 'Missing dashboard HTML' }
+            $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
+            if ($script.Content -notmatch 'function overview') { throw 'Missing embedded dashboard JS' }
+            $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
+            if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             Write-Host 'Verified localhost API and browser shell'
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
