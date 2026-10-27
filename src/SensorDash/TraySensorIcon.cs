@@ -1,32 +1,59 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
-// Small numerical badge, allocated only when the displayed reading changes.
-// Each tray widget has its own NotifyIcon, enabling Windows native overflow
-// and taskbar placement preferences.
+// Draw at the native notification-area pixel size rather than rendering a
+// decorative 64px image and asking Windows to shrink it down to ~16px.
+// At that size, a ring and large padding leave almost no space for numbers.
 internal static class TraySensorIcon
 {
-    public static Icon Create(string value, string hexColor)
+    public static Icon Create(string fullValue, string hexColor)
     {
         if (!ColorTranslator.TryFromHtmlCompat(hexColor, out var accent))
             accent = Color.FromArgb(98, 213, 206);
-        using var bitmap = new Bitmap(64, 64, PixelFormat.Format32bppArgb);
+
+        var size = NativeIconSize();
+        var displayed = Compact(fullValue, size);
+        using var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bitmap))
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             g.Clear(Color.Transparent);
-            using var bg = new SolidBrush(Color.FromArgb(17, 34, 49));
-            using var border = new Pen(accent, 3.2f);
-            using var fg = new SolidBrush(Color.FromArgb(242, 255, 255));
-            g.FillRoundedRectangleCompat(bg, new RectangleF(2, 4, 60, 56), 11);
-            g.DrawRoundedRectangleCompat(border, new RectangleF(3.5f, 5.5f, 57, 53), 10);
-            var fontSize = value.Length >= 5 ? 18f : value.Length >= 4 ? 23f : 30f;
-            using var font = new Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
-            using var format = new StringFormat { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center };
-            g.DrawString(value, font, fg, new RectangleF(4, 5, 56, 54), format);
+            g.SmoothingMode = SmoothingMode.None;
+            g.TextRenderingHint = size <= 20
+                ? TextRenderingHint.SingleBitPerPixelGridFit
+                : TextRenderingHint.AntiAliasGridFit;
+
+            // Use all available pixels for the value. The accent is a narrow
+            // bottom stripe, not a thick border competing with the digits.
+            using var background = new SolidBrush(Color.FromArgb(14, 28, 40));
+            using var foreground = new SolidBrush(Color.White);
+            using var underline = new SolidBrush(accent);
+            g.FillRectangle(background, 0, 0, size, size);
+            var stripeHeight = size <= 20 ? 2 : 3;
+            g.FillRectangle(underline, 0, size - stripeHeight, size, stripeHeight);
+
+            using var format = new StringFormat(StringFormat.GenericTypographic)
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap
+            };
+            var availableHeight = size - stripeHeight;
+            var bestSize = Math.Min(size * .87f, size - 2f);
+            // Measure for the *native* raster: a two-digit temperature stays
+            // roughly 12px tall at the common 16px taskbar icon resolution.
+            using var family = new FontFamily("Arial");
+            for (; bestSize >= 6; bestSize -= .5f)
+            {
+                using var probe = new Font(family, bestSize, FontStyle.Bold, GraphicsUnit.Pixel);
+                var measured = g.MeasureString(displayed, probe, 1000, format);
+                if (measured.Width <= size - 1 && measured.Height <= availableHeight) break;
+            }
+            using var font = new Font(family, Math.Max(6, bestSize), FontStyle.Bold, GraphicsUnit.Pixel);
+            g.DrawString(displayed, font, foreground, new RectangleF(0, -1, size, availableHeight + 1), format);
         }
         var handle = bitmap.GetHicon();
         try
@@ -37,42 +64,44 @@ internal static class TraySensorIcon
         finally { DestroyIcon(handle); }
     }
 
-    [DllImport("user32.dll", SetLastError=true)]
+    // The exact precision is always kept in the Windows hover tooltip.
+    // Four or five digits cannot be deciphered at 16px; simplify only the
+    // tray graphic (e.g. 24.0 -> 24, 1340 -> 1.3k or 1k at 100% DPI).
+    internal static string Compact(string value, int size)
+    {
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+            || !double.IsFinite(number)) return "--";
+        if (Math.Abs(number) >= 1000)
+        {
+            var shortValue = size <= 20
+                ? Math.Round(number / 1000, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture)
+                : (number / 1000).ToString("0.#", CultureInfo.InvariantCulture);
+            return shortValue + "k";
+        }
+        if (value.Length <= 3) return value;
+        if (Math.Abs(number) >= 10) return Math.Round(number, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+        // Single-digit readings can accommodate a decimal point.
+        if (Math.Abs(number) < 10) return number.ToString("0.#", CultureInfo.InvariantCulture);
+        return value;
+    }
+
+    private static int NativeIconSize()
+    {
+        try
+        {
+            // At 100%, 125%, 150%, 200% Windows typically renders 16, 20,
+            // 24, 32 physical pixels respectively.
+            var dpi = GetDpiForSystem();
+            return Math.Clamp((int)Math.Round(16.0 * dpi / 96), 16, 48);
+        }
+        catch (EntryPointNotFoundException) { return 16; }
+        catch (DllNotFoundException) { return 16; }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForSystem();
+
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr handle);
-
-    // Keep our own helper rather than depend on a Windows Forms extension.
-    private static GraphicsPath Round(RectangleF rect, float radius)
-    {
-        var d=radius*2;
-        var path = new GraphicsPath();
-        path.AddArc(rect.Left,rect.Top,d,d,180,90);
-        path.AddArc(rect.Right-d,rect.Top,d,d,270,90);
-        path.AddArc(rect.Right-d,rect.Bottom-d,d,d,0,90);
-        path.AddArc(rect.Left,rect.Bottom-d,d,d,90,90);
-        path.CloseFigure();
-        return path;
-    }
-    private static void FillRoundedRectangleCompat(this Graphics g, Brush brush, RectangleF r, float radius)
-    {
-        using var path=Round(r,radius);
-        g.FillPath(brush,path);
-    }
-    private static void DrawRoundedRectangleCompat(this Graphics g, Pen pen, RectangleF r, float radius)
-    {
-        using var path=Round(r,radius);
-        g.DrawPath(pen,path);
-    }
-}
-internal static class ColorTranslator
-{
-    public static bool TryFromHtmlCompat(string? hex, out Color result)
-    {
-        result = Color.FromArgb(98,213,206);
-        if (string.IsNullOrEmpty(hex)||hex.Length!=7||hex[0]!='#')return false;
-        if (!int.TryParse(hex[1..], System.Globalization.NumberStyles.HexNumber,
-            System.Globalization.CultureInfo.InvariantCulture,out var raw))return false;
-        result=Color.FromArgb((raw>>16)&255,(raw>>8)&255,raw&255);
-        return true;
-    }
 }
