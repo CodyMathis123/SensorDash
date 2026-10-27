@@ -1,3 +1,24 @@
+# SensorDash v0.4.0 — Generic hardware collection, sensor visibility and editor improvements
+
+Hardware collection is now **generic**, not networking-specific. Settings → Collection and history footprint exposes **all eight collection families** supported by LibreHardwareMonitor's Computer API: Processors, Graphics adapters, Motherboard/Super I/O, Memory, Storage, Network, Auxiliary Controllers and Power Monitors. All families are enabled by default, preserving existing behavior.
+
+You can also pause individual discovered devices. The collector skips `IHardware.Update()` for a paused device/subtree and returns unavailable/null values for those sensors, while retaining their identity for configuration. Shared parent hardware operations may still read information from child devices; true hardware-register-level granularity is backend dependent. Disabling a **family** reopens the LibreHardwareMonitor Computer with that family switched off, which can reduce initialization, enumeration and polling overhead. Its devices will disappear from live discovery until re-enabled.
+
+These actions remain separate:
+- **Hide:** Presentation only. Explorer retains search/management of hidden sensors; existing alarms, dashboards and simulations still receive data.
+- **Pause device / disable family:** Actual hardware-collection changes. Dependent readings are unavailable, so any simulated curve using them also becomes unavailable.
+- **History policy:** Balanced (original behavior), In-use-only (dashboard/cooling/tray/virtual/curve/alert/pinned references), or All. A separate hardware-type exclusion prevents new SQLite samples for selected categories without disabling live polling. Existing SQLite records remain until normal retention expiry.
+
+Sensor Explorer now groups rows by hardware or sensor type, allows device filtering, has **In use** and **Hidden** quick filters, counts references, and links to all dashboards, cooling components, tray icons, virtual sensors and curves that reference a reading. Hide by sensor, device or sensor type. Auto-generated Overview cards prefer descriptive physical sensor labels, keeping real but vague names like `Temperature #1` available in Explorer. Dashboards have a persisted **Lock layout** toggle that switches the view to read-only widget mode (UI-only, not access control).
+
+Also includes the previous unreleased v0.3.1 editor fixes: non-overlapping Precision/Color fields in tray settings, sharper high-contrast numerical tray icons, and an editable two-column fan-curve points table (numeric temperature/percentage steppers, auto-added blank row, validation and inline preview).
+
+**Safety:** Fan curves are still simulation-only. SensorDash does not write fan or pump controls. If you disable hardware that supplies a simulated curve, its target becomes unavailable rather than falling back to an unsafe hardware output.
+
+**Build:** the expensive Windows/MSI workflow is triggered only for a push/merge to `Production` or an explicit workflow dispatch. Feature-branch commits intentionally do not build an MSI automatically. Run `dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist`, `dist/SensorDash.exe --self-test`, then `dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64` for local validation.
+
+---
+
 # SensorDash 0.3.0 — Configurable hardware workspaces (simulation-only controls)
 
 This version begins the transition from a fixed PC-specific monitoring dashboard
