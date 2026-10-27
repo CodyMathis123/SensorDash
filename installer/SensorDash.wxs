@@ -43,7 +43,7 @@
       </Directory>
     </StandardDirectory>
 
-    <Feature Id="Complete" Title="SensorDash" Level="1" Absent="disallow">
+    <Feature Id="Complete" Title="SensorDash" Level="1">
       <ComponentRef Id="SensorDashExecutable" />
       <ComponentRef Id="TrayAutoStart" />
       <ComponentRef Id="ShortcutComponent" />
