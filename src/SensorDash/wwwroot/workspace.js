@@ -373,10 +373,16 @@ const SDWorkspace = (() => {
        const row=el.closest('[data-curve-point-row]');
        const table=el.closest('[data-curve-table]');
        row?.remove();
-       if(table && !table.querySelector('tbody tr:last-child [data-curve-temperature]:placeholder-shown')){
-         table.querySelector('tbody')?.insertAdjacentHTML('beforeend',curvePointRow());
+       if(table){
+         const last=table.querySelector('tbody tr:last-child');
+         const temperature=last?.querySelector('[data-curve-temperature]')?.value.trim();
+         const percent=last?.querySelector('[data-curve-percentage]')?.value.trim();
+         // Always offer one empty row, even after deleting the previous blank.
+         if(!last || temperature || percent){
+           table.querySelector('tbody')?.insertAdjacentHTML('beforeend',curvePointRow());
+         }
+         updateCurvePreview(table,S);
        }
-       if(table)updateCurvePreview(table,S);
        return true;
      }
      // Preserve unsaved editor inputs when pressing Add/Remove.
