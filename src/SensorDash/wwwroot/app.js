@@ -3,7 +3,7 @@ const titles={
  overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
  dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
  cooling:['COOLING','Cooling systems','Model any number of air, liquid or custom cooling systems'],
- curves:['SIMULATION','Fan curves','Calculate fan targets without writing hardware outputs'],
+ curves:['CONTROL','Fan curves & hardware','Design curves, inspect writable channels and authorize short live tests'],
  virtual:['DERIVED','Virtual sensors','Define maximum, minimum, average and difference sensors'],
  tray:['NOTIFICATION AREA','Tray readouts','Configure up to six simultaneous Windows tray sensor icons'],
  storage:['HARDWARE','Storage sensors','SSD and drive telemetry in the unified sensor catalog'],
@@ -13,7 +13,7 @@ const titles={
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -272,6 +272,7 @@ function updateLiveValues(){
  });
  SDWorkspace.paintSimulation(S);
  SDWorkspace.paintCooling(S);
+ SDWorkspace.paintFanControl(S);
 }
 // Graph history draws at most once every 8 seconds. While a graph is being
 // inspected/dragged, freeze its base paint so the hover remains uninterrupted.
@@ -451,6 +452,18 @@ async function loadSimulation(){
  try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
  catch(e){console.warn('Simulation preview:',e.message);}
 }
+async function loadFanControl(){
+ if(S.view!=='curves')return;
+ try{
+  const data=await fetchJSON('/api/fan-control');
+  const signature=JSON.stringify((data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]));
+  const changed=signature!==S.fanOutputSignature;
+  S.fanControl=data;
+  S.fanOutputSignature=signature;
+  if(changed&&S.view==='curves')render();
+  else SDWorkspace.paintFanControl(S);
+ }catch(e){console.warn('Live fan channel inventory:',e.message);}
+}
 async function changeVisibility(field,value){
  if(!value||!S.settings)return;
  const draft=structuredClone(S.settings);
@@ -509,7 +522,9 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
- const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});render();return}
+ const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
+ if(S.view==='curves'){loadSimulation();loadFanControl();}
+ render();return}
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){
    const target=usages.dataset.usageTarget;
@@ -592,12 +607,13 @@ async function bootstrap(){
      fetchJSON('/api/settings'),fetchJSON('/api/live'),fetchJSON('/api/collection-groups')
    ]);
    S.collectionGroups=groups;
-   S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();
+   S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
    setInterval(loadEvents,30000);
    setInterval(loadSimulation,2000);
+   setInterval(loadFanControl,2000);
    setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
