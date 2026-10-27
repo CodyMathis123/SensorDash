@@ -21,6 +21,29 @@ if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+// An explicit UAC-elevated helper sends exactly one privileged fan-control
+// command to an administrator-only pipe, then exits. There is deliberately no
+// unprivileged fan-control operation on the telemetry pipe.
+if (args.Contains("--fan-admin-command", StringComparer.OrdinalIgnoreCase))
+{
+    try
+    {
+        var at=Array.FindIndex(args,a=>a.Equals("--fan-admin-command",StringComparison.OrdinalIgnoreCase));
+        if(at<0||at+1>=args.Length)throw new ArgumentException("Missing command payload.");
+        var decoded=Convert.FromBase64String(args[at+1]);
+        if(decoded.Length>4096)throw new ArgumentException("Command too large.");
+        var command=JsonSerializer.Deserialize<FanCommand>(decoded, JsonSerializerOptions.Web);
+        await AdminFanControlClient.SendAsync(command ?? throw new ArgumentException("Invalid command."));
+    }
+    catch(Exception ex)
+    {
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(),"SensorDash-Fan-Admin.log"),
+            DateTimeOffset.UtcNow+" "+ex.GetType().Name+": "+ex.Message+Environment.NewLine); }catch{}
+        Environment.ExitCode=1;
+    }
+    return;
+}
+
 // Same signed executable, two separate Windows processes.
 // Windows Service (--collector) owns elevated sensor hardware access and the database.
 // Desktop (default) owns the tray icon + loopback web server, never opens the hardware.
@@ -35,9 +58,11 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
             services.AddSingleton(new DashboardState(data));
             services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
             services.AddSingleton<SimulationState>();
+            services.AddSingleton<FanControlRuntime>();
             services.AddHostedService<SensorWorker>();
             services.AddHostedService<SimulationWorker>();
             services.AddHostedService<CollectorPipeServer>();
+            services.AddHostedService<AdminFanControlPipeServer>();
         }).Build();
     await service.RunAsync();
     return;
@@ -120,6 +145,48 @@ app.MapGet("/api/events", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("events"), ct));
 app.MapGet("/api/simulation", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("simulation"), ct));
+app.MapGet("/api/fan-control", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("fanOutputs"), ct));
+app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
+{
+    // Browser mutations require same-origin JSON with a non-simple custom
+    // header. Cross-origin pages cannot satisfy this through ordinary forms.
+    if(context.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
+       context.Request.Headers["X-SensorDash-Action"].ToString() != "fan-control" ||
+       context.Request.ContentType is not string mime ||
+       !mime.StartsWith("application/json",StringComparison.OrdinalIgnoreCase))
+        return Results.StatusCode(403);
+    FanCommand? command;
+    try
+    {
+        command=await JsonSerializer.DeserializeAsync<FanCommand>(
+            context.Request.Body,JsonSerializerOptions.Web,context.RequestAborted);
+    }
+    catch(JsonException){return Results.BadRequest("Invalid control request.");}
+    if(command is null || command.Action is not ("arm" or "release") ||
+       command.ChannelId.Length>256 || command.CurveId.Length>80 ||
+       command.DurationSeconds is < 15 or > FanControlRuntime.MaxSessionSeconds ||
+       !double.IsFinite(command.Percent) ||
+       (command.Action=="arm" && (!command.ConfirmExclusiveOwnership ||
+         (command.CurveId.Length==0 && command.Percent < FanControlRuntime.MinExperimentalDuty))))
+        return Results.BadRequest("Invalid or unconfirmed control request.");
+    try
+    {
+        var process=new ProcessStartInfo(Environment.ProcessPath ??
+            throw new InvalidOperationException("Cannot locate SensorDash executable"))
+        {
+            UseShellExecute=true,Verb="runas"
+        };
+        process.ArgumentList.Add("--fan-admin-command");
+        process.ArgumentList.Add(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(command,JsonSerializerOptions.Web)));
+        Process.Start(process);
+        return Results.Accepted(value:new { message="Windows elevation requested. Check live status for the actual result." });
+    }
+    catch(System.ComponentModel.Win32Exception)
+    {
+        return Results.Problem("Elevation was cancelled or unavailable.",statusCode:403);
+    }
+});
 async Task<IResult> ProxyAsync(PipeCommand request, CancellationToken ct)
 {
     try { return Results.Json(await CollectorClient.AskAsync(request, ct), JsonSerializerOptions.Web); }
@@ -356,7 +423,7 @@ public sealed class HistoryStore {
         cmd.Parameters.AddWithValue("$before", before); cmd.ExecuteNonQuery();
     }
 }
-public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<SensorWorker> logger) : BackgroundService {
+public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls, ILogger<SensorWorker> logger) : BackgroundService {
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
     private string? _activeCollectionSignature;
@@ -372,6 +439,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
                     // LHM's Computer family flags are applied during discovery.
                     // Reopen only when those flags change, not when users toggle
                     // a sensor's visibility, history or a specific device's polls.
+                    controls.ReleaseBeforeClose(_computer,"Collection changed; restored defaults.");
                     try { _computer.Close(); } catch { }
                     _computer = null;
                 }
@@ -392,6 +460,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
                 var baseFrame = new SensorFrame(now, readings, null, devices);
                 readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
                 var frame = new SensorFrame(now, readings, null, devices);
+                controls.Tick(_computer, frame, cfg, now);
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
                     db.Record(frame, cfg);
@@ -403,15 +472,18 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
                 }
             } catch (Exception ex) {
                 logger.LogError(ex, "Sensor collection failed");
+                controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");
                 try { File.AppendAllText(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash", "SensorDash.log"), $"{DateTimeOffset.Now}: {ex}\n"); } catch { }
                 state.Publish(new SensorFrame(DateTimeOffset.UtcNow, [], ex.GetType().Name + ": " + ex.Message));
                 try { _computer?.Close(); } catch { }
                 _computer = null;
                 try { await Task.Delay(TimeSpan.FromSeconds(8), stoppingToken); } catch (OperationCanceledException) { }
             }
-            try { await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(cfg.FastPollSeconds, 1, 30)), stoppingToken); }
+            try { await Task.Delay(TimeSpan.FromSeconds(controls.IsActive
+                ? 1 : Math.Clamp(cfg.FastPollSeconds, 1, 30)), stoppingToken); }
             catch (OperationCanceledException) { break; }
         }
+        controls.ReleaseBeforeClose(_computer,"Collector stopped; restore firmware.");
         try { _computer?.Close(); } catch { }
     }
     private static void Scan(IHardware hardware, List<SensorReading> target, List<HardwareDevice> devices,
