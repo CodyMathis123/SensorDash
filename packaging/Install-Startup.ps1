@@ -2,6 +2,10 @@
 $ErrorActionPreference = 'Stop'
 $exe = Join-Path $PSScriptRoot 'SensorDash.exe'
 if (!(Test-Path $exe)) { throw "Missing SensorDash.exe. Extract the entire release first." }
+# Prevent a duplicate normal user process when the elevated logon task exists.
+if (Get-ScheduledTask -TaskName 'SensorDash (Elevated)' -ErrorAction SilentlyContinue) {
+    throw 'Elevated SensorDash startup is already configured. Run Remove-ElevatedStartup.cmd before installing ordinary startup.'
+}
 $startup = [Environment]::GetFolderPath('Startup')
 $shortcutPath = Join-Path $startup 'SensorDash.lnk'
 $shell = New-Object -ComObject WScript.Shell
