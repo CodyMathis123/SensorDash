@@ -33,12 +33,13 @@ public static class CollectorClient
         return document.RootElement.Clone();
     }
 }
-public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, SimulationState simulation, ILogger<CollectorPipeServer> log) : BackgroundService
+public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, SimulationState simulation, FanControlRuntime liveFan, ILogger<CollectorPipeServer> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // The collector accepts connections from local authenticated Windows users.
-        // There are deliberately no file-system/process/fan-control commands.
+        // There are deliberately no fan-control WRITE commands. Read-only
+        // inventory/status goes here; privileged writes use a separate pipe.
         // Settings changes are validated by DashboardState.UpdateSettings.
         var acl = new PipeSecurity();
         // Explicitly reject remote/network logons: only processes running locally may
@@ -96,6 +97,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                     "saveSettings" when req.Settings != null => Save(req.Settings),
                     "events" => db.ReadEvents(),
                     "simulation" => new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest },
+                    "fanOutputs" => liveFan.Snapshot(),
                     "history" => new
                     {
                         series = db.ReadHistory((req.Ids ?? []).Where(s => s.Length <= 256).Distinct().Take(12).ToArray(),
