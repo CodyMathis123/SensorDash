@@ -3,7 +3,7 @@ name: Windows MSI and portable build
 # or through an explicit Actions -> Run workflow request.
 on:
   push:
-    branches: [Production, "validation/**"]
+    branches: [Production]
   workflow_dispatch:
 permissions:
   contents: read
