@@ -89,11 +89,11 @@ const h={
    preventDefault(){},stopPropagation(){}},S,h);
  }
  await click('add-system',{kind:'liquid'});
- assert.deepEqual(Array.from(settings.coolingSystems.at(-1).components.map(c=>c.kind)),
+ assert.deepEqual(Array.from(S.settings.coolingSystems.at(-1).components.map(c=>c.kind)),
   ['heat-source','fan-group','pump','temperature-probe']);
- assert.ok(!settings.coolingSystems.at(-1).components.some(c=>c.kind==='radiator'));
+ assert.ok(!S.settings.coolingSystems.at(-1).components.some(c=>c.kind==='radiator'));
  await click('cooling-to-dashboard',{id:system.id});
- const board=settings.dashboards.at(-1);
+ const board=S.settings.dashboards.at(-1);
  assert.match(board.name,/Workstation loop/);
  for(const title of ['Temperature history','Power history','RPM history','Flow history'])
   assert.ok(board.widgets.some(w=>w.title===title),'Missing generated dashboard widget '+title);
