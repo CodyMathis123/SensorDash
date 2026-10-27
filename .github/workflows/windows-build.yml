@@ -80,6 +80,20 @@ jobs:
           if ($ui -notmatch 'Request elevated takeover' -or $ui -notmatch 'fan-release') {
             throw 'Missing explicit live fan-control UI actions'
           }
+      - name: Verify fan control accepts LHM initial modes and honors duty range
+        shell: pwsh
+        run: |
+          $control = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          if ($control -match 'control.ControlMode != ControlMode.Default') {
+            throw 'LHM Undefined mode must not block a configured PWM channel'
+          }
+          if ($control -notmatch 'SupportsTestRange\(' -or $control -notmatch 'CanApplyManualDuty\(') {
+            throw 'Missing per-channel PWM validation'
+          }
+          if ($ui -match 'firmware recovery after a power loss' -or $ui -notmatch 'I have closed other fan-control software') {
+            throw 'Fan control acknowledgment should be concise and accurate'
+          }
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -282,7 +296,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.5.0-x64
+          name: SensorDash-Setup-0.5.1-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
