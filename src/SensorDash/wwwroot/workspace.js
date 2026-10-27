@@ -18,7 +18,9 @@ const SDWorkspace = (() => {
  ];
  const kinds=componentKinds.map(x=>x.id);
  const componentLabel=kind=>componentKinds.find(x=>x.id===kind)?.name||kind;
- const componentOptions=kind=>componentKinds.map(x=>'<option value="'+attr(x.id)+'" '+(x.id===kind?'selected':'')+'>'+
+ const componentOptions=kind=>componentKinds
+   .filter(x=>!['radiator','fan','sensor'].includes(x.id)||x.id===kind)
+   .map(x=>'<option value="'+attr(x.id)+'" '+(x.id===kind?'selected':'')+'>'+
    safe(x.name)+'</option>').join('');
  const typesByComponent={
   'heat-source':['Temperature','Power','Load','Clock'],
@@ -244,13 +246,13 @@ const SDWorkspace = (() => {
        '<p class="note">Power is shown by sensor rather than summed because package, core and device readings may overlap.</p>':'';
      const chartGroups=[
        ['Temperature','Temperature history','Temperature probes and component temperatures'],
-       ['Power','Heat-source power history','Assigned power measurements (not a measurement of heat rejected)'],
+       ['Power','Power history','Component power readings (not a measurement of heat rejected)'],
        ['Fan','Fan RPM history','Cooling fan and pump tachometers'],
        ['Control','Control duty history','Reported duty percentages, monitoring only'],
        ['Flow','Flow history','Circulation flow sensor history']
      ];
      const charts=chartGroups.map(([type,title,description])=>{
-       const series=(type==='Power'?telemetry.heatPower:telemetry.byType(type));
+       const series=telemetry.byType(type);
        if(!series.length)return '';
        const limit=series.slice(0,8);
        return h.panel(title,description+(series.length>8?' · '+limit.length+'/'+series.length+' sensors shown':''),
@@ -612,7 +614,7 @@ const SDWorkspace = (() => {
        for(const [type,title] of [
          ['Temperature','Temperature history'],['Power','Power history'],
          ['Fan','RPM history'],['Control','Duty history'],['Flow','Flow history']]){
-         const readings=type==='Power'?data.heatPower:data.byType(type);
+         const readings=data.byType(type);
          if(readings.length)widgets.push(createWidget(title,'chart',readings.slice(0,8).map(s=>s.id)));
        }
        const dashboard={id:uid(),name:sys.name+' · Cooling overview',widgets,locked:false};
