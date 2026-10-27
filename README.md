@@ -45,6 +45,20 @@ The elevated installer removes the standard startup shortcut **only after succes
 
 **Security trade-off:** Elevated startup also elevates the locally hosted dashboard/API. SensorDash listens exclusively on \`127.0.0.1\`, but other programs on the same computer can reach that local API. Use the optional elevated task only if you want the additional sensor access and understand this trade-off. It cannot be installed silently; Windows administrator approval is required. If your everyday Windows account is not an administrator and UAC uses a different account, use ordinary startup until an appropriate per-user privilege arrangement is configured.
 
+## Performance improvements (v0.1.3)
+
+Sensor collection and screen rendering are intentionally separate:
+
+- Hardware values continue polling and are written to history at the configured rate.
+- Live numbers update using coalesced animation-frame callbacks, and only changed text is written to the page.
+- Charts are refreshed at most every **8 seconds**, independent from the sensor polling interval.
+- **While your mouse is over a graph, SensorDash defers graph repainting** so hovering across samples stays uninterrupted. The graph catches up after you move away.
+- Historical data is refreshed independently every 30 seconds, so long-running sessions still have complete timelines.
+- Charts avoid needless canvas-buffer resize operations, which previously reset the hover context and caused hitches.
+- If your computer is under heavy load, incoming sensor data continues recording without requiring an immediate graph paint.
+
+Fan Control (v238 and later) uses a PawnIO-based LibreHardwareMonitor backend and can use elevated scheduled startup or its newer Windows service mode. The current user's service/task privilege level depends on how Fan Control is configured. SensorDash keeps fan control read-only and independent.
+
 ## Development
 Install .NET 10 SDK. From the repo:
 
