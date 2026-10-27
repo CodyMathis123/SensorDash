@@ -1,9 +1,10 @@
 name: Windows MSI and portable build
-# Full Windows/MSI validation is intentionally expensive. Run it on merges
-# into Production or via Actions -> Run workflow, not for every feature commit.
+# Full Windows/MSI validation is intentionally expensive. Routine feature
+# commits do NOT trigger it. An explicit validation/* branch push serves as
+# a one-time build trigger before the workflow exists on Production.
 on:
   push:
-    branches: [Production]
+    branches: [Production, "validation/**"]
   workflow_dispatch:
 permissions:
   contents: read
