@@ -1,3 +1,13 @@
+# SensorDash v0.2.2 — Branded application and Start Menu shortcut
+
+Version 0.2.2 embeds the same cyan-on-navy telemetry icon used by the tray directly into **SensorDash.exe**. The per-machine MSI explicitly registers an **all-users Start Menu shortcut** called **SensorDash** in `%ProgramData%\Microsoft\Windows\Start Menu\Programs\SensorDash.lnk` and assigns the branded icon using the MSI Icon table.
+
+The MSI install/uninstall test checks that the shortcut is actually created, then removed on uninstall. It also verifies the published multi-resolution `SensorDash.ico` and extracts the executable's embedded icon to check the application resource.
+
+The icon is generated reproducibly during the Windows build by `scripts/Generate-SensorDashIcon.ps1`; no external downloadable icon asset is required. Upgrading from 0.2.1 through the new MSI retains the collector data under `%ProgramData%\SensorDash`. **Exit the tray application before upgrading** so Windows Installer can replace its executable.
+
+---
+
 # SensorDash v0.2.1 — Tray usability update
 
 The tray menu now contains **Open SensorDash**, a **disabled collector status indicator** (Online with the discovered sensor count, Discovering, Sensor error, or Offline), and **Exit tray and dashboard**. The previous "Collector service: SensorDashCollector" entry had incorrectly duplicated Open Dashboard.
