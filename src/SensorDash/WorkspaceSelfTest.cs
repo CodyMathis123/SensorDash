@@ -156,7 +156,25 @@ internal static class WorkspaceSelfTest
             if (icon.Width < 16 || icon.Height < 16)
                 throw new Exception("Tray icon could not be generated");
         }
-        // The simulation engine makes no reference to ISensor.Control or IControl.
-        // The absence of any write entry point remains an intentional safety boundary.
+        // Read-only workspace evaluation is independent of the experimental
+        // privileged controller. A new runtime must never own outputs by default.
+        var live = new FanControlRuntime();
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(live.Snapshot(),
+            System.Text.Json.JsonSerializerOptions.Web);
+        if (!snapshot.Contains("\"state\":\"off\"", StringComparison.Ordinal))
+            throw new Exception("Fan control was activated without authorization");
+        var rejected = System.Text.Json.JsonSerializer.Serialize(
+            live.Request(new FanCommand("arm", "fake-channel", "", 30, 60, false), cfg),
+            System.Text.Json.JsonSerializerOptions.Web);
+        if (!rejected.Contains("\"accepted\":false", StringComparison.Ordinal))
+            throw new Exception("Unconfirmed fan control request was accepted");
+        rejected = System.Text.Json.JsonSerializer.Serialize(
+            live.Request(new FanCommand("arm", "fake-channel", "", 100, 60, true), cfg),
+            System.Text.Json.JsonSerializerOptions.Web);
+        if (!rejected.Contains("\"accepted\":false", StringComparison.Ordinal))
+            throw new Exception("Unknown fan output was accepted");
+        if (FanControlRuntime.MinExperimentalDuty < 70 ||
+            FanControlRuntime.MaxSessionSeconds > 120)
+            throw new Exception("Experimental control limits changed without safety review");
     }
 }
