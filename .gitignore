@@ -4,3 +4,6 @@
 *.user
 *.suo
 dist/
+
+# Generated from the source-controlled icon generator
+src/SensorDash/Assets/SensorDash.ico
