@@ -11,7 +11,13 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    WorkspaceSelfTest.Run();
+    try { WorkspaceSelfTest.Run(); }
+    catch (Exception ex)
+    {
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
+        Environment.ExitCode = 1;
+        return;
+    }
     return;
 }
 
