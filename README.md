@@ -15,12 +15,20 @@ No administrator rights are required to *start* SensorDash, but certain low-leve
 - Polls LibreHardwareMonitorLib sensors directly; fast sensors typically every 2 seconds, storage devices every 10 seconds.
 - Shows live temperatures, load, CPU/GPU package power, fan and pump tachometers, and NVMe readings.
 - Persists selected numeric readings into SQLite (WAL mode) every 10 seconds, with 30-day retention.
-- Dashboard tabs: Overview, Cooling, NVMe, Explorer, Events, Settings. History graph supports flexible time ranges.
+- Dashboard tabs: Overview, Cooling, NVMe, Explorer, Events, Settings. Readings update in place, not by replacing the page. History graph supports flexible time ranges.
 - Sensor identities are **sensor IDs**, not ambiguous names, with local aliases and favorite sensor selection.
 - Fans: radiator bank = \`/lpc/it8688e/0/fan/0\`; DDC pump *tach only* = \`/lpc/it8688e/0/fan/1\`; NVMe heatsink fan = \`/lpc/it8688e/0/fan/2\`.
 - Displays RPM and reported control percentage; **does not control any fans**. Continue using Fan Control for curves.
 - Data remains on this computer under \`%LOCALAPPDATA%\SensorDash\` (\`telemetry.db\`, \`settings.json\`).
 - HTTP binds to loopback only. No external services, accounts, or telemetry uploads.
+
+## Sensor discovery and renaming
+- Sensor readings update in place without resetting the Sensor Explorer's search, scroll position or alias editor.
+- Select any sensor in **Sensor Explorer** to change its displayed name; click **Save name**. This is independent of whether it is used by a dashboard gauge.
+- Open **Settings → Sensor role assignments** to map CPU temperature, GPU hotspot, NVMe composite, ALL RADS, pump tach and other dashboard roles to the precise device/sensor IDs available on your machine.
+- **NVMe Cooling → Storage sensor diagnostics** shows your detected storage hardware, the number of temperature sensors, their IDs and values, the active polling interval and whether SensorDash has administrator privileges.
+- If no SSD temperature is discovered, the library may lack the necessary device access. Close the ordinary SensorDash instance and **run the executable as administrator once for comparison**. If sensors appear only when elevated, automatic non-elevated startup will still lack them. Keep the web host local-only; SensorDash does not require or enforce elevation.
+- **Storage polling is enabled** in the embedded collector and defaults to every 10 seconds. Fan Control keeps its own independent storage polling setting.
 
 ## Development
 Install .NET 10 SDK. From the repo:
