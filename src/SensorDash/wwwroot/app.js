@@ -20,7 +20,13 @@ const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
 const shorttime=t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
-const label=s=>S.settings?.aliases?.[s?.id]||s?.name||'Unavailable';
+const label=s=>{
+ const alias=S.settings?.aliases?.[s?.id];
+ if(alias)return alias;
+ const name=s?.name||'Unavailable';
+ return /^(Temperature|Fan|Control|Load|Power)\s*#\d+$/i.test(name)&&s?.device
+   ? s.device+' · '+name:name;
+};
 const sensor=id=>S.byId.get(id);
 const val=id=>sensor(id)?.value??null;
 const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id==='__calculated__'?'data-live-calc="nvmeHeadroom"':s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
