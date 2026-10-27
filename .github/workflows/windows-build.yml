@@ -56,6 +56,17 @@ jobs:
           Copy-Item packaging/Install-ElevatedStartup.cmd dist/Install-ElevatedStartup.cmd
           Copy-Item packaging/Remove-ElevatedStartup.cmd dist/Remove-ElevatedStartup.cmd
           Copy-Item README.md dist/README.txt
+      - name: Build tiny advertised-shortcut icon carrier
+        run: dotnet build tools/SensorDashIconCarrier/SensorDashIconCarrier.csproj -c Release -r win-x64 -o installer-assets
+      - name: Verify branded shortcut icon resource
+        shell: pwsh
+        run: |
+          $carrier = Resolve-Path 'installer-assets/SensorDashShortcutIcon.exe'
+          if (!(Test-Path $carrier)) { throw 'Missing MSI shortcut icon carrier executable' }
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($carrier.Path)
+          if (!$icon -or $icon.Width -lt 16) { throw 'Shortcut icon carrier has no embedded icon' }
+          $icon.Dispose()
       - name: Build Windows MSI installer
         run: dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
       - name: Confirm installer created
