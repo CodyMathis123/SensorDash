@@ -33,6 +33,8 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path dist/SensorDash.exe)) { throw 'Missing SensorDash.exe' }
+          # Generated during managed build; copy into the portable artifact for inspection.
+          Copy-Item 'src/SensorDash/Assets/SensorDash.ico' 'dist/SensorDash.ico' -Force
           if (!(Test-Path dist/SensorDash.ico)) { throw 'Missing published SensorDash icon' }
           $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path dist/SensorDash.ico))
           if ($bytes.Length -lt 1000 -or $bytes[0] -ne 0 -or $bytes[1] -ne 0 -or $bytes[2] -ne 1 -or $bytes[3] -ne 0 -or $bytes[4] -lt 4) {
