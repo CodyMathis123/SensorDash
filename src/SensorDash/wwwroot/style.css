@@ -173,3 +173,21 @@
 .w-collection-group strong{font-size:13px;color:#e6f3fa;line-height:1.3}
 .w-collection-group small{color:#9fb8c7;font-size:11px;line-height:1.5}
 @media(max-width:680px){.w-collection-groups,.w-collection-devices{grid-template-columns:1fr}}
+
+/* Cooling systems are analytical, component-aware workspaces.
+   Summary and chart grids intentionally remain useful with an arbitrary
+   number of heat sources, fans, pumps, temperature probes or cooling loops. */
+.w-cooling-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:17px 0}
+.w-cooling-stat{display:grid;align-content:start;gap:7px;min-width:0;background:#102434;
+ border:1px solid #2e4e5c;border-radius:11px;padding:15px}
+.w-cooling-stat>span{font-size:11px;color:#9fb4c6;letter-spacing:.03em;text-transform:uppercase}
+.w-cooling-stat>strong{font-size:22px;font-variant-numeric:tabular-nums;color:#dbfff8;overflow-wrap:anywhere}
+.w-cooling-stat>small{font-size:11px;line-height:1.45;color:#88aabd}
+.w-cooling-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;margin:16px 0 24px}
+.w-cooling-charts>.panel{min-width:0;margin:0}
+.w-cooling-configuration{border-top:1px solid #35515f;margin-top:20px;padding-top:19px}
+.w-cooling-configuration>h3{font-size:16px;margin:0 0 7px}
+.w-cooling-configuration>.note{margin-bottom:12px}
+.w-cooling-configuration .w-component>.note{margin:7px 0 11px;line-height:1.5}
+@media(max-width:1050px){.w-cooling-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.w-cooling-charts{grid-template-columns:1fr}}
+@media(max-width:570px){.w-cooling-summary{grid-template-columns:1fr 1fr;gap:8px}.w-cooling-stat{padding:10px}.w-cooling-stat>strong{font-size:18px}}
