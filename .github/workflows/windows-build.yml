@@ -1,0 +1,35 @@
+name: Windows portable build
+on:
+  push:
+    branches: [Production, "feature/**"]
+  pull_request:
+    branches: [Production]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
+      - name: Publish portable Windows build
+        run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
+      - name: Verify executable and assets
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/SensorDash.exe)) { throw 'Missing SensorDash.exe' }
+          if (!(Test-Path dist/wwwroot/index.html)) { throw 'Missing dashboard' }
+          Copy-Item packaging/Install-Startup.ps1 dist/Install-Startup.ps1
+          Copy-Item packaging/Remove-Startup.ps1 dist/Remove-Startup.ps1
+          Copy-Item packaging/Start-SensorDash.cmd dist/Start-SensorDash.cmd
+          Copy-Item README.md dist/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SensorDash-win-x64
+          path: dist/**
+          if-no-files-found: error
