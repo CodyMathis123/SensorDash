@@ -27,6 +27,8 @@ jobs:
           Copy-Item packaging/Install-Startup.ps1 dist/Install-Startup.ps1
           Copy-Item packaging/Remove-Startup.ps1 dist/Remove-Startup.ps1
           Copy-Item packaging/Start-SensorDash.cmd dist/Start-SensorDash.cmd
+          Copy-Item packaging/Install-Startup.cmd dist/Install-Startup.cmd
+          Copy-Item packaging/Remove-Startup.cmd dist/Remove-Startup.cmd
           Copy-Item README.md dist/README.txt
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
