@@ -1,17 +1,21 @@
 <!doctype html>
 <html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b111a"><title>SensorDash · Hardware telemetry</title>
-  <link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script>
+  <meta name="theme-color" content="#0b111a"><title>SensorDash · Hardware workspaces</title>
+  <link rel="stylesheet" href="/style.css"><script defer src="/workspace.js"></script><script defer src="/app.js"></script>
 </head><body>
 <div class="shell">
  <aside class="sidebar">
-  <div class="brand"><div class="brand-icon">◈</div><div><strong>SensorDash</strong><small>HARDWARE TELEMETRY</small></div></div>
+  <div class="brand"><div class="brand-icon">◈</div><div><strong>SensorDash</strong><small>HARDWARE WORKSPACE</small></div></div>
   <div class="group-title">MONITOR</div>
   <nav id="navigation">
    <button class="nav active" data-view="overview"><span>▦</span> Overview</button>
-   <button class="nav" data-view="cooling"><span>◉</span> Water Cooling</button>
-   <button class="nav" data-view="nvme"><span>▰</span> NVMe Cooling</button>
+   <button class="nav" data-view="dashboards"><span>▤</span> Dashboards</button>
+   <button class="nav" data-view="cooling"><span>◉</span> Cooling Systems</button>
+   <button class="nav" data-view="curves"><span>⌁</span> Curve Sandbox</button>
+   <button class="nav" data-view="virtual"><span>≋</span> Virtual Sensors</button>
+   <button class="nav" data-view="tray"><span>▣</span> Tray Readouts</button>
+   <button class="nav" data-view="storage"><span>▰</span> Storage</button>
    <button class="nav" data-view="explorer"><span>⌕</span> Sensor Explorer</button>
    <button class="nav" data-view="events"><span>⚑</span> Events <span id="eventCount" class="nav-number"></span></button>
   </nav>
@@ -26,7 +30,7 @@
   <div class="content-wrap">
    <div id="heading"></div>
    <div id="content"><div class="loading">Connecting to local sensor collector…</div></div>
-   <footer>SensorDash 0.1 · Local measurements only · Fan control remains in Fan Control · <span id="lastUpdated">Waiting for first sample</span></footer>
+   <footer>SensorDash 0.3 · Local measurements · Curve simulation only · Physical fan outputs remain unchanged · <span id="lastUpdated">Waiting for first sample</span></footer>
   </div>
  </main>
 </div>
