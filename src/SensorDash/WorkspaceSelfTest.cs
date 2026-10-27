@@ -58,6 +58,37 @@ internal static class WorkspaceSelfTest
         WorkspaceLogic.Normalize(cfg);
         if(cfg.TrayWidgets.Count!=6)throw new Exception("Tray widget limit not enforced");
         if(cfg.Dashboards[0].Widgets.Count!=1)throw new Exception("Dashboard configuration lost");
+        // Hide is presentation-only; it must not change database eligibility.
+        cfg.HiddenSensorIds = ["cpu"];
+        cfg.HiddenDeviceIds = ["network-adapter"];
+        cfg.HiddenHardwareTypes = ["Network"];
+        cfg.Dashboards[0].Locked = true;
+        cfg.Dashboards[0].Widgets[0].SensorIds = ["cpu"];
+        WorkspaceLogic.Normalize(cfg);
+        if (!cfg.Dashboards[0].Locked || !cfg.HiddenSensorIds.Contains("cpu"))
+            throw new Exception("Dashboard lock or sensor visibility settings were lost");
+        var cpuSample = new SensorReading("cpu", "CPU Package", "CPU", "Cpu",
+            "Temperature", 46, now, "cpu-hardware");
+        var nicSample = new SensorReading("nic", "Transfer", "Ethernet", "Network",
+            "Throughput", 350, now, "network-adapter");
+        if (!HistoryStore.ShouldRecord(cpuSample, cfg))
+            throw new Exception("Hiding a sensor must not disable its historical samples");
+        cfg.HistoryMode = "in-use";
+        WorkspaceLogic.Normalize(cfg);
+        if (!HistoryStore.ShouldRecord(cpuSample, cfg) ||
+            HistoryStore.ShouldRecord(nicSample, cfg))
+            throw new Exception("Only-in-use history mode must honor workspace references");
+        cfg.HistoryMode = "all";
+        cfg.ExcludedHistoryHardwareTypes = ["Network"];
+        WorkspaceLogic.Normalize(cfg);
+        if (HistoryStore.ShouldRecord(nicSample, cfg) ||
+            !HistoryStore.ShouldRecord(cpuSample, cfg))
+            throw new Exception("Network history exclusion must not affect other devices");
+        cfg.HistoryMode = "nonsense";
+        WorkspaceLogic.Normalize(cfg);
+        if (cfg.HistoryMode != "balanced")
+            throw new Exception("Unknown history policy was not normalized");
+
         // Windows notification icons must remain legible when rasterized at 16px.
         if (TraySensorIcon.Compact("24.0", 16) != "24"
             || TraySensorIcon.Compact("24.0", 24) != "24.0"
