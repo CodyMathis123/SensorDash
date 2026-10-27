@@ -63,7 +63,7 @@ function explorer(){
   const pinned=Number(S.settings?.pinnedSensors?.includes(b.id))-Number(S.settings?.pinnedSensors?.includes(a.id));
   return pinned||a.type.localeCompare(b.type)||display(a).localeCompare(display(b));
  });
- const chosen=S.byId.get(S.selected)||candidates[0];
+ const chosen=candidates.find(x=>x.id===S.selected)||candidates[0];
  if(chosen)S.selected=chosen.id;
  const indexText=x=>(display(x)+' '+x.id+' '+x.device+' '+x.deviceType+' '+x.type+' '+
    (usage.get(x.id)||[]).map(u=>u.label).join(' ')).toLowerCase();
@@ -117,7 +117,8 @@ function explorer(){
   const hideType=(S.settings?.hiddenHardwareTypes||[]).includes(chosen.deviceType);
   const inherited=(hideDevice||hideType)&&!direct;
   const referenceList=uses.length?'<div class="sensor-use-list">'+uses.map(u=>
-   '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+'">'+
+   '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+
+   '" data-usage-system="'+esc(u.systemId||'')+'" data-usage-component="'+esc(u.componentId||'')+'">'+
    esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not referenced by any saved dashboard, cooling component, tray icon, virtual sensor or curve.</p>';
   return '<div class="full">'+panel('Selected sensor · '+display(chosen),chosen.id+' · '+chosen.device,
    '<div class="alias-editor">'+
@@ -498,12 +499,29 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
- const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});render();return}
+ const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});render();return}
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){
-   const target=usages.dataset.usageTarget;if(target==='dashboards'&&usages.dataset.usageDashboard)
+   const target=usages.dataset.usageTarget;
+   if(target==='dashboards'&&usages.dataset.usageDashboard)
      S.workspaceDashboardId=usages.dataset.usageDashboard;
-   S.view=target;history.replaceState(null,'','#'+target);S.historyKey='';render();return;
+   S.focusCoolingTarget=target==='cooling'?{
+     systemId:usages.dataset.usageSystem,
+     componentId:usages.dataset.usageComponent
+   }:null;
+   S.view=target;history.replaceState(null,'','#'+target);S.historyKey='';render();
+   if(target==='cooling'&&S.focusCoolingTarget){
+     const focus=S.focusCoolingTarget;
+     requestAnimationFrame(()=>{
+       const components=[...document.querySelectorAll('[data-cooling-component-id]')];
+       const component=components.find(n=>n.dataset.coolingSystemId===focus.systemId&&
+         n.dataset.coolingComponentId===focus.componentId);
+       const system=[...document.querySelectorAll('.w-cooling-configuration[data-cooling-system-id]')]
+         .find(n=>n.dataset.coolingSystemId===focus.systemId);
+       (component||system)?.scrollIntoView({block:'center',behavior:'smooth'});
+     });
+   }
+   return;
  }
  const hSensor=e.target.closest('[data-hide-sensor]');
  if(hSensor){e.stopPropagation();changeVisibility('hiddenSensorIds',hSensor.dataset.hideSensor);return;}
