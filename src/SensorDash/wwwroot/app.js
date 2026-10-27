@@ -46,7 +46,7 @@ const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
 function chart(ids,unit='',small=false){
  const valid=ids.map(id=>typeof id==='string'?sensor(id):id).filter(Boolean);
  const labels=valid.map((s,i)=>`<span><i class="legend-key" style="background:${colors[i%colors.length]}"></i>${esc(label(s))}</span>`).join('');
- return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
+ return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
 }
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function getDefaults(){
@@ -337,7 +337,7 @@ function drawCanvas(canvas){
  canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
  const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,w,h);
  const p={l:49,r:14,t:17,b:31};const cw=w-p.l-p.r,ch=h-p.t-p.b;
- if(!series.length){ctx.fillStyle='#829aad';ctx.font='12px Segoe UI';ctx.textAlign='center';ctx.fillText('Collecting sensor history…',w/2,h/2);return}
+ if(!series.length){const overlay=canvas.nextElementSibling;if(overlay?.classList.contains('chart-hover-overlay')){overlay.width=canvas.width;overlay.height=canvas.height}ctx.fillStyle='#829aad';ctx.font='12px Segoe UI';ctx.textAlign='center';ctx.fillText('Collecting sensor history…',w/2,h/2);return}
  let lo=Math.min(...series.flatMap(s=>s.points.map(p=>p.v))),hi=Math.max(...series.flatMap(s=>s.points.map(p=>p.v)));
  if(lo===hi){lo-=5;hi+=5}
  const pad=(hi-lo)*.12;lo-=pad;hi+=pad;
@@ -358,12 +358,24 @@ function drawCanvas(canvas){
     ctx.beginPath();s.points.forEach((q,j)=>{const x=tx(q.t),y=ty(q.v);if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});
     ctx.stroke();if(s.points.length===1){ctx.beginPath();ctx.arc(tx(s.points[0].t),ty(s.points[0].v),3,0,7);ctx.fillStyle=s.color;ctx.fill()}
  });
+ // The base canvas contains the graph only. Mouse interaction draws into a
+ // transparent, independently cleared overlay so moving the cursor cannot leave
+ // crosshairs or tooltip "ghosts" behind.
+ const overlay=canvas.nextElementSibling;
+ if(!overlay || !overlay.classList.contains('chart-hover-overlay'))return;
+ overlay.width=canvas.width;
+ overlay.height=canvas.height;
+ const hoverCtx=overlay.getContext('2d');
+ hoverCtx.setTransform(ratio,0,0,ratio,0,0);
+ const clearHover=()=>hoverCtx.clearRect(0,0,w,h);
  canvas.onmousemove=e=>{
+   clearHover();
    const x=e.clientX-canvas.getBoundingClientRect().left;
    const desired=xmin+(x-p.l)/cw*(xmax-xmin);
-   drawCanvasOverlay(ctx,series,{tx,ty,p,h,w,cw,ch},desired);
+   if(desired>=xmin&&desired<=xmax)
+     drawCanvasOverlay(hoverCtx,series,{tx,ty,p,h,w,cw,ch},desired);
  };
- canvas.onmouseleave=()=>drawCanvas(canvas);
+ canvas.onmouseleave=clearHover;
 }
 function drawCanvasOverlay(ctx,series,layout,desired){
  const {tx,ty,p,h,w}=layout;
