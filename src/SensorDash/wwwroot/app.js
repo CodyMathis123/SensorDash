@@ -38,7 +38,7 @@ function resolveRole(key,legacy,type,namePattern,devicePattern) {
 }
 
 const val=id=>sensor(id)?.value??null;
-const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
+const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id==='__calculated__'?'data-live-calc="nvmeHeadroom"':s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
 const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(unit||typeUnit(s?.type))}"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
 const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
@@ -137,7 +137,7 @@ function nvme(){
   ${metric('SSD composite',d.nvme,'#a991e8','Measured storage temperature','°C','▰')}
   ${metric('NVMe heatsink',d.nvmeFan,'#62d5ce','Fan tachometer','RPM','❋')}
   ${metric('Reported fan duty',d.fanDuty,'#6fa7ed','Motherboard channel, if exposed','%','◉')}
-  ${metric('Thermal headroom',d.nvme?.value!=null?{value:60-d.nvme.value,type:'Temperature'}:null,'#f2bd6d','Below your 60°C curve endpoint','°C','◈')}
+  ${metric('Thermal headroom',d.nvme?.value!=null?{value:60-d.nvme.value,type:'Temperature',id:'__calculated__'}:null,'#f2bd6d','Below your 60°C curve endpoint','°C','◈')}
  </div>
  <div class="half-col">
   ${panel('NVMe thermal timeline','SSD composite temperature',chart([d.nvme],'°C'))}
@@ -251,8 +251,36 @@ function render(){
  const frame=S.frame;
  const error=frame?.error?`<div class="help" style="border-left-color:#ec8792">Sensor collector: ${esc(frame.error)}. The web app is running; readings may require administrator access or a supported hardware driver.</div>`:'';
  const content=({overview,cooling,nvme,explorer,events,settings:settingsView})[S.view]();
+ const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
  byId('content').innerHTML=error+content;
+ if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
+}
+function updateLiveValues(){
+ document.querySelectorAll('[data-live-reading]').forEach(el=>{
+    const s=sensor(el.dataset.liveReading);
+    if(el.dataset.liveFormat==='value')el.textContent=fmt(s?.value,s?.type==='Fan'?0:1);
+    else el.textContent=fmt(s?.value,s?.type==='Fan'?0:1)+' '+(el.dataset.liveUnit||typeUnit(s?.type));
+ });
+ const h=document.querySelector('[data-live-calc="nvmeHeadroom"]');
+ if(h){const t=getDefaults().nvme?.value;h.textContent=fmt(t==null?null:60-t);}
+}
+async function loadDiagnostics(shouldRender=true){
+ try {
+  const previous=JSON.stringify(S.diagnostics);
+  S.diagnostics=await fetchJSON('/api/diagnostics');
+  if(shouldRender&&S.view==='nvme'&&previous!==JSON.stringify(S.diagnostics))render();
+ }catch(e){console.warn('Storage diagnostics unavailable:',e.message);}
+}
+async function saveAlias(clear=false){
+ const current=S.selected;if(!sensor(current))return;
+ const cfg=structuredClone(S.settings);cfg.aliases=cfg.aliases||{};
+ const name=clear?'':byId('sensorAlias')?.value.trim()||'';
+ if(name)cfg.aliases[current]=name;else delete cfg.aliases[current];
+ try {
+   S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+   toast(name?'Sensor name saved':'Original sensor name restored');render();
+ }catch(e){toast('Could not save alias: '+e.message);}
 }
 function updateFrame(frame){
  S.frame=frame;S.sensors=frame.sensors||[];
@@ -270,7 +298,10 @@ function updateFrame(frame){
  byId('liveStatus').textContent=S.connected?'Live telemetry':'Sensor unavailable';
  byId('collectorStatus').textContent=S.connected?'Collector online':'Collector warning';
  byId('lastUpdated').textContent='Sample: '+when(t);
- if(S.view!=='settings' && document.activeElement?.id!=='search')render();
+ const signature=S.sensors.map(s=>s.id).join('|');
+ if(S.schemaKey!==signature){S.schemaKey=signature;render();return}
+ updateLiveValues();
+ drawAll();
 }
 async function loadEvents(){
  try{S.events=await fetchJSON('/api/events');byId('eventCount').textContent=S.events.filter(e=>e.severity==='warning').length||'';if(S.view==='events')render()}catch{}
@@ -367,14 +398,22 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
- const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;S.historyKey='';if(S.view==='events')loadEvents();render();return}
+ const v=e.target.closest('[data-view]');if(v){S.view=v.dataset.view;S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='nvme')loadDiagnostics().catch(()=>{});render();return}
  const f=e.target.closest('[data-filter]');if(f){S.filter=f.dataset.filter;render();return}
  const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
  const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
+ if(e.target.closest('[data-save-alias]')){saveAlias(false);return}
+ if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
- if(e.target.id==='search'){S.search=e.target.value;const pos=e.target.selectionStart;render();const field=byId('search');field?.focus();field?.setSelectionRange(pos,pos)}
+ if(e.target.id==='search'){
+  S.search=e.target.value;const query=S.search.toLowerCase();let shown=0;
+  document.querySelectorAll('#sensorList tr[data-select]').forEach(row=>{
+   const visible=row.dataset.search.includes(query);row.hidden=!visible;if(visible)shown++;
+  });
+  if(byId('matchCount'))byId('matchCount').textContent=shown;
+ }
 });
 byId('range').addEventListener('change',e=>{S.hours=Number(e.target.value);S.historyKey='';render()});
 byId('refresh').addEventListener('click',()=>{S.historyKey='';loadEvents();render();toast('Refreshing sensor history')});
@@ -382,11 +421,12 @@ window.addEventListener('resize',()=>drawAll());
 async function bootstrap(){
  try{
    const [cfg,frame]=await Promise.all([fetchJSON('/api/settings'),fetchJSON('/api/live')]);
-   S.settings=cfg;updateFrame(frame);render();loadEvents();
+   S.settings=cfg;updateFrame(frame);render();loadEvents();loadDiagnostics(false);
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
    setInterval(loadEvents,30000);
+   setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
    byId('content').innerHTML='<div class="help">Could not connect to the local API: '+esc(err.message)+'. Restart SensorDash.exe and refresh this page.</div>';
