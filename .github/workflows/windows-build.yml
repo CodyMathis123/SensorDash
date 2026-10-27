@@ -17,6 +17,16 @@ jobs:
           dotnet-version: "10.0.x"
       - name: Restore
         run: dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
+      - name: Check dashboard JavaScript syntax
+        run: node --check src/SensorDash/wwwroot/app.js
+      - name: Check polling / rendering separation
+        shell: pwsh
+        run: |
+          $js = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          if ($js -notmatch 'CHART_PAINT_INTERVAL_MS=8000') { throw 'Missing throttled chart painting' }
+          if ($js -notmatch 'scheduleChartPaint\(\)') { throw 'Missing chart paint scheduling' }
+          if ($js -notmatch 'if\(document.hidden\|\|chartInUse\(\)\)') { throw 'Missing hover redraw guard' }
+          if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
       - name: Publish portable Windows build
         run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
       - name: Verify executable and assets
