@@ -75,6 +75,7 @@ function explorer(){
   }
   const references=usage.get(x.id)||[],hide=hidden(x);
   const pinned=S.settings?.pinnedSensors?.includes(x.id);
+  const directlyHidden=(S.settings?.hiddenSensorIds||[]).includes(x.id);
   rows+='<tr class="'+(selected?'chosen ':'')+(hide?'sensor-hidden':'')+'" data-select="'+esc(x.id)+
    '" data-group-key="'+esc(group)+'" data-search="'+esc(searchText)+'" '+
    (searchText.includes(S.search.toLowerCase())?'':'hidden')+'>'+
@@ -83,7 +84,10 @@ function explorer(){
    '<td data-live-reading="'+esc(x.id)+'" data-live-format="unit" data-live-unit="'+esc(typeUnit(x.type))+'">'+latest(x)+'</td>'+
    '<td class="explorer-count">'+(references.length?'<b>'+references.length+'</b>':'—')+'</td>'+
    '<td><button class="pin '+(pinned?'pinned':'')+'" data-pin="'+esc(x.id)+'" title="Toggle history pin">★</button></td>'+
-   '<td><button class="btn tiny secondary" data-hide-sensor="'+esc(x.id)+'">'+(hide?'Show':'Hide')+'</button></td></tr>';
+   '<td>'+(hide&&!directlyHidden?
+       '<button class="btn tiny secondary" data-select="'+esc(x.id)+'" title="Hidden by hardware or category; select to manage">Group hidden</button>':
+       '<button class="btn tiny secondary" data-hide-sensor="'+esc(x.id)+'">'+(directlyHidden?'Show':'Hide')+'</button>')+
+   '</td></tr>';
  }
  const tools='<div class="toolbar explorer-toolbar">'+
   '<input id="search" placeholder="Search sensor, ID, hardware or usage…" value="'+esc(S.search)+'">'+
@@ -105,6 +109,7 @@ function explorer(){
   const direct=(S.settings?.hiddenSensorIds||[]).includes(chosen.id);
   const hideDevice=deviceId&&(S.settings?.hiddenDeviceIds||[]).includes(deviceId);
   const hideType=(S.settings?.hiddenHardwareTypes||[]).includes(chosen.deviceType);
+  const inherited=(hideDevice||hideType)&&!direct;
   const referenceList=uses.length?'<div class="sensor-use-list">'+uses.map(u=>
    '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+'">'+
    esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not referenced by any saved dashboard, cooling component, tray icon, virtual sensor or curve.</p>';
@@ -115,7 +120,8 @@ function explorer(){
     '<button class="btn" data-save-alias>Save name</button>'+
     '<button class="btn secondary" data-clear-alias>Use original name</button></div>'+
    '<div class="explorer-visibility-actions">'+
-    '<button class="btn secondary" data-hide-sensor="'+esc(chosen.id)+'">'+(direct?'Unhide sensor':'Hide sensor')+'</button>'+
+    (inherited?'<span class="note">Hidden by a hardware/type rule. Remove that rule to show this reading.</span>':
+     '<button class="btn secondary" data-hide-sensor="'+esc(chosen.id)+'">'+(direct?'Unhide sensor':'Hide sensor')+'</button>')+
     (deviceId?'<button class="btn secondary" data-hide-device="'+esc(deviceId)+'">'+(hideDevice?'Show this hardware':'Hide this hardware')+'</button>':'')+
     '<button class="btn secondary" data-hide-type="'+esc(chosen.deviceType)+'">'+(hideType?'Show all '+chosen.deviceType:'Hide all '+chosen.deviceType)+'</button></div>'+
    '<p class="note">Visibility changes only the interface and sensor pickers; collection, configured widgets, history and simulations continue. Hidden sensors can be managed in the Hidden filter.</p>'+
