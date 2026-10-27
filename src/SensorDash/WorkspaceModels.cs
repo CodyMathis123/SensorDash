@@ -122,6 +122,8 @@ public static class WorkspaceLogic
         cfg.ExcludedHistoryHardwareTypes = (cfg.ExcludedHistoryHardwareTypes ?? [])
             .Where(x => !string.IsNullOrWhiteSpace(x) && x.Length <= 80)
             .Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();
+        cfg.DisabledCollectionGroups = HardwareCollection.NormalizeGroups(cfg.DisabledCollectionGroups);
+        cfg.DisabledCollectionDeviceIds = Ids(cfg.DisabledCollectionDeviceIds, 250);
         cfg.CoolingSystems = (cfg.CoolingSystems ?? []).Take(20).Select(system => {
             system.Id = Short(system.Id, 80);
             system.Name = Short(system.Name);
