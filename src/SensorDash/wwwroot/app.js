@@ -15,7 +15,7 @@ const titles={overview:['SYSTEM OVERVIEW','Hardware at a glance','Live CPU, GPU,
  settings:['CONFIGURATION','Settings','Polling, storage, sensor aliases and alert thresholds']};
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:IDS.cpu,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false};
+ hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,schemaKey:''};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -24,11 +24,23 @@ const shorttime=t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minu
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>S.settings?.aliases?.[s?.id]||s?.name||'Unavailable';
 const sensor=id=>S.byId.get(id);
-const match=(id,type,name)=>sensor(id)||S.sensors.find(s=>(!type||s.type===type)&&(!name||s.name.toLowerCase().includes(name.toLowerCase())));
+// A saved role binding takes priority; otherwise discover by metadata rather than
+// assuming that current hardware has the exact sensor IDs from an old CSV log.
+function resolveRole(key,legacy,type,namePattern,devicePattern) {
+ const assigned=S.settings?.sensorBindings?.[key];
+ if(assigned) return sensor(assigned)||null;
+ const preferred=sensor(legacy);
+ if(preferred?.type===type && namePattern.test(preferred.name) &&
+    (!devicePattern || devicePattern.test(preferred.device+' '+preferred.deviceType))) return preferred;
+ const compatible=S.sensors.filter(v=>v.type===type &&
+   namePattern.test(v.name) && (!devicePattern||devicePattern.test(v.device+' '+v.deviceType)));
+ return compatible.find(v=>v.value!=null && (type!=='Temperature'||v.value>0))||compatible[0]||preferred||null;
+}
+
 const val=id=>sensor(id)?.value??null;
-const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
+const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--accent:${accent}"><div class="metric-top"><span>${esc(name)}</span><span class="metric-icon">${icon}</span></div><div class="metric-num"><b ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="value"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)}</b><span>${unit||typeUnit(s?.type)}</span></div><div class="metric-detail">${esc(detail)}</div></div>`;
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
-const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
+const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(unit||typeUnit(s?.type))}"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
 const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
 function chart(ids,unit='',small=false){
  const valid=ids.map(id=>typeof id==='string'?sensor(id):id).filter(Boolean);
@@ -38,15 +50,22 @@ function chart(ids,unit='',small=false){
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function getDefaults(){
  return {
- cpu:match(IDS.cpu,'Temperature','Tctl/Tdie'), gpu:match(IDS.gpu,'Temperature','GPU Core'),
- hotspot:match(IDS.hotspot,'Temperature','Hot Spot'), nvme:match(IDS.nvme,'Temperature','Composite'),
- radiator:match(IDS.radiator,'Fan','Fan #1'),pump:match(IDS.pump,'Fan','Fan #2'),
- nvmeFan:match(IDS.nvmeFan,'Fan','Fan #3'),cpuPower:match(IDS.cpuPower,'Power','Package'),
- gpuPower:match(IDS.gpuPower,'Power','GPU Package'),ram:match(IDS.ram,'Load','Memory'),
- ccd1:sensor(IDS.ccd1),ccd2:sensor(IDS.ccd2),vram:sensor(IDS.vram),fanDuty:sensor(IDS.fanDuty),
+ cpu:resolveRole('cpu',IDS.cpu,'Temperature',/Tctl\/Tdie|CPU Package|CPU Core/i,/CPU|Ryzen|AMD/i),
+ gpu:resolveRole('gpu',IDS.gpu,'Temperature',/GPU Core/i,/GPU|Radeon/i),
+ hotspot:resolveRole('hotspot',IDS.hotspot,'Temperature',/Hot.?Spot/i,/GPU|Radeon/i),
+ nvme:resolveRole('nvme',IDS.nvme,'Temperature',/Composite|Drive Temperature|Temperature/i,/Storage|NVMe|SSD|FireCuda|Seagate|Samsung|WD|Western Digital/i),
+ radiator:resolveRole('radiator',IDS.radiator,'Fan',/^Fan #1$|Radiator/i,/LPC|IT8688|Motherboard/i),
+ pump:resolveRole('pump',IDS.pump,'Fan',/^Fan #2$|Pump/i,/LPC|IT8688|Motherboard/i),
+ nvmeFan:resolveRole('nvmeFan',IDS.nvmeFan,'Fan',/^Fan #3$|NVMe/i,/LPC|IT8688|Motherboard/i),
+ cpuPower:resolveRole('cpuPower',IDS.cpuPower,'Power',/Package/i,/CPU|Ryzen|AMD/i),
+ gpuPower:resolveRole('gpuPower',IDS.gpuPower,'Power',/GPU Package|Total Board/i,/GPU|Radeon/i),
+ ram:resolveRole('ram',IDS.ram,'Load',/Memory/i,/Memory|RAM/i),
+ ccd1:sensor(IDS.ccd1),ccd2:sensor(IDS.ccd2),vram:sensor(IDS.vram),
+ fanDuty:resolveRole('fanDuty',IDS.fanDuty,'Control',/Fan #3|Fan/i,/LPC|IT8688|Motherboard/i),
  cpuLoad:sensor(IDS.cpuLoad),gpuLoad:sensor(IDS.gpuLoad)
  };
 }
+
 function overview(){
  const d=getDefaults();
  const out=`<div class="metrics">
@@ -101,6 +120,19 @@ function cooling(){
 function nvme(){
  const d=getDefaults();const curve=[[35,30],[40,30],[45,40],[50,55],[55,75],[60,100]];
  const poly=curve.map(([t,p])=>((t-30)/35*350+40)+','+(178-p/100*140)).join(' ');
+ const diag=S.diagnostics;
+ const storage=(diag?.storageDevices||[]).map(x=>x.name);
+ const temps=diag?.storageTemperatures||[];
+ const diagnostic=diag?panel('Storage sensor diagnostics','What the embedded LibreHardwareMonitor library discovers',
+    '<div class="stat-row"><label>Windows administrator access</label><strong>'+ (diag.isAdministrator?'Yes':'No (standard user)')+'</strong></div>'+
+    '<div class="stat-row"><label>Detected storage devices</label><strong>'+storage.length+'</strong></div>'+
+    '<div class="stat-row"><label>Storage temperature sensors</label><strong>'+temps.length+'</strong></div>'+
+    '<div class="stat-row"><label>Storage poll interval</label><strong>'+diag.storagePollSeconds+' seconds</strong></div>'+
+    (storage.length?'<p class="note">'+storage.map(esc).join(' · ')+'</p>':'')+
+    (temps.length?'<div class="note">'+temps.map(x=>esc(x.device+' · '+x.name+' ['+x.id+'] = '+(x.value??'N/A'))).join('<hr>')+'</div>':'')+
+    '<div class="help">'+esc(diag.note)+'</div>'+
+    (!diag.isAdministrator?'<p class="note">For a diagnostic comparison, close SensorDash and run it once as Administrator. You can still keep everyday startup under your normal user account.</p>':''))
+    :'<div class="help">Loading storage inventory and access diagnostics…</div>';
  return `<div class="metrics">
   ${metric('SSD composite',d.nvme,'#a991e8','Measured storage temperature','°C','▰')}
   ${metric('NVMe heatsink',d.nvmeFan,'#62d5ce','Fan tachometer','RPM','❋')}
@@ -124,7 +156,7 @@ function nvme(){
     stat('Reported control duty',d.fanDuty,'%')+
     '<div class="help">Suggested Fan Control settings: storage polling <b>10 seconds</b>, hysteresis <b>2°C</b>, response time <b>5 seconds</b>. Verify reliable startup at 30% duty.</div>'+
     '<p class="note">The graph represents the proposed Fan Control curve, not a curve stored or applied by SensorDash. The reported control sensor may not correspond to the NVMe fan on every board.</p>')}
- </div>`;
+ </div><div class="full">${diagnostic}</div>`;
 }
 function explorer(){
  const candidates=S.sensors.filter(s=>{
@@ -272,6 +304,11 @@ function drawCanvasOverlay(ctx,series,layout,desired){
 async function saveSettings(){
  const cfg=structuredClone(S.settings);
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
+ cfg.sensorBindings=cfg.sensorBindings||{};
+ document.querySelectorAll('[data-sensor-role]').forEach(el=>{
+   if(el.value)cfg.sensorBindings[el.dataset.sensorRole]=el.value;
+   else delete cfg.sensorBindings[el.dataset.sensorRole];
+ });
  document.querySelectorAll('[data-alias]').forEach(el=>{if(el.value.trim())cfg.aliases[el.dataset.alias]=el.value.trim();else delete cfg.aliases[el.dataset.alias]});
  document.querySelectorAll('[data-threshold]').forEach(el=>{if(el.value.trim())cfg.highThresholds[el.dataset.threshold]=Number(el.value);else delete cfg.highThresholds[el.dataset.threshold]});
  try{S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});toast('Settings saved');render()}
