@@ -18,7 +18,9 @@ jobs:
       - name: Restore
         run: dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
       - name: Check dashboard JavaScript syntax
-        run: node --check src/SensorDash/wwwroot/app.js
+        run: |
+          node --check src/SensorDash/wwwroot/app.js
+          node --check src/SensorDash/wwwroot/workspace.js
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -102,6 +104,10 @@ jobs:
             if ($page.Content -notmatch 'Hardware telemetry') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
             if ($script.Content -notmatch 'function overview') { throw 'Missing embedded dashboard JS' }
+          $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
+          if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
+          $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+          if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
             if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
             if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
@@ -154,7 +160,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.2.2-x64
+          name: SensorDash-Setup-0.3.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
