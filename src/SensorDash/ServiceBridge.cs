@@ -41,6 +41,10 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, I
         // There are deliberately no file-system/process/fan-control commands.
         // Settings changes are validated by DashboardState.UpdateSettings.
         var acl = new PipeSecurity();
+        // Explicitly reject remote/network logons: only processes running locally may
+        // talk to the service, even if Windows file sharing exposes named pipes.
+        acl.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null),
+            PipeAccessRights.ReadWrite, AccessControlType.Deny));
         acl.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             PipeAccessRights.FullControl, AccessControlType.Allow));
         acl.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
