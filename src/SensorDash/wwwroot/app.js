@@ -365,6 +365,9 @@ document.addEventListener('click',e=>{
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
+ // Curve editor adds another blank key/value row once both numeric cells
+ // are filled, without persisting or rebuilding the current form.
+ if(SDWorkspace.handleCurvePointInput(e,S))return;
  if(e.target.id==='search'){
   S.search=e.target.value;const query=S.search.toLowerCase();let shown=0;
   document.querySelectorAll('#sensorList tr[data-select]').forEach(row=>{
