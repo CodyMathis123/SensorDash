@@ -34,8 +34,18 @@ builder.Services.AddSingleton(new DashboardState(home));
 builder.Services.AddSingleton(new HistoryStore(Path.Combine(home, "telemetry.db")));
 builder.Services.AddHostedService<SensorWorker>();
 var app = builder.Build();
-app.UseDefaultFiles();
-app.UseStaticFiles();
+// Serve compiled-in web assets so the executable works even if only SensorDash.exe
+// is copied to a new folder or launched from an unrelated working directory.
+IResult BuiltInAsset(string name, string mediaType) {
+    var resource = typeof(DashboardState).Assembly.GetManifestResourceStream("SensorDash.Web." + name);
+    return resource == null
+        ? Results.Problem("Embedded dashboard resource missing: " + name, statusCode: 500)
+        : Results.Stream(resource, contentType: mediaType);
+}
+app.MapGet("/", () => BuiltInAsset("index.html", "text/html; charset=utf-8"));
+app.MapGet("/index.html", () => BuiltInAsset("index.html", "text/html; charset=utf-8"));
+app.MapGet("/app.js", () => BuiltInAsset("app.js", "text/javascript; charset=utf-8"));
+app.MapGet("/style.css", () => BuiltInAsset("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new {
     app = "SensorDash", version = "0.1.0", localOnly = true,
     started = state.Started, now = DateTimeOffset.UtcNow, dataDirectory = home,
