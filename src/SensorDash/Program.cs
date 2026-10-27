@@ -8,6 +8,13 @@ using LibreHardwareMonitor.Hardware;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
+// Pure synthetic tests run without opening any hardware or web endpoints.
+if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
+{
+    WorkspaceSelfTest.Run();
+    return;
+}
+
 // Same signed executable, two separate Windows processes.
 // Windows Service (--collector) owns elevated sensor hardware access and the database.
 // Desktop (default) owns the tray icon + loopback web server, never opens the hardware.
