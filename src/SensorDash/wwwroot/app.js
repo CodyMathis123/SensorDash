@@ -15,7 +15,7 @@ const titles={overview:['SYSTEM OVERVIEW','Hardware at a glance','Live CPU, GPU,
  settings:['CONFIGURATION','Settings','Polling, storage, sensor aliases and alert thresholds']};
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:IDS.cpu,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,schemaKey:''};
+ hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -257,15 +257,63 @@ function render(){
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
 }
+// Collecting data and painting the UI run independently. Incoming 2-second sensor
+// frames must never force a costly canvas redraw in the middle of a graph hover.
+function scheduleLivePaint() {
+ if(S.livePaintQueued||document.hidden)return;
+ S.livePaintQueued=true;
+ requestAnimationFrame(()=>{
+   S.livePaintQueued=false;
+   if(document.hidden)return;
+   updateLiveValues();
+ });
+}
 function updateLiveValues(){
  document.querySelectorAll('[data-live-reading]').forEach(el=>{
-    const s=sensor(el.dataset.liveReading);
-    if(el.dataset.liveFormat==='value')el.textContent=fmt(s?.value,s?.type==='Fan'?0:1);
-    else el.textContent=fmt(s?.value,s?.type==='Fan'?0:1)+' '+(el.dataset.liveUnit||typeUnit(s?.type));
+    const reading=sensor(el.dataset.liveReading);
+    const next=fmt(reading?.value,reading?.type==='Fan'?0:1);
+    const rendered=el.dataset.liveFormat==='value'?next:next+' '+(el.dataset.liveUnit||typeUnit(reading?.type));
+    // Assigning textContent unnecessarily invalidates styles/layout, particularly
+    // in the large explorer table (hundreds of rows). Only mutate changed values.
+    if(el.textContent!==rendered)el.textContent=rendered;
  });
  const h=document.querySelector('[data-live-calc="nvmeHeadroom"]');
- if(h){const t=getDefaults().nvme?.value;h.textContent=fmt(t==null?null:60-t);}
+ if(h){
+   const t=getDefaults().nvme?.value,rendered=fmt(t==null?null:60-t);
+   if(h.textContent!==rendered)h.textContent=rendered;
+ }
 }
+// Graph history draws at most once every 8 seconds. While a graph is being
+// inspected/dragged, freeze its base paint so the hover remains uninterrupted.
+// Telemetry keeps recording at full speed regardless of cursor position.
+const CHART_PAINT_INTERVAL_MS=8000;
+function chartInUse(){
+ return !!document.querySelector('.chart-wrap:hover');
+}
+function scheduleChartPaint(){
+ S.chartDirty=true;
+ if(S.chartPaintTimer!==null||document.hidden||!document.querySelector('canvas[data-chart]'))return;
+ const delay=Math.max(0,CHART_PAINT_INTERVAL_MS-(performance.now()-S.lastChartPaint));
+ S.chartPaintTimer=setTimeout(()=>{
+   S.chartPaintTimer=null;
+   if(!S.chartDirty||document.hidden||chartInUse())return;
+   S.chartDirty=false;
+   S.lastChartPaint=performance.now();
+   requestAnimationFrame(()=>{if(chartInUse()){S.chartDirty=true;return}drawAll()});
+ },delay);
+}
+function flushChartAfterHover(){
+ if(!S.chartDirty||chartInUse()||document.hidden)return;
+ // Avoid an immediate paint during the last mouse event of the interaction.
+ setTimeout(()=>{
+   if(chartInUse()||!S.chartDirty||document.hidden)return;
+   if(S.chartPaintTimer!==null){clearTimeout(S.chartPaintTimer);S.chartPaintTimer=null}
+   S.chartDirty=false;
+   S.lastChartPaint=performance.now();
+   requestAnimationFrame(()=>{if(!chartInUse())drawAll();else S.chartDirty=true});
+ },120);
+}
+
 async function loadDiagnostics(shouldRender=true){
  try {
   const previous=JSON.stringify(S.diagnostics);
@@ -301,8 +349,8 @@ function updateFrame(frame){
  byId('lastUpdated').textContent='Sample: '+when(t);
  const signature=S.sensors.map(s=>s.id).join('|');
  if(S.schemaKey!==signature){S.schemaKey=signature;render();return}
- updateLiveValues();
- drawAll();
+ scheduleLivePaint();
+ scheduleChartPaint();
 }
 async function loadEvents(){
  try{S.events=await fetchJSON('/api/events');byId('eventCount').textContent=S.events.filter(e=>e.severity==='warning').length||'';if(S.view==='events')render()}catch{}
@@ -320,11 +368,16 @@ function ensureHistory(){
  if(S.historyPending&&key===S.historyKey){drawAll();return}
  S.historyKey=key;S.historyFetch=now;S.historyPending=true;
  fetchJSON('/api/history?ids='+encodeURIComponent(ids.join(','))+'&hours='+encodeURIComponent(S.hours))
-   .then(data=>{if(S.historyKey!==key)return;S.history=Object.fromEntries((data.series||[]).map(s=>[s.id,s.points]));drawAll()})
-   .catch(()=>drawAll()).finally(()=>{S.historyPending=false});
+   .then(data=>{if(S.historyKey!==key)return;S.history=Object.fromEntries((data.series||[]).map(s=>[s.id,s.points]));scheduleChartPaint()})
+   .catch(err=>{console.warn('History fetch:',err.message)}).finally(()=>{S.historyPending=false});
  drawAll();
 }
-function drawAll(){document.querySelectorAll('canvas[data-chart]').forEach(drawCanvas)}
+function drawAll(){
+ if(document.hidden||chartInUse()){S.chartDirty=true;return}
+ document.querySelectorAll('canvas[data-chart]').forEach(drawCanvas);
+ S.lastChartPaint=performance.now();
+ S.chartDirty=false;
+}
 function drawCanvas(canvas){
  const ids=canvas.dataset.chart.split('|').filter(Boolean), series=ids.map((id,i)=>{
    const base=S.history[id]||[], live=S.liveCache.get(id)||[], first=Date.now()-S.hours*3600000;
@@ -334,8 +387,12 @@ function drawCanvas(canvas){
  }).filter(s=>s.points.length);
  const rect=canvas.getBoundingClientRect(),w=Math.max(100,rect.width),h=Math.max(100,rect.height);
  const ratio=Math.min(window.devicePixelRatio||1,2);
- canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
- const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,w,h);
+ const pixelWidth=Math.round(w*ratio),pixelHeight=Math.round(h*ratio);
+ // Canvas dimensions erase the bitmap and reset its context, so never assign
+ // them when unchanged. Only full/redraws should touch these buffers.
+ if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
+ if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
+ const ctx=canvas.getContext('2d');ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,w,h);
  const p={l:49,r:14,t:17,b:31};const cw=w-p.l-p.r,ch=h-p.t-p.b;
  if(!series.length){const overlay=canvas.nextElementSibling;if(overlay?.classList.contains('chart-hover-overlay')){overlay.width=canvas.width;overlay.height=canvas.height}ctx.fillStyle='#829aad';ctx.font='12px Segoe UI';ctx.textAlign='center';ctx.fillText('Collecting sensor history…',w/2,h/2);return}
  let lo=Math.min(...series.flatMap(s=>s.points.map(p=>p.v))),hi=Math.max(...series.flatMap(s=>s.points.map(p=>p.v)));
@@ -363,8 +420,8 @@ function drawCanvas(canvas){
  // crosshairs or tooltip "ghosts" behind.
  const overlay=canvas.nextElementSibling;
  if(!overlay || !overlay.classList.contains('chart-hover-overlay'))return;
- overlay.width=canvas.width;
- overlay.height=canvas.height;
+ if(overlay.width!==canvas.width)overlay.width=canvas.width;
+ if(overlay.height!==canvas.height)overlay.height=canvas.height;
  const hoverCtx=overlay.getContext('2d');
  hoverCtx.setTransform(ratio,0,0,ratio,0,0);
  const clearHover=()=>hoverCtx.clearRect(0,0,w,h);
@@ -375,7 +432,7 @@ function drawCanvas(canvas){
    if(desired>=xmin&&desired<=xmax)
      drawCanvasOverlay(hoverCtx,series,{tx,ty,p,h,w,cw,ch},desired);
  };
- canvas.onmouseleave=clearHover;
+ canvas.onmouseleave=()=>{clearHover();flushChartAfterHover()};
 }
 function drawCanvasOverlay(ctx,series,layout,desired){
  const {tx,ty,p,h,w}=layout;
@@ -430,7 +487,20 @@ document.addEventListener('input',e=>{
 });
 byId('range').addEventListener('change',e=>{S.hours=Number(e.target.value);S.historyKey='';render()});
 byId('refresh').addEventListener('click',()=>{S.historyKey='';loadEvents();render();toast('Refreshing sensor history')});
-window.addEventListener('resize',()=>drawAll());
+let resizePaint;
+window.addEventListener('resize',()=>{
+  clearTimeout(resizePaint);
+  resizePaint=setTimeout(()=>{S.chartDirty=true;flushChartAfterHover();if(!chartInUse())drawAll()},200);
+});
+document.addEventListener('visibilitychange',()=>{
+ if(!document.hidden){scheduleLivePaint();scheduleChartPaint()}
+});
+// A history query is cheap compared to polling hardware; perform it separately
+// every 30 seconds to keep long-running graphs complete beyond liveCache's 140 samples.
+setInterval(()=>{
+ if(document.hidden||!document.querySelector('canvas[data-chart]'))return;
+ if(Date.now()-S.historyFetch>=30000)ensureHistory();
+},30000);
 async function bootstrap(){
  try{
    const [cfg,frame]=await Promise.all([fetchJSON('/api/settings'),fetchJSON('/api/live')]);
