@@ -97,15 +97,6 @@ jobs:
           $icon.Dispose()
           Write-Host 'Published executable includes SensorDash icon'
           if (!(Test-Path dist/wwwroot/index.html)) { throw 'Missing dashboard' }
-          Copy-Item packaging/Install-Startup.ps1 dist/Install-Startup.ps1
-          Copy-Item packaging/Remove-Startup.ps1 dist/Remove-Startup.ps1
-          Copy-Item packaging/Start-SensorDash.cmd dist/Start-SensorDash.cmd
-          Copy-Item packaging/Install-Startup.cmd dist/Install-Startup.cmd
-          Copy-Item packaging/Remove-Startup.cmd dist/Remove-Startup.cmd
-          Copy-Item packaging/Install-ElevatedStartup.ps1 dist/Install-ElevatedStartup.ps1
-          Copy-Item packaging/Remove-ElevatedStartup.ps1 dist/Remove-ElevatedStartup.ps1
-          Copy-Item packaging/Install-ElevatedStartup.cmd dist/Install-ElevatedStartup.cmd
-          Copy-Item packaging/Remove-ElevatedStartup.cmd dist/Remove-ElevatedStartup.cmd
           Copy-Item README.md dist/README.txt
       - name: Build tiny advertised-shortcut icon carrier
         run: dotnet build tools/SensorDashIconCarrier/SensorDashIconCarrier.csproj -c Release -r win-x64 -o installer-assets
