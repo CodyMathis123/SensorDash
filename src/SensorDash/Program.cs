@@ -22,7 +22,13 @@ try {
     }
 } catch (HttpRequestException) { /* no active instance */ }
   catch (TaskCanceledException) { /* not responding */ }
-var builder = WebApplication.CreateBuilder(args);
+// Published portable builds must serve assets relative to their executable, even when
+// Windows launches them with another working directory.
+var root = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))
+    ? AppContext.BaseDirectory : Directory.GetCurrentDirectory();
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions {
+    Args = args, ContentRootPath = root
+});
 builder.WebHost.UseUrls("http://127.0.0.1:8765");
 builder.Services.AddSingleton(new DashboardState(home));
 builder.Services.AddSingleton(new HistoryStore(Path.Combine(home, "telemetry.db")));
