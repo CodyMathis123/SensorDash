@@ -1,3 +1,53 @@
+
+# SensorDash 0.2.0 — MSI / Windows service / tray dashboard
+
+SensorDash is a read-only Windows hardware telemetry application. Fan Control continues to own your fan curves.
+
+## Install
+
+1. Download SensorDash-Setup-0.2.0-x64.msi from the successful Windows Actions run.
+2. Double-click the MSI and approve administrator access once.
+3. The MSI installs SensorDash.exe into Program Files, registers and starts the SensorDashCollector Windows service under LocalSystem, adds a Start Menu shortcut and configures tray startup at Windows sign-in.
+4. Open SensorDash from Start Menu to launch the tray and the browser dashboard at http://127.0.0.1:8765.
+5. Double-click the tray icon to reopen the browser. Right-click it to exit the tray without stopping telemetry collection.
+
+No separate .NET runtime or Python is required.
+
+## Upgrades, uninstall, versioning
+
+- WiX MSI major upgrades replace installed binaries and service registration, and disallow downgrades.
+- Version 0.2.0 follows semantic versioning. Each GitHub Actions build publishes a Windows MSI and portable developer artifact.
+- Uninstall through Windows Settings / Apps / Installed apps. MSI removes the Windows Service, the autorun entry, app binary and Start Menu shortcut.
+- New history and settings live in %ProgramData%\SensorDash. These are deliberately preserved during uninstall/upgrade.
+- The MSI does not uninstall or modify PawnIO or Fan Control.
+- The service runs even before login. The user-facing dashboard runs without elevation.
+
+## Transition from 0.1.x portable ZIP
+
+Before installing, exit old SensorDash processes, uninstall old startup shortcut and any prior optional "SensorDash (Elevated)" scheduled task. The old files in %LOCALAPPDATA%\SensorDash remain untouched. Version 0.2.0 starts a new machine-wide SQLite history in %ProgramData%\SensorDash; automatic migration of old history and aliases is not implemented yet. Back up legacy data if you wish to retain it.
+
+## Architecture and security
+
+- SensorDash.exe --collector: LocalSystem Windows Service; hardware polling, SQLite, events, validated settings.
+- SensorDash.exe --desktop: regular Windows account; ASP.NET Core localhost dashboard and tray icon.
+- IPC: Windows named pipe SensorDash.Telemetry.v1, explicit access for local authenticated users (read telemetry and set validated monitoring options only). No arbitrary filesystem, process execution, or fan control commands.
+- The elevated collector has no HTTP listener. Only the regular desktop process listens on 127.0.0.1:8765.
+- Local authenticated users can modify monitoring settings through the pipe. It is designed for a trusted, single-user workstation.
+- The collector retains its logs when the dashboard closes or you log off.
+
+## Build from source
+
+Windows with .NET 10 SDK:
+- dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist
+- dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
+- GitHub Actions builds both automatically and smoke-tests collector + dashboard named-pipe communication.
+
+Licenses: LibreHardwareMonitorLib MPL 2.0; WiX 5.0.2 (the last generation before newer WiX maintenance-fee licensing). A newer WiX toolchain would require independent license review.
+
+---
+
+## Portable v0.1.x historical notes
+
 # SensorDash
 
 A locally hosted Windows hardware-monitoring dashboard powered by [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor). Runs under your Windows user account, with **no Libre Hardware Monitor GUI, Python, cloud, or fan-control writes required**.
