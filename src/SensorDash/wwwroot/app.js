@@ -200,52 +200,47 @@ function explorer(){
 }
 
 function events(){
- return `<div class="two-col">
-  ${panel('Event history','Most recent alerts and recovery events',`<div class="event-list">${S.events.length?S.events.map(e=>`<div class="event ${esc(e.severity)}"><div class="dot"></div><div><b>${esc(e.message)}</b><p>${when(e.t)} · ${esc(e.sensor)}${e.value!=null?' · '+fmt(e.value):''}</p></div></div>`).join(''):'<div class="empty">No events yet. Alerts appear here when configured thresholds are crossed.</div>'}</div>`)}
-  ${panel('Alert behavior','Monitoring safeguards','<div class="help">Thresholds are evaluated on persisted samples; default checks include CPU, GPU hotspot, NVMe and the dedicated DDC pump tachometer.</div><p class="note">A pump low-RPM warning is raised only after the tach has previously reported a running value and then stays below 1,000 RPM for at least 20 seconds. Verify cooling independently if hardware temperatures rise unexpectedly.</p><p class="note">Threshold recovery requires cooling at least 2°C below the configured limit.</p><button class="btn secondary" data-view="settings">Configure thresholds</button>')}
- </div>`;
+ return '<div class="two-col">'+
+ panel('Event history','Recorded threshold crossings and recoveries',
+ '<div class="event-list">'+(S.events.length?S.events.map(e=>'<div class="event '+esc(e.severity)+'"><div class="dot"></div><div><b>'+esc(e.message)+'</b><p>'+when(e.t)+' · '+esc(e.sensor)+(e.value!=null?' · '+fmt(e.value):'')+'</p></div></div>').join('')
+  :'<div class="empty">No events yet. Add a monitoring threshold in Settings.</div>')+'</div>')+
+ panel('Alert behavior','Configurable monitoring',
+ '<p class="help">Alerts are evaluated by the elevated collector. High-value thresholds are configured for individual sensor IDs; recovery uses a two-unit hysteresis. Simulated curves do not provide hardware protection and never write fan outputs.</p>')+
+ '</div>';
 }
 function settingsView(){
- const cfg=S.settings;if(!cfg)return '<div class="loading">Loading settings…</div>';
- const selected=[IDS.radiator,IDS.pump,IDS.nvmeFan,IDS.cpu,IDS.gpu,IDS.hotspot,IDS.nvme];
-
- // Keep sensor roles independent of the original CSV's hardware IDs.
- const roles=[
-  ['cpu','CPU temperature','Temperature'],
-  ['gpu','GPU core temperature','Temperature'],
-  ['hotspot','GPU hotspot','Temperature'],
-  ['nvme','NVMe temperature','Temperature'],
-  ['radiator','ALL RADS fan tach','Fan'],
-  ['pump','DDC pump tach','Fan'],
-  ['nvmeFan','NVMe heatsink fan tach','Fan'],
-  ['fanDuty','NVMe fan control readout','Control'],
-  ['cpuPower','CPU package power','Power'],
-  ['gpuPower','GPU package power','Power']
- ];
- const detected=getDefaults();
- const roleEditor=roles.map(([key,title,type])=>{
-   const saved=cfg.sensorBindings?.[key]||'';
-   const possible=S.sensors.filter(x=>x.type===type).sort((a,b)=>a.device.localeCompare(b.device)||a.name.localeCompare(b.name));
-   const unavailable=saved&&!possible.some(x=>x.id===saved);
-   const auto=detected[key]?label(detected[key])+' ('+detected[key].id+')':'no matching sensor';
-   return `<div class="field sensor-role"><label for="role-${key}">${esc(title)}</label>
-    <select id="role-${key}" data-sensor-role="${key}">
-      <option value="">Automatic · ${esc(auto)}</option>
-      ${unavailable?`<option selected value="${esc(saved)}">Unavailable: ${esc(saved)}</option>`:''}
-      ${possible.map(x=>`<option value="${esc(x.id)}" ${saved===x.id?'selected':''}>${esc(x.device+' / '+x.name+' ['+x.id+']')}</option>`).join('')}
-    </select></div>`;
- }).join('');
- return `<div class="settings-grid">
-  ${panel('Collection intervals','Adjust sensor refresh and history retention',`<div class="form-grid">
-   ${[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']].map(([key,title])=>`<div class="field"><label for="${key}">${title}</label><input id="${key}" type="number" min="1" max="365" value="${cfg[key]}"></div>`).join('')}
-  </div><p class="note">NVMe polling is intentionally slower than CPU/GPU polling. History is stored in your Windows user profile.</p>`)}
-  ${panel('Sensor role assignments','Choose the actual source for each dashboard gauge; Automatic is the default',
-    '<div class="role-list">'+roleEditor+'</div><p class="note">Only sensors currently detected by LibreHardwareMonitor can be selected. If your SSD is absent, consult the Storage Diagnostics card on the NVMe page.</p>')}
-  ${panel('Sensor aliases','Edit these here, or rename ANY sensor directly from Sensor Explorer',
-    [...new Set([...selected,...Object.keys(cfg.aliases||{})])].map(id=>`<div class="alias-row"><label title="${esc(id)}">${esc(sensor(id)?.name||id)}</label><input data-alias="${esc(id)}" value="${esc(cfg.aliases?.[id]||'')}" placeholder="Friendly name"></div>`).join(''))}
-  ${panel('High-temperature thresholds','Alert whenever a reading crosses its configured value',[IDS.cpu,IDS.hotspot,IDS.nvme].map(id=>`<div class="alias-row"><label title="${esc(id)}">${esc(label(sensor(id)||{id,name:id}))}</label><input type="number" min="0" max="150" step="1" data-threshold="${esc(id)}" value="${cfg.highThresholds?.[id]??''}"></div>`).join('')+'<p class="note">Pump tach warning uses a fixed safety threshold of 1,000 RPM for 20 seconds, after it has first reported a running value.</p>')}
-  ${panel('Application & startup','Keep everything local','<div class="stat-row"><label>Dashboard address</label><strong>127.0.0.1:8765</strong></div><div class="stat-row"><label>Fan control</label><strong>Disabled (read-only)</strong></div><div class="stat-row"><label>Storage</label><strong>%LOCALAPPDATA%\\SensorDash</strong></div><p class="note">To start when you sign in, run Install-Startup.ps1 from the extracted release. It creates a shortcut only for your Windows user account. Remove-Startup.ps1 undoes it.</p><p class="note">If a sensor is unavailable, try starting the application as Administrator for comparison. Don’t grant elevated access to an exposed network server; this app binds to localhost.</p>')}
- </div><div class="badge-line"><p class="note">Changes apply to the live collector without restarting.</p><button class="btn" id="saveSettings">Save settings</button></div>`;
+ const cfg=S.settings;if(!cfg)return '<div class="loading">Waiting for collector settings…</div>';
+ const aliases=Object.entries(cfg.aliases||{}).sort((a,b)=>a[0].localeCompare(b[0]));
+ const thresholds=Object.entries(cfg.highThresholds||{});
+ const choices=S.sensors.filter(s=>['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type));
+ return '<div class="settings-grid">'+
+ panel('Collection intervals','Configure hardware sampling, logging and retention',
+ '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
+ ['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']]
+ .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="1" max="365" value="'+cfg[key]+'"></div>').join('')+
+ '</div><p class="note">The simulation engine evaluates curves at 1 Hz using the newest timestamped samples. Storage can poll independently.</p>')+
+ panel('Sensor aliases','Rename any physical or virtual sensor',
+ aliases.length?aliases.map(([id,name])=>
+ '<div class="alias-row"><label title="'+esc(id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
+ '<input data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Optional display alias"></div>').join(''):
+ '<p class="note">No custom aliases. Select a sensor in Sensor Explorer to rename it.</p>')+
+ panel('Monitoring thresholds','Alert when a selected sensor crosses its assigned value',
+ thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
+ '<input type="number" step="any" data-threshold="'+esc(id)+'" value="'+number+'">'+
+ '<button class="btn secondary tiny" data-remove-threshold="'+esc(id)+'">Remove</button></div>').join('')+
+ '<div class="w-add-input"><select id="newThresholdId"><option value="">Choose sensor to monitor</option>'+
+ choices.filter(s=>!(s.id in (cfg.highThresholds||{}))).map(s=>
+ '<option value="'+esc(s.id)+'">'+esc(s.device+' / '+s.name+' ('+s.type+')')+'</option>').join('')+
+ '</select><button class="btn secondary" id="addThreshold">+ Threshold</button></div>')+
+ panel('Service and storage','Local-only hardware access',
+ '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
+ '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
+ '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
+ '<div class="stat-row"><label>Hardware controls</label><strong>Simulation only · No writes</strong></div>'+
+ '<div class="stat-row"><label>Discovered storage devices</label><strong>'+(S.diagnostics?.storageDevices?.length??'—')+'</strong></div>'+
+ '<p class="note">The browser host is unelevated; only the named-pipe collector reads hardware. Storage telemetry is available in the unified catalog.</p>')+
+ '</div><div class="badge-line"><p class="note">Changes are validated by the collector service.</p>'+
+ '<button class="btn" id="saveSettings">Save settings</button></div>';
 }
 function heading(){
  const [eyebrow,title,desc]=titles[S.view];
@@ -460,6 +455,19 @@ async function loadSimulation(){
  try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
  catch(e){console.warn('Simulation preview:',e.message);}
 }
+async function changeThreshold(id,remove=false){
+ if(!id)return;
+ const cfg=structuredClone(S.settings);cfg.highThresholds=cfg.highThresholds||{};
+ if(remove)delete cfg.highThresholds[id];
+ else {
+  const reading=sensor(id);
+  cfg.highThresholds[id]=Math.round((reading?.value??40)+10);
+ }
+ try{
+  S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  render();toast(remove?'Threshold removed':'Threshold added');
+ }catch(e){toast('Could not update threshold: '+e.message)}
+}
 async function saveSettings(){
  const cfg=structuredClone(S.settings);
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
@@ -489,6 +497,8 @@ document.addEventListener('click',e=>{
  const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
  if(e.target.closest('[data-save-alias]')){saveAlias(false);return}
  if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
+ if(e.target.closest('#addThreshold')){changeThreshold(byId('newThresholdId')?.value);return}
+ const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
