@@ -118,6 +118,7 @@ const SDWorkspace = (() => {
    const all=S.settings?.dashboards||[];
    const chosen=all.find(d=>d.id===S.workspaceDashboardId)||all[0];
    if(chosen)S.workspaceDashboardId=chosen.id;
+   const editing=!chosen?.locked;
    const tabBar='<div class="w-tabs">'+all.map(d=>button('switch-dashboard',d.name,
       'data-id="'+attr(d.id)+'"',chosen?.id!==d.id)).join('')+
       button('add-dashboard','+ Blank dashboard')+'</div>'+
@@ -135,22 +136,28 @@ const SDWorkspace = (() => {
             '#62d5ce',s.device,unit(s.type),icon[s.type]||'◈')).join('');
      const scope='dashboard:'+chosen.id+':'+w.id;
      return '<div class="w-widget"><div class="w-widget-head"><div><strong>'+safe(w.title)+'</strong><span>'+safe(w.kind)+'</span></div>'+
-       button('remove-widget','Remove','data-id="'+attr(chosen.id)+'" data-child="'+attr(w.id)+'"')+'</div>'+
+       (editing?button('remove-widget','Remove','data-id="'+attr(chosen.id)+'" data-child="'+attr(w.id)+'"'):'')+'</div>'+
        (body||nothing('Select a sensor for this widget'))+
-       '<div class="w-widget-editor"><label>Title<input value="'+attr(w.title)+'" data-widget-title="'+attr(w.id)+'"></label>'+
+       (editing?'<div class="w-widget-editor"><label>Title<input value="'+attr(w.title)+'" data-widget-title="'+attr(w.id)+'"></label>'+
        '<label>Kind<select data-widget-kind="'+attr(w.id)+'">'+opts(['metric','chart','readings'],w.kind)+'</select></label></div>'+
        selectors(S,w.sensorIds,scope)+
        '<div class="w-add-input">'+select(S,'',()=>true,'Choose a sensor','data-add-to="'+attr(scope)+'"')+
-       button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div></div>';
+       button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div>':'')+'</div>';
    }).join('');
-   return tabBar+card(chosen.name,'Customizable widgets • saved in collector settings',
-     '<div class="w-actions">'+textfield('dashboard-name',chosen.id,chosen.name,'Dashboard name')+
-     button('save-editor','Save dashboard')+
-     (all.length>1?button('remove-dashboard','Delete dashboard','data-id="'+attr(chosen.id)+'"'):'')+'</div>')+
-     (widgets.length?'<div class="w-widget-grid">'+shown+'</div>':card('Empty dashboard','Add a widget below',nothing('No widgets have been configured yet.')))+
-     '<div class="w-actions">'+button('add-widget','+ Metric','data-kind="metric" data-id="'+attr(chosen.id)+'"')+
-     button('add-widget','+ Chart','data-kind="chart" data-id="'+attr(chosen.id)+'"')+
-     button('add-widget','+ Readings','data-kind="readings" data-id="'+attr(chosen.id)+'"')+'</div>';
+   return tabBar+card(chosen.name,chosen.locked?'Viewing mode · Editing is locked':'Edit mode · Customize this dashboard',
+     '<div class="w-dashboard-toolbar">'+
+     button('toggle-dashboard-lock',chosen.locked?'🔓 Unlock layout':'🔒 Lock layout',
+       'data-id="'+attr(chosen.id)+'"',chosen.locked)+
+     (editing?textfield('dashboard-name',chosen.id,chosen.name,'Dashboard name')+
+       button('save-editor','Save dashboard')+
+       (all.length>1?button('remove-dashboard','Delete dashboard','data-id="'+attr(chosen.id)+'"'):''):
+       '<span class="note">Widget controls are hidden. Unlock to make changes.</span>')+'</div>')+
+     (widgets.length?'<div class="w-widget-grid">'+shown+'</div>':
+       card('Empty dashboard',editing?'Add a widget below':'Unlock the layout to add widgets',
+            nothing('No widgets have been configured yet.')))+
+     (editing?'<div class="w-actions">'+button('add-widget','+ Metric','data-kind="metric" data-id="'+attr(chosen.id)+'"')+
+       button('add-widget','+ Chart','data-kind="chart" data-id="'+attr(chosen.id)+'"')+
+       button('add-widget','+ Readings','data-kind="readings" data-id="'+attr(chosen.id)+'"')+'</div>':'');
  };
  const renderCooling=(S)=>{
    const systems=S.settings?.coolingSystems||[];
@@ -434,6 +441,20 @@ const SDWorkspace = (() => {
      syncInputs(S);
      const cfg=S.settings;
      if(action==='switch-dashboard'){S.workspaceDashboardId=id;h.render();return true;}
+     if(action==='toggle-dashboard-lock'){
+       const board=cfg.dashboards.find(d=>d.id===id);
+       if(board){board.locked=!board.locked;await persist(S,h);}
+       return true;
+     }
+     // Lock is a layout/editor guard. It isn't an access-control mechanism.
+     if(['add-widget','remove-widget','remove-dashboard'].includes(action)){
+       const board=cfg.dashboards.find(d=>d.id===id);
+       if(board?.locked){h.toast('Unlock the dashboard before editing.');return true;}
+     }
+     if(['add-sensor','remove-sensor'].includes(action)&&scope?.startsWith('dashboard:')){
+       const board=cfg.dashboards.find(d=>d.id===scope.split(':')[1]);
+       if(board?.locked){h.toast('Unlock the dashboard before editing.');return true;}
+     }
      if(action==='add-dashboard'){
        const template=el.dataset.template||'blank';
        const newWidget=(title,kind,ids)=>({id:uid(),title,kind,sensorIds:ids});
