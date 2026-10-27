@@ -33,7 +33,7 @@ public static class CollectorClient
         return document.RootElement.Clone();
     }
 }
-public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, ILogger<CollectorPipeServer> log) : BackgroundService
+public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, SimulationState simulation, ILogger<CollectorPipeServer> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -94,6 +94,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, I
                     "settings" => state.Settings,
                     "saveSettings" when req.Settings != null => Save(req.Settings),
                     "events" => db.ReadEvents(),
+                    "simulation" => new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest },
                     "history" => new
                     {
                         series = db.ReadHistory((req.Ids ?? []).Where(s => s.Length <= 256).Distinct().Take(12).ToArray(),
@@ -174,69 +175,95 @@ public sealed class SensorDashTray : ApplicationContext
     private readonly Icon _trayImage;
     private readonly ToolStripMenuItem _collectorStatus;
     private readonly System.Windows.Forms.Timer _statusTimer;
+    private readonly List<NotifyIcon> _readoutIcons = [];
+    private readonly List<Icon> _readoutImages = [];
+    private readonly Dictionary<string,string> _lastReadouts = [];
+    private List<TrayWidgetConfig> _configuration = [];
     private bool _checking;
     private bool _disposed;
+    private int _cycles;
 
     public SensorDashTray(IHostApplicationLifetime lifetime)
     {
         var menu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("Open SensorDash", null, (_, _) => Open())
-        {
-            Font = new Font(SystemFonts.MenuFont, FontStyle.Bold)
-        };
+        { Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) };
         menu.Items.Add(openItem);
-
-        // A read-only indicator, not a second copy of "Open SensorDash".
         _collectorStatus = new ToolStripMenuItem("Collector: Connecting…") { Enabled = false };
         menu.Items.Add(_collectorStatus);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Configure tray sensors", null, (_, _) => Open("tray"));
         menu.Items.Add("Exit tray and dashboard", null, (_, _) =>
         {
             _icon.Visible = false;
             lifetime.StopApplication();
             ExitThread();
         });
-
         _trayImage = TrayIconFactory.Create();
         _icon = new NotifyIcon
         {
-            Icon = _trayImage,
-            Text = "SensorDash — Checking collector",
-            ContextMenuStrip = menu,
-            Visible = true
+            Icon = _trayImage, Text = "SensorDash — Checking collector",
+            ContextMenuStrip = menu, Visible = true
         };
         _icon.DoubleClick += (_, _) => Open();
 
-        // Poll just the lightweight service status every 10 seconds. This is
-        // unrelated to the actual fast sensor or NVMe collection intervals.
-        // Windows Forms runs the timer on the tray's STA message loop.
-        _statusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        // The UI timer does not poll hardware. It reads the service's latest snapshot.
+        _statusTimer = new System.Windows.Forms.Timer { Interval = 1200 };
         _statusTimer.Tick += async (_, _) =>
         {
-            _statusTimer.Interval = 10_000;
-            await RefreshCollectorStatusAsync();
+            _statusTimer.Interval = 2000;
+            await RefreshAsync();
         };
         _statusTimer.Start();
     }
 
-    private async Task RefreshCollectorStatusAsync()
+    private async Task RefreshAsync()
     {
         if (_disposed || _checking) return;
         _checking = true;
         try
         {
-            var response = await CollectorClient.AskAsync(new PipeCommand("status"));
+            // Discover changed icon assignments on a slower cadence.
+            if (_cycles++ % 5 == 0)
+            {
+                var configuration = await CollectorClient.AskAsync(new PipeCommand("settings"));
+                if (_disposed) return;
+                var settings = configuration.Deserialize<DashboardSettings>(PipeProtocol.Json);
+                if (settings != null) ReconcileIcons(settings.TrayWidgets ?? []);
+            }
+            var live = await CollectorClient.AskAsync(new PipeCommand("live"));
             if (_disposed) return;
-            var count = response.TryGetProperty("sensorCount", out var sensors) &&
-                sensors.ValueKind == JsonValueKind.Number ? sensors.GetInt32() : 0;
-            var error = response.TryGetProperty("error", out var errorProp) &&
-                errorProp.ValueKind == JsonValueKind.String ? errorProp.GetString() : null;
-            _collectorStatus.Text = !string.IsNullOrEmpty(error)
-                ? "Collector: Running (sensor error)"
-                : count > 0 ? $"Collector: Online ({count} sensors)" : "Collector: Online (discovering sensors)";
-            _icon.Text = !string.IsNullOrEmpty(error)
-                ? "SensorDash — Collector sensor error"
-                : $"SensorDash — Collector online ({count} sensors)";
+            var frame = live.Deserialize<SensorFrame>(PipeProtocol.Json);
+            var readings = frame?.Sensors.ToDictionary(r => r.Id, r => r) ?? [];
+            _collectorStatus.Text = frame?.Error is { Length: > 0 }
+                ? "Collector: Sensor warning" : $"Collector: Online ({readings.Count} sensors)";
+            _icon.Text = frame?.Error is { Length: > 0 }
+                ? "SensorDash — Sensor warning" : $"SensorDash — {readings.Count} sensors";
+            for (var i = 0; i < _configuration.Count && i < _readoutIcons.Count; i++)
+            {
+                var cfg = _configuration[i];
+                readings.TryGetValue(cfg.SensorId, out var sensor);
+                var text = sensor?.Value is double value && double.IsFinite(value)
+                    ? value.ToString("F" + cfg.Decimals, System.Globalization.CultureInfo.InvariantCulture)
+                    : "--";
+                var unit = sensor?.Type switch
+                {
+                    "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" => "%",
+                    "Power" => "W", "Voltage" => "V", "Clock" => "MHz", _ => ""
+                };
+                var description = string.IsNullOrWhiteSpace(cfg.Label)
+                    ? (sensor?.Name ?? cfg.SensorId) : cfg.Label;
+                var tooltip = $"{description}: {text} {unit}";
+                _readoutIcons[i].Text = tooltip.Length > 63 ? tooltip[..63] : tooltip;
+                var key = cfg.Id + "/" + text + "/" + cfg.Color;
+                if (_lastReadouts.GetValueOrDefault(cfg.Id) == key) continue;
+                _lastReadouts[cfg.Id] = key;
+                var newIcon = TraySensorIcon.Create(text, cfg.Color);
+                var oldIcon = _readoutImages[i];
+                _readoutIcons[i].Icon = newIcon;
+                _readoutImages[i] = newIcon;
+                oldIcon.Dispose();
+            }
         }
         catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException)
         {
@@ -247,14 +274,37 @@ public sealed class SensorDashTray : ApplicationContext
         finally { _checking = false; }
     }
 
-    private static void Open()
+    private void ReconcileIcons(List<TrayWidgetConfig> requested)
+    {
+        // Rebuild only if the assigned sensor/icon options changed, not when a reading changes.
+        var desired = requested.Take(6).Where(w => !string.IsNullOrEmpty(w.SensorId)).ToList();
+        var previous = System.Text.Json.JsonSerializer.Serialize(_configuration);
+        if (previous == System.Text.Json.JsonSerializer.Serialize(desired)) return;
+        foreach (var icon in _readoutIcons) { icon.Visible = false; icon.Dispose(); }
+        foreach (var icon in _readoutImages) icon.Dispose();
+        _readoutIcons.Clear(); _readoutImages.Clear(); _lastReadouts.Clear();
+        _configuration = desired;
+        foreach (var cfg in desired)
+        {
+            var image = TraySensorIcon.Create("--", cfg.Color);
+            var icon = new NotifyIcon
+            {
+                Icon = image, Visible = true, Text = "SensorDash sensor — waiting for reading",
+                ContextMenuStrip = _icon.ContextMenuStrip
+            };
+            icon.DoubleClick += (_, _) => Open("tray");
+            _readoutIcons.Add(icon);
+            _readoutImages.Add(image);
+        }
+    }
+
+    private static void Open(string? page = null)
     {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://127.0.0.1:8765")
-            {
-                UseShellExecute = true
-            });
+            var uri = "http://127.0.0.1:8765/" + (page == null ? "" : "#" + page);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri)
+                { UseShellExecute = true });
         }
         catch { }
     }
@@ -264,11 +314,10 @@ public sealed class SensorDashTray : ApplicationContext
         if (disposing && !_disposed)
         {
             _disposed = true;
-            _statusTimer.Stop();
-            _statusTimer.Dispose();
-            _icon.Visible = false;
-            _icon.Dispose();
-            _trayImage.Dispose();
+            _statusTimer.Stop(); _statusTimer.Dispose();
+            foreach (var icon in _readoutIcons) { icon.Visible = false; icon.Dispose(); }
+            foreach (var icon in _readoutImages) icon.Dispose();
+            _icon.Visible = false; _icon.Dispose(); _trayImage.Dispose();
         }
         base.Dispose(disposing);
     }
