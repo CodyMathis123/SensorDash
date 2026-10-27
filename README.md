@@ -1,3 +1,4 @@
+<!-- One-time v0.5 fan-control Windows/MSI validation run. -->
 # SensorDash 0.5.0 — Experimental Live Fan Control
 
 Fan Control (the separate app) can simply be closed. Quit its tray/background process and disable its automatic startup before commanding a channel with SensorDash. No migration integration is required. Confirm the fan remains operational under BIOS/default control.
