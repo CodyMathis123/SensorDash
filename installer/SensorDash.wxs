@@ -8,7 +8,7 @@
     <MediaTemplate EmbedCab="yes" />
     <!-- WiX Icon table explicitly assigns the icon to the advertised Start Menu shortcut.
          The same icon is compiled into SensorDash.exe via ApplicationIcon. -->
-    <Icon Id="SensorDashAppIcon" SourceFile="$(MSBuildThisFileDirectory)..\src\SensorDash\Assets\SensorDash.ico" />
+    <Icon Id="SensorDashAppIcon" SourceFile="$(var.PublishDir)\..\src\SensorDash\Assets\SensorDash.ico" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="SensorDash">
