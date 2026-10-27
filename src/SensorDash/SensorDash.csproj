@@ -6,14 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>SensorDash</AssemblyName>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
+    <ApplicationIcon>Assets\SensorDash.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+  <Target Name="GenerateSensorDashApplicationIcon" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Generate-SensorDashIcon.ps1&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\Assets\SensorDash.ico&quot;" />
+  </Target>
   <ItemGroup>
+    <None Include="Assets\SensorDash.ico" CopyToPublishDirectory="Always" TargetPath="SensorDash.ico" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
