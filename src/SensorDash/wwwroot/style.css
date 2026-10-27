@@ -55,15 +55,46 @@
 .w-chip>.btn{border:0;background:none;color:#e0a9a9;padding:1px 5px}
 .w-add-input{display:flex;gap:9px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .w-add-input select{flex:1;min-width:180px}
-.w-tray-row{display:grid;grid-template-columns:20px minmax(180px,2fr) minmax(130px,1fr) 88px 105px auto;gap:10px;align-items:end;border-top:1px solid var(--edge);padding:13px 0}
-.w-tray-row>strong{align-self:center;color:var(--cyan)}
-.w-tray-row input[type=color]{padding:3px;min-height:40px;cursor:pointer}
+/* Independent named grid tracks keep Precision from overlapping Color/Remove.
+   The generic form-label min-width and flex rules must not apply to tray rows. */
+.w-tray-row{
+ display:grid;
+ grid-template-columns:24px minmax(190px,2.8fr) minmax(130px,1.5fr) 92px 100px 36px;
+ grid-template-areas:"index sensor label color precision remove";
+ gap:12px;align-items:end;border-top:1px solid var(--edge);padding:14px 0;
+}
+.w-tray-row>.w-tray-index{grid-area:index;color:var(--cyan);align-self:end;padding-bottom:10px;font-weight:750}
+.w-tray-row>.w-tray-sensor{grid-area:sensor}
+.w-tray-row>.w-tray-label{grid-area:label}
+.w-tray-row>.w-tray-color{grid-area:color}
+.w-tray-row>.w-tray-precision{grid-area:precision}
+.w-tray-row>.w-tray-remove{grid-area:remove;align-self:end}
+.w-tray-row>label{display:grid;gap:7px;min-width:0;width:100%;max-width:100%;font-size:12px;color:#a0b6c8;flex:none}
+.w-tray-row select,.w-tray-row input{display:block;width:100%;min-width:0;max-width:100%;height:34px;box-sizing:border-box}
+.w-tray-row input[type=color]{padding:3px;height:34px;cursor:pointer}
+.w-tray-remove>.btn{display:grid;place-items:center;min-width:36px;width:36px;height:34px;padding:0;font-size:17px}
+
 .w-sim-preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
 .w-sim-preview>div{background:#0f1c28;border:1px solid var(--edge);border-radius:9px;padding:13px;min-width:0}
 .w-sim-preview span{display:block;color:var(--muted);font-size:11px;margin-bottom:7px}
 .w-sim-preview strong{font-size:20px;font-variant-numeric:tabular-nums;color:var(--cyan)}
-@media(max-width:1100px){.w-widget-grid{grid-template-columns:1fr}.w-tray-row{grid-template-columns:1fr 2fr 2fr;align-items:center}.w-tray-row .btn{width:fit-content}}
-@media(max-width:700px){.w-grid{grid-template-columns:1fr}.w-tray-row{display:flex;flex-wrap:wrap}.w-tray-row>select{min-width:200px;flex:1}.w-sim-preview{grid-template-columns:1fr}.w-actions label{min-width:100%;flex:1}}
+@media(max-width:1100px){
+ .w-widget-grid{grid-template-columns:1fr}
+ .w-tray-row{
+  grid-template-columns:24px minmax(110px,1fr) minmax(110px,1fr) 100px;
+  grid-template-areas:"index sensor sensor remove" ". label color precision";
+  align-items:end;
+ }
+}
+@media(max-width:700px){
+ .w-grid{grid-template-columns:1fr}
+ .w-tray-row{
+  grid-template-columns:24px minmax(0,1fr) minmax(90px,1fr) 36px;
+  grid-template-areas:"index sensor sensor remove" ". label label ." ". color precision .";
+ }
+ .w-sim-preview{grid-template-columns:1fr}
+ .w-actions label{min-width:100%;flex:1}
+}
 
 .w-chip b{font-weight:700;color:#fbfcff;white-space:nowrap;margin-left:5px;font-variant-numeric:tabular-nums}
 .w-curve-plot{display:block;width:100%;max-width:740px;min-height:180px;margin:10px 0 18px;
