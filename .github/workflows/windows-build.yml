@@ -161,8 +161,17 @@ jobs:
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            $groups = @(Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8)
+            if ($groups.Count -ne 8) {
+              throw "Expected all eight hardware collection families, got $($groups.Count)"
+            }
+            if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
+              throw 'Missing Network from generic hardware collection capabilities'
+            }
 
             # Save real workspace configurations across the UI -> named pipe -> service.
+            $settings.disabledCollectionGroups = @('Network')
+            $settings.disabledCollectionDeviceIds = @()
             $settings.dashboards = @(@{
               id='ci-dashboard'; name='CI Workspace';
               widgets=@(@{id='ci-widget';title='CPU history';kind='chart';sensorIds=@('/ci/temperature')})
@@ -185,6 +194,9 @@ jobs:
               throw 'Generic workspace settings did not round-trip through named pipe'
             }
             $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
+              throw 'Generic collection family setting did not persist through service IPC'
+            }
             if ($persisted.dashboards[0].widgets[0].kind -ne 'chart' -or $persisted.simulatedFanCurves[0].id -ne 'ci-curve') {
               throw 'Collector did not persist workspace and simulated curve configuration'
             }
