@@ -21,7 +21,9 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
         {
             services.AddSingleton(new DashboardState(data));
             services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
+            services.AddSingleton<SimulationState>();
             services.AddHostedService<SensorWorker>();
+            services.AddHostedService<SimulationWorker>();
             services.AddHostedService<CollectorPipeServer>();
         }).Build();
     await service.RunAsync();
@@ -100,6 +102,8 @@ app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken 
 });
 app.MapGet("/api/events", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("events"), ct));
+app.MapGet("/api/simulation", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("simulation"), ct));
 async Task<IResult> ProxyAsync(PipeCommand request, CancellationToken ct)
 {
     try { return Results.Json(await CollectorClient.AskAsync(request, ct), JsonSerializerOptions.Web); }
@@ -150,7 +154,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 await app.RunAsync();
 
-public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value);
+public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null);
 public sealed record HardwareDevice(string Id, string Name, string Type, int SensorCount);
 public sealed record SensorFrame(DateTimeOffset Timestamp, List<SensorReading> Sensors, string? Error, List<HardwareDevice>? Devices = null);
 public static class SecurityInfo {
@@ -166,6 +170,13 @@ public sealed class DashboardSettings {
     public int StoragePollSeconds { get; set; } = 10;
     public int SaveEverySeconds { get; set; } = 10;
     public int RetentionDays { get; set; } = 30;
+    public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
+    public List<WorkspaceDashboardConfig> Dashboards { get; set; } = [
+        new() { Id = "system", Name = "System dashboard" }
+    ];
+    public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
+    public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
+    public List<SimulatedFanCurveConfig> SimulatedFanCurves { get; set; } = [];
     // Optional roles map to *actual* IDs discovered on this machine. The UI can change all mappings.
     public Dictionary<string, string> SensorBindings { get; set; } = new();
     public Dictionary<string, string> Aliases { get; set; } = new() {
@@ -209,6 +220,7 @@ public sealed class DashboardState {
         requested.PinnedSensors = requested.PinnedSensors.Where(s => s.Length <= 256).Distinct().Take(100).ToList();
         requested.SensorBindings = requested.SensorBindings.Where(kv => kv.Key.Length <= 64 && kv.Value.Length <= 256).Take(32).ToDictionary();
         requested.HighThresholds = requested.HighThresholds.Where(kv => kv.Key.Length <= 256 && double.IsFinite(kv.Value)).Take(100).ToDictionary();
+        WorkspaceLogic.Normalize(requested);
         var temp = _settingsPath + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(requested, new JsonSerializerOptions(JsonSerializerOptions.Web) { WriteIndented = true }));
         File.Move(temp, _settingsPath, true);
@@ -341,7 +353,10 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
-                foreach (var hardware in _computer.Hardware) Scan(hardware, readings, devices, refreshStorage);
+                foreach (var hardware in _computer.Hardware)
+                    Scan(hardware, readings, devices, refreshStorage, now, _lastStorage);
+                var baseFrame = new SensorFrame(now, readings, null, devices);
+                readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
                 var frame = new SensorFrame(now, readings, null, devices);
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
@@ -365,7 +380,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
         }
         try { _computer?.Close(); } catch { }
     }
-    private static void Scan(IHardware hardware, List<SensorReading> target, List<HardwareDevice> devices, bool refreshStorage) {
+    private static void Scan(IHardware hardware, List<SensorReading> target, List<HardwareDevice> devices,
+        bool refreshStorage, DateTimeOffset now, DateTimeOffset lastStorage) {
         // Sensor metadata stays discoverable even when the latest reading is null.
         // Only perform storage I/O on the separately configurable slower interval.
         if (hardware.HardwareType != HardwareType.Storage || refreshStorage) hardware.Update();
@@ -374,9 +390,11 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, ILogger<
         foreach (var sensor in hardware.Sensors) {
             double? value = sensor.Value is float x && float.IsFinite(x) ? x : null;
             target.Add(new SensorReading(sensor.Identifier.ToString(), sensor.Name, hardware.Name,
-                hardware.HardwareType.ToString(), sensor.SensorType.ToString(), value));
+                hardware.HardwareType.ToString(), sensor.SensorType.ToString(), value,
+                hardware.HardwareType == HardwareType.Storage ? lastStorage : now));
         }
-        foreach (var child in hardware.SubHardware) Scan(child, target, devices, refreshStorage);
+        foreach (var child in hardware.SubHardware)
+            Scan(child, target, devices, refreshStorage, now, lastStorage);
     }
     private void CheckEvents(SensorFrame frame, DashboardSettings cfg) {
         var byId = frame.Sensors.ToDictionary(s => s.Id, s => s);
