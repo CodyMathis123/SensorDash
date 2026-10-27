@@ -12,7 +12,7 @@ internal static class TraySensorIcon
 {
     public static Icon Create(string fullValue, string hexColor)
     {
-        if (!ColorTranslator.TryFromHtmlCompat(hexColor, out var accent))
+        if (!TryHexColor(hexColor, out var accent))
             accent = Color.FromArgb(98, 213, 206);
 
         var size = NativeIconSize();
@@ -89,6 +89,17 @@ internal static class TraySensorIcon
         // Single-digit readings can accommodate a decimal point.
         if (Math.Abs(number) < 10) return number.ToString("0.#", CultureInfo.InvariantCulture);
         return value;
+    }
+
+    private static bool TryHexColor(string? text, out Color color)
+    {
+        color = Color.FromArgb(98, 213, 206);
+        if (text is not { Length: 7 } || text[0] != '#' ||
+            !int.TryParse(text[1..], NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture, out var rgb))
+            return false;
+        color = Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+        return true;
     }
 
     private static int NativeIconSize()
