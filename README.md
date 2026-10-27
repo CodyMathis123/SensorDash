@@ -2,7 +2,7 @@
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **simulation-only fan curves**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.4.0.** The feature branch may be ahead of the most recently validated installer. The full MSI pipeline runs manually or on a push to `Production`, not on every feature commit.
+**Development version: 0.4.0.** The feature branch may be ahead of the most recently validated installer. The full MSI pipeline runs on `Production` pushes, an explicitly created `validation/*` branch, or manual dispatch (once the workflow is registered on the default branch). Routine feature commits do not trigger it.
 
 ## What Cooling Systems are for
 
@@ -67,6 +67,6 @@ dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
 
 The JavaScript regression test covers auto-generated cooling analytics, meaningful component types, in-use sensor references, exact Explorer→Cooling navigation, history query batching, hidden sensors, layout locks and generated dashboard widgets. The executable self-test covers virtual sensor arithmetic, simulated curves, missing/stale readings, tray formatting, collection groups, history filtering and cooling component normalization.
 
-The full Windows workflow also smoke-tests the service-to-dashboard named pipe and verifies MSI install, service startup, Start Menu shortcut creation, tray registration and uninstall. It runs **only on `Production` pushes or manual dispatch**, to avoid expensive builds on every development commit.
+The full Windows workflow also smoke-tests the service-to-dashboard named pipe and verifies MSI install, service startup, Start Menu shortcut creation, tray registration and uninstall. It runs on **`Production` pushes, explicitly created `validation/*` branches, or manual dispatch** once the workflow exists on the default branch. Ordinary feature commits never trigger it.
 
 This application is not safety-rated fan-control software. Hardware writes, output ownership, calibration, watchdog recovery and tighter control authorization must be implemented and separately tested before any future live fan-control release.
