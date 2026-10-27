@@ -220,6 +220,7 @@ const SDWorkspace = (() => {
      const temperatures=telemetry.byType('Temperature').filter(s=>Number.isFinite(s.value));
      const heat=telemetry.heatPower;
      const fans=telemetry.byType('Fan').filter(s=>Number.isFinite(s.value));
+     const flows=telemetry.byType('Flow').filter(s=>Number.isFinite(s.value));
      const pumps=(sys.components||[]).filter(c=>c.kind==='pump');
      const sampledPower=heat.length===1?heat[0]:null;
      // Never add core/package/board power indiscriminately: multiple readings
@@ -229,10 +230,12 @@ const SDWorkspace = (() => {
          temperatures.length?'Highest assigned temperature':'Add a temperature sensor'],
        ['heat-power','Heat-source power',sampledPower?value(sampledPower)+' W':heat.length?heat.length+' power readings':'—',
          heat.length===1?displayName(S,sampledPower):heat.length?'Multiple readings; shown individually':'Assign source power readings'],
-       ['fan-count','Cooling fans',fans.length?fans.length+' readings':'—',
-         fans.length?'Fan speeds plotted below':'Assign Fan RPM sensors'],
-       ['pump-count','Circulation',pumps.length+' pumps',
-         telemetry.byType('Flow').length?'Flow sensors assigned':'Optional pump RPM / flow']
+       ['fan-count','RPM sensors',fans.length?fans.length+' readings':'—',
+         fans.length?'Fan and pump tachometers plotted below':'Assign fan or pump RPM'],
+       ['pump-count','Circulation',flows.length===1?value(flows[0])+' '+unit('Flow'):
+           flows.length?flows.length+' flow readings':pumps.length?pumps.length+' pump'+(pumps.length===1?'':'s'):'—',
+         flows.length===1?displayName(S,flows[0]):flows.length?'Flow sensors plotted individually':
+           pumps.length?'Pump configured; add a flow sensor for rate':'Optional pump/flow meter']
      ];
      const summary='<div class="w-cooling-summary">'+summaries.map(([key,name,val,description])=>
        '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong data-cooling-value="'+attr(sys.id)+'|'+key+'">'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
@@ -686,12 +689,16 @@ const SDWorkspace = (() => {
        const data=coolingReadings(S,system);
        const temperatures=data.byType('Temperature').filter(s=>Number.isFinite(s.value));
        const fans=data.byType('Fan').filter(s=>Number.isFinite(s.value));
+       const flows=data.byType('Flow').filter(s=>Number.isFinite(s.value));
+       const pumpCount=system.components.filter(c=>c.kind==='pump').length;
        values={
          'highest-temp':temperatures.length?Math.max(...temperatures.map(s=>s.value)).toFixed(1)+' °C':'—',
          'heat-power':data.heatPower.length===1?value(data.heatPower[0])+' W':
            data.heatPower.length?data.heatPower.length+' power readings':'—',
          'fan-count':fans.length?fans.length+' readings':'—',
-         'pump-count':system.components.filter(c=>c.kind==='pump').length+' pumps'
+         'pump-count':flows.length===1?value(flows[0])+' '+unit('Flow'):
+           flows.length?flows.length+' flow readings':
+           pumpCount?pumpCount+' pump'+(pumpCount===1?'':'s'):'—'
        };
        cache.set(id,values);
      }
