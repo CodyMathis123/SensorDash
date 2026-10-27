@@ -409,6 +409,60 @@ const SDWorkspace = (() => {
   updateCurvePreview(table,S);
   return true;
  };
+ const renderLiveFanControl=(S)=>{
+  const data=S.fanControl||{};
+  const state=data.status||{};
+  const outputs=data.outputs||[];
+  const active=state.state==='active'||state.state==='pending';
+  const supported=outputs.filter(o=>o.writable);
+  const rows=outputs.map(o=>
+    '<tr><td>'+safe(o.device)+' <small>'+safe(o.deviceId||'')+'</small></td>'+
+    '<td>'+safe(o.name)+'<small>'+safe(o.id)+'</small></td>'+
+    '<td>'+safe(o.mode)+'</td>'+
+    '<td>'+safe(o.minimum)+'–'+safe(o.maximum)+'%</td>'+
+    '<td>'+(!o.writable?'Unavailable':o.mode==='Default'?'Ready for explicit takeover':
+      o.mode==='Software'?'Already software-controlled':'Inspect hardware support')+'</td></tr>'
+  ).join('');
+  const curveOptions=(S.settings?.simulatedFanCurves||[]).map(c=>
+    '<option value="'+attr(c.id)+'">'+safe(c.name)+'</option>').join('');
+  return card('Experimental live fan control','Elevated, time-limited sessions · disabled by default',
+    '<p class="help">Exit any other fan-controller application before using this. '+
+     'Select a discovered writable output, not an RPM sensor. '+
+     'Windows will request administrator approval for every takeover or release. '+
+     'The initial implementation limits duty to 70–100% and restores firmware/default mode at lease expiry. '+
+     'Do not use this experimental mode to control an essential pump without verified firmware fallback.</p>'+
+    '<div class="w-live-status"><strong>Control state: <span data-fan-status>'+
+       safe(state.state||'Loading…')+'</span></strong>'+
+     '<span data-fan-message>'+safe(state.message||'Looking for writable outputs…')+'</span>'+
+     '<span data-fan-expiry>'+safe(state.expires?'Expires '+new Date(state.expires).toLocaleTimeString():'')+'</span></div>'+
+    '<div class="table-container"><table class="w-output-table"><thead><tr>'+
+      '<th>Hardware</th><th>Writable output</th><th>Mode</th><th>Duty range</th><th>Availability</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="w-actions">'+
+      '<label>Writable channel<select id="liveFanChannel">'+
+      '<option value="">Choose an output</option>'+supported.map(o=>
+        '<option value="'+attr(o.id)+'">'+safe(o.device+' / '+o.name+' ('+o.mode+')')+'</option>').join('')+
+      '</select></label>'+
+      '<label>Control mode<select id="liveFanMode"><option value="manual">Manual test</option>'+
+      '<option value="curve">Saved temperature curve</option></select></label>'+
+      '<label>Manual PWM (%)<input id="liveFanDuty" type="number" min="70" max="100" step="1" value="100"></label>'+
+      '<label>Saved curve<select id="liveFanCurve"><option value="">Choose curve</option>'+
+        curveOptions+'</select></label>'+
+      '<label>Time limit<select id="liveFanDuration">'+
+        '<option value="30">30 seconds</option><option value="60" selected>60 seconds</option>'+
+        '<option value="120">120 seconds</option></select></label>'+
+    '</div>'+
+    '<label class="w-fan-ack"><input id="liveFanExclusive" type="checkbox" />'+
+    '<span>I have exited other fan-control software, confirmed this channel, and understand '+
+    'that firmware recovery after a power loss or hard crash cannot be guaranteed.</span></label>'+
+    '<div class="w-actions">'+
+       button('fan-authorize','Request elevated takeover','',false)+
+       button('fan-release','Release to firmware control')+
+     '</div>'+
+    '<p class="note">Live curve control uses the same saved curves as the sandbox, with a temporary 70% duty floor. '+
+    'If a curve input disappears or becomes stale, SensorDash attempts to return the channel to firmware/default control. '+
+    'This is not yet a background watchdog or permanent controller.</p>');
+ };
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
@@ -441,7 +495,8 @@ const SDWorkspace = (() => {
    }).join('');
    return '<div class="help">Read-only mode is enforced in the elevated collector. This sandbox evaluates each saved curve every second without claiming a fan-output channel or calling hardware control APIs.</div>'+
       '<div class="w-actions">'+button('add-curve','+ New simulated curve','',false)+'</div>'+
-      (cards||card('Create a fan curve','Choose a detected temperature sensor',nothing('No simulated curves yet.')));
+      (cards||card('Create a fan curve','Choose a detected temperature sensor',nothing('No simulated curves yet.')))+
+      renderLiveFanControl(S);
  };
  const renderVirtual=(S)=>{
    const virtual=S.settings?.virtualSensors||[];
@@ -531,6 +586,33 @@ const SDWorkspace = (() => {
    e.preventDefault();e.stopPropagation();
    const action=el.dataset.work,id=el.dataset.id,scope=el.dataset.scope;
    try{
+     if(action==='fan-authorize'||action==='fan-release'){
+       const release=action==='fan-release';
+       const channel=document.getElementById('liveFanChannel')?.value||'';
+       const mode=document.getElementById('liveFanMode')?.value||'manual';
+       const acknowledge=document.getElementById('liveFanExclusive')?.checked===true;
+       if(!release&&(!channel||!acknowledge)){
+         h.toast('Select a writable channel and confirm exclusive hardware ownership.');
+         return true;
+       }
+       const command={
+         action:release?'release':'arm',channelId:release?'':channel,
+         curveId:!release&&mode==='curve'?(document.getElementById('liveFanCurve')?.value||''):'',
+         percent:Number(document.getElementById('liveFanDuty')?.value||100),
+         durationSeconds:Number(document.getElementById('liveFanDuration')?.value||60),
+         confirmExclusiveOwnership:acknowledge
+       };
+       if(!release&&mode==='curve'&&!command.curveId){
+         h.toast('Select a saved temperature curve.');return true;
+       }
+       const response=await fetch('/api/fan-control/authorize',{
+         method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
+         body:JSON.stringify(command)
+       });
+       if(!response.ok){h.toast('Authorization not started: '+(await response.text()).slice(0,150));return true;}
+       h.toast('Windows elevation requested. The status above shows the actual hardware result.');
+       return true;
+     }
      // Curve point row operations edit the local form. Saving is explicit,
      // so a blank/partially typed row must not be persisted or discarded.
      if(action==='remove-curve-point'){
@@ -706,6 +788,19 @@ const SDWorkspace = (() => {
      if(next!=null&&node.textContent!==next)node.textContent=next;
    });
  };
+ const paintFanControl=(S)=>{
+   const data=S.fanControl?.status;
+   if(!data)return;
+   const updates=[
+     ['[data-fan-status]',data.state||'unknown'],
+     ['[data-fan-message]',data.message||''],
+     ['[data-fan-expiry]',data.expires?'Expires '+new Date(data.expires).toLocaleTimeString():'']
+   ];
+   for(const [selector,val] of updates){
+     const element=document.querySelector(selector);
+     if(element&&element.textContent!==val)element.textContent=val;
+   }
+ };
  const paintSimulation=(S)=>{
    const readings=S.simulation?.results||[];
    document.querySelectorAll('[data-sim]').forEach(el=>{
@@ -715,5 +810,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation,paintCooling,handleCurvePointInput,isHidden,displayName,usageIndex};
+ return {render,handle,paintSimulation,paintCooling,paintFanControl,handleCurvePointInput,isHidden,displayName,usageIndex};
 })();
