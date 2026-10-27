@@ -176,5 +176,16 @@ internal static class WorkspaceSelfTest
         if (FanControlRuntime.MinExperimentalDuty < 70 ||
             FanControlRuntime.MaxSessionSeconds > 120)
             throw new Exception("Experimental control limits changed without safety review");
+        // LHM reports Undefined on first instantiation, not firmware state.
+        // Hardware eligibility should depend on the supported output range,
+        // rather than which mode the LHM wrapper happens to remember.
+        if (!FanControlRuntime.SupportsTestRange(0,100) ||
+            !FanControlRuntime.SupportsTestRange(80,90) ||
+            FanControlRuntime.SupportsTestRange(0,50) ||
+            FanControlRuntime.CanApplyManualDuty(80,90,70) ||
+            !FanControlRuntime.CanApplyManualDuty(80,90,85) ||
+            FanControlRuntime.CanApplyManualDuty(80,90,100))
+            throw new Exception("Fan control per-channel PWM capability detection incorrect");
+
     }
 }
