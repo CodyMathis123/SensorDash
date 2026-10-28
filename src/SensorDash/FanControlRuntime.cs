@@ -81,6 +81,9 @@ public sealed class FanControlRuntime
                 _pending = new Pending(command, null);
                 return new { accepted = true, message = "Firmware-default restoration queued." };
             }
+            if (settings.FanChannelMappings?.Any(m => m.ChannelId == command.ChannelId &&
+                    m.Kind == "pump") == true)
+                return new { accepted = false, message = "This channel is identified as a pump; manual fan-commissioning tests are disabled." };
             if (_session != null)
                 return new { accepted = false, message = "Release the current session first." };
             if (!command.ConfirmExclusiveOwnership)

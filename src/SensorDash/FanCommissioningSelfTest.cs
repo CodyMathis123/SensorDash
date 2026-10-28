@@ -37,6 +37,14 @@ internal static class FanCommissioningSelfTest
         var normalizedPump=FanCommissioningRules.Normalize([pump])[0];
         Check(normalizedPump.Measurements.Count==0 && normalizedPump.VerifiedAt==null,
             "pump cannot acquire fan calibration or verification");
+        var runtime=new FanControlRuntime(Path.Combine(Path.GetTempPath(),
+            "SensorDash-Commissioning-" + Guid.NewGuid().ToString("N")));
+        var guard=System.Text.Json.JsonSerializer.Serialize(runtime.Request(
+            new FanCommand("arm",ChannelId:"pump",Percent:100,DurationSeconds:30,
+                ConfirmExclusiveOwnership:true),
+            new DashboardSettings{FanChannelMappings=[normalizedPump]}));
+        Check(guard.Contains("identified as a pump",StringComparison.Ordinal),
+            "collector must reject manual tests for mapped pumps");
         var unknown=new FanChannelMapping{
             ChannelId="unknown",Kind="fan",RpmSensorId="rpm",
             VisuallyIdentified=true,VerifiedAt=now,

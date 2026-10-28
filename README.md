@@ -91,7 +91,7 @@ A local-first Windows hardware telemetry dashboard with configurable cooling sys
 
 The Fan Control screen includes a dedicated **Identify → Name → Calibrate → Verify** assistant. It stores *advisory* mappings of discovered PWM outputs to fan-bank labels and optional tachometer (RPM) sensor IDs. It does not guess header wiring or use mapping metadata as hardware-write authorization.
 
-- Identify each channel as **fan**, **pump**, or **unknown**. Unknown/pump outputs have no commissioning test buttons. The user must confirm fan versus pump wiring.
+- Identify each channel as **fan**, **pump**, or **unknown**. Unknown/pump outputs have no commissioning test buttons, and the privileged controller also rejects timed manual tests for channels identified as pumps. The user must confirm fan versus pump wiring.
 - Test a named fan using the existing UAC-authorized exclusive **30-second manual session**, at **100%, 85%, or 70%** PWM only. Each test requires a new elevation prompt. Stop/release remains available.
 - When an RPM sensor is assigned, capture a **fresh, positive** reading during the **matching active manual test**, after a five-second stabilization period. Recordings are evidence of observed RPM, not proof all fans on a splitter are spinning.
 - User verification requires physical confirmation and at least two measurements separated by 10 PWM percentage points with an 8% RPM rise. Changes to channel type or tachometer clear observations/verification. Mappings and measured points persist with settings across upgrades.
