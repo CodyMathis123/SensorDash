@@ -384,7 +384,7 @@ function drawCanvas(canvas){
    const base=S.history[id]||[], live=S.liveCache.get(id)||[], first=Date.now()-S.hours*3600000;
    const points=base.filter(p=>p.t>=first);
    live.forEach(p=>{if(p.t>=first&&(!points.length||p.t>points[points.length-1].t))points.push(p)});
-   return {id,color:colors[i%colors.length],points};
+   return {id,name:label(sensor(id)),color:colors[i%colors.length],points};
  }).filter(s=>s.points.length);
  const rect=canvas.getBoundingClientRect(),w=Math.max(100,rect.width),h=Math.max(100,rect.height);
  const ratio=Math.min(window.devicePixelRatio||1,2);
@@ -431,22 +431,44 @@ function drawCanvas(canvas){
    const x=e.clientX-canvas.getBoundingClientRect().left;
    const desired=xmin+(x-p.l)/cw*(xmax-xmin);
    if(desired>=xmin&&desired<=xmax)
-     drawCanvasOverlay(hoverCtx,series,{tx,ty,p,h,w,cw,ch},desired);
+     drawCanvasOverlay(hoverCtx,series,{tx,ty,p,h,w,cw,ch,unit:canvas.dataset.unit||''},desired);
  };
  canvas.onmouseleave=()=>{clearHover();flushChartAfterHover()};
 }
 function drawCanvasOverlay(ctx,series,layout,desired){
- const {tx,ty,p,h,w}=layout;
+ const {tx,p,h,w,unit}=layout;
  if(desired<Date.now()-S.hours*3600000||desired>Date.now())return;
  const values=series.map(s=>s.points.reduce((a,b)=>Math.abs(a.t-desired)<=Math.abs(b.t-desired)?a:b));
  if(!values.length)return;
  const x=tx(values[0].t);
- ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#819aab';ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,h-p.b);ctx.stroke();ctx.restore();
- ctx.fillStyle='#101923d9';ctx.strokeStyle='#3b5867';const tipW=130,tipH=26+values.length*18,tipX=Math.max(5,Math.min(w-tipW-5,x+9)),tipY=5;
+ ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#819aab';
+ ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,h-p.b);ctx.stroke();ctx.restore();
+ const cap=s=>s.length>32?s.slice(0,29)+'…':s;
+ const names=series.map(s=>cap(s.name||s.id));
+ ctx.font='11px Segoe UI';
+ const labelWidth=Math.max(50,...names.map(n=>ctx.measureText(n).width));
+ const valWidth=Math.max(45,...values.map(q=>ctx.measureText(fmt(q.v,1)+(unit?' '+unit:'')).width));
+ const tipW=Math.min(w-10,Math.max(175,Math.ceil(labelWidth+valWidth+45)));
+ const tipH=26+values.length*20;
+ const tipX=Math.max(5,Math.min(w-tipW-5,x+11)),tipY=5;
+ ctx.fillStyle='#101923ed';ctx.strokeStyle='#3b5867';
  ctx.fillRect(tipX,tipY,tipW,tipH);ctx.strokeRect(tipX,tipY,tipW,tipH);
- ctx.font='11px Segoe UI';ctx.textAlign='left';ctx.fillStyle='#a8bdc9';ctx.fillText(shorttime(values[0].t),tipX+9,tipY+16);
- values.forEach((q,i)=>{ctx.fillStyle=series[i].color;ctx.fillText(fmt(q.v,1),tipX+9,tipY+34+i*18)});
+ ctx.textAlign='left';ctx.fillStyle='#b1c5d2';
+ ctx.fillText(shorttime(values[0].t),tipX+10,tipY+16);
+ values.forEach((q,i)=>{
+   const rowY=tipY+35+i*20;
+   ctx.fillStyle=series[i].color;ctx.fillRect(tipX+9,rowY-9,8,8);
+   ctx.fillStyle='#dcecf5';
+   const maxTextWidth=Math.max(30,tipW-valWidth-37);
+   ctx.save();ctx.beginPath();ctx.rect(tipX+23,rowY-12,maxTextWidth,15);ctx.clip();
+   ctx.fillText(names[i],tipX+23,rowY);
+   ctx.restore();
+   ctx.fillStyle=series[i].color;ctx.textAlign='right';
+   ctx.fillText(fmt(q.v,1)+(unit?' '+unit:''),tipX+tipW-10,rowY);
+   ctx.textAlign='left';
+ });
 }
+
 async function loadSimulation(){
  if(S.view!=='curves')return;
  try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
