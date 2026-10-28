@@ -94,6 +94,25 @@ jobs:
           if ($ui -match 'firmware recovery after a power loss' -or $ui -notmatch 'I have closed other fan-control software') {
             throw 'Fan control acknowledgment should be concise and accurate'
           }
+      - name: Verify persistent fan-control and performance contracts
+        shell: pwsh
+        run: |
+          $model = Get-Content 'src/SensorDash/PersistentFanProfiles.cs' -Raw
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $app = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          $html = Get-Content 'src/SensorDash/wwwroot/index.html' -Raw
+          if ($model -notmatch 'approved-fan-profiles.json' -or
+              $model -notmatch 'SetDefault\(' -or $model -notmatch 'SetSoftware\(') {
+            throw 'Missing approved persistent hardware control and cleanup'
+          }
+          if ($model -notmatch 'Math.Max' -or
+              $ui -notmatch 'starter-radiators' -or $ui -notmatch 'starter-nvme') {
+            throw 'Missing CPU/GPU MAX and NVMe fan profiles'
+          }
+          if ($app -notmatch 'HISTORY_CACHE_LIMIT' -or $app -notmatch 'tipW' -or
+              $html -match 'Curve simulation only') {
+            throw 'Chart cache, hover tooltip, or live-control footer missing'
+          }
       - name: Check polling / rendering separation
         shell: pwsh
         run: |
@@ -184,6 +203,10 @@ jobs:
           $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
           if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
           $outputs = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/fan-control' -TimeoutSec 8
+          if (!$outputs.persistent -or !$outputs.persistent.persistent -or
+              $outputs.persistent.profiles.Count -ne 0) {
+            throw 'Installed v0.6 must start with no active fan-control approvals'
+          }
           if (!$outputs.status -or !$outputs.experimental -or !$outputs.requiresAdministrator) {
             throw 'Control inventory is not available or is incorrectly configured'
           }
@@ -296,7 +319,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.5.1-x64
+          name: SensorDash-Setup-0.6.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
