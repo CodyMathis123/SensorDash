@@ -510,7 +510,6 @@ async function loadSimulation(){
  catch(e){console.warn('Simulation preview:',e.message);}
 }
 async function loadFanControl(){
- if(S.view!=='curves')return;
  try{
   const data=await fetchJSON('/api/fan-control');
   const signature=JSON.stringify({
@@ -682,7 +681,7 @@ async function bootstrap(){
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
    setInterval(loadEvents,30000);
    setInterval(loadSimulation,2000);
-   setInterval(loadFanControl,2000);
+   setInterval(loadFanControl,3000);
    setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
