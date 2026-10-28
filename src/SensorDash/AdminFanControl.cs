@@ -27,7 +27,8 @@ public static class AdminFanControlClient
 }
 
 public sealed class AdminFanControlPipeServer(
-    DashboardState state, FanControlRuntime control, ILogger<AdminFanControlPipeServer> logger)
+    DashboardState state, FanControlRuntime control, HistoryStore db,
+    ILogger<AdminFanControlPipeServer> logger)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -83,6 +84,17 @@ public sealed class AdminFanControlPipeServer(
                 var command=JsonSerializer.Deserialize<FanCommand>(data,PipeProtocol.Json);
                 var result=control.Request(command,state.Settings);
                 await output.WriteLineAsync(JsonSerializer.Serialize(result,PipeProtocol.Json).AsMemory(),timeout.Token);
+                // The request was accepted by the privileged controller, but
+                // actual PWM application still happens on the collector thread.
+                if(command!=null && CoolingEventRecorder.Accepted(result))
+                {
+                    var entry=CoolingEventRecorder.Describe(command);
+                    if(entry!=null)
+                    {
+                        try { db.Event("info",entry.Sensor,entry.Message,null); }
+                        catch(Exception ex) { logger.LogWarning(ex,"Could not record fan activity"); }
+                    }
+                }
             }
             catch(Exception ex) when(ex is not OperationCanceledException)
             {

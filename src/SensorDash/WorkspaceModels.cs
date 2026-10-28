@@ -152,7 +152,8 @@ public static class WorkspaceLogic
                 component.Id = Short(component.Id, 80);
                 component.Name = Short(component.Name);
                 component.Kind = component.Kind is "heat-source" or "fan-group" or "pump" or
-                    "temperature-probe" or "flow-meter" or "other" ? component.Kind : "other";
+                    "temperature-probe" or "coolant-probe" or "case-air" or
+                    "room-ambient" or "flow-meter" or "other" ? component.Kind : "other";
                 component.SensorIds = Ids(component.SensorIds);
                 return component;
             }).ToList();

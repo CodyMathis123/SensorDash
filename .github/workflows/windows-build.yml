@@ -25,12 +25,16 @@ jobs:
           node --check src/SensorDash/wwwroot/fan-control-ux.js
           node --check src/SensorDash/wwwroot/workspace-locks.js
           node --check src/SensorDash/wwwroot/fan-feedback.js
+          node --check src/SensorDash/wwwroot/cooling-insights.js
+          node --check src/SensorDash/wwwroot/cooling-timeline.js
       - name: Test configurable cooling systems and sensor usage
         run: node scripts/test-workspace.cjs
       - name: Test fan commissioning frontend contracts
         run: node scripts/test-fan-commissioning.cjs
       - name: Test fan profile review and editor locks
         run: node scripts/test-fan-review.cjs
+      - name: Test role-aware Cooling Systems analysis
+        run: node scripts/test-cooling-phase1.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
@@ -330,7 +334,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.6.4-x64
+          name: SensorDash-Setup-0.7.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -85,7 +85,10 @@ catch (TaskCanceledException) { }
 
 var userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
 Directory.CreateDirectory(userDir);
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+// The desktop process only serves loopback minimal APIs and embedded assets.
+// SlimBuilder avoids unrelated MVC/configuration defaults in the tray host;
+// the elevated collector keeps its normal Windows Service host.
+var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
 {
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
@@ -109,6 +112,8 @@ app.MapGet("/fan-commissioning.js", () => Resource("fan-commissioning.js", "text
 app.MapGet("/fan-control-ux.js", () => Resource("fan-control-ux.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
+app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
+app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
@@ -225,7 +230,7 @@ app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
 var trayThread = new Thread(() =>
 {
     Application.EnableVisualStyles();
-    using var context = new SensorDashTray(app.Lifetime);
+    using var context = new SensorDashTray(app.Services.GetRequiredService<DashboardState>(),app.Lifetime);
     Application.Run(context);
 }) { IsBackground = true, Name = "SensorDash Tray" };
 trayThread.SetApartmentState(ApartmentState.STA);

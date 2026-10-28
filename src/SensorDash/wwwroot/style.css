@@ -276,3 +276,52 @@
 .w-fan-feedback .note{margin:8px 0 0}
 @media(max-width:700px){.w-fan-fold-body{padding:0 8px 8px}
  .w-fan-fold>summary{padding:12px}.w-fan-feedback-row{align-items:flex-start}}
+
+/* Cooling Phase 1: role-aware component summaries and correlated timeline.
+   All calculations are read-only, separate from privileged fan control. */
+.cooling-insights,.cooling-analysis,.cooling-activity{margin:16px 0;border:1px solid #304956;
+  border-radius:12px;background:#111f2b;padding:17px;min-width:0}
+.cooling-insights-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.cooling-insights-head h3{font-size:14px;color:#e2f3fc;margin:0 0 5px}
+.cooling-insights-head p{font-size:11px;color:#9db3c3;margin:0;line-height:1.55}
+.cooling-insights-label{font-size:10px;border:1px solid #345b60;color:#82dcd4;
+ padding:5px 9px;border-radius:30px;white-space:nowrap}
+.cooling-insight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cooling-insight-tile{display:flex;flex-direction:column;gap:9px;background:#172a38;
+ padding:12px;border-radius:9px;border:1px solid #294554;min-width:0}
+.cooling-insight-tile>span{font-size:12px;font-weight:700;color:#9cf2e5}
+.cooling-insight-reading{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #2a414f;padding-top:8px}
+.cooling-insight-reading small,.cooling-insight-tile>small{color:#a9bdcc;font-size:11px;min-width:0;overflow-wrap:anywhere}
+.cooling-insight-reading strong{color:#e4f2fa;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cooling-insight-empty{font-size:13px;font-weight:600;color:#c9d7de}
+.cooling-insights>.note{margin:12px 0 0;line-height:1.55}
+.cooling-timeline-intro{padding:8px 4px 0;margin-top:14px}
+.cooling-timeline-intro>strong{font-size:14px}
+.cooling-timeline-intro>.note{margin:7px 0 13px}
+.cooling-correlation-list{display:grid;gap:6px}
+.cooling-correlation-row{display:grid;grid-template-columns:1fr 2fr 75px 100px;align-items:center;
+ gap:8px;background:#1a3040;padding:10px;border-radius:7px;font-size:12px}
+.cooling-correlation-row>span{color:#adc3cf}
+.cooling-correlation-row>b{text-align:right;color:#8ae8dd;font-variant-numeric:tabular-nums}
+.cooling-correlation-row>small{text-align:right;color:#9bafbc}
+.cooling-activity-list{display:grid;gap:6px}
+.cooling-activity-row{border:1px solid #2c4351;background:#172c3b;color:#cce2ec;text-align:left;
+ border-radius:8px;padding:10px 12px;display:flex;align-items:start;gap:15px;width:100%;cursor:pointer;font:inherit}
+.cooling-activity-row:hover{border-color:#579c9e;background:#1a3948}
+.cooling-activity-row>time{font-size:11px;white-space:nowrap;color:#85d9d1;min-width:80px}
+.cooling-activity-row>span{font-size:11px;line-height:1.6}
+.cooling-config-fold{margin:18px 0 0;background:#102130;border:1px solid #314b58;border-radius:11px;overflow:hidden}
+.cooling-config-fold>summary{cursor:pointer;padding:15px 17px;display:flex;flex-wrap:wrap;gap:8px 18px;
+ align-items:center;list-style:none;font-size:13px;font-weight:700}
+.cooling-config-fold>summary::-webkit-details-marker{display:none}
+.cooling-config-fold>summary:before{content:"▸";font-size:17px;color:#7fe2d5}
+.cooling-config-fold[open]>summary:before{content:"▾"}
+.cooling-config-fold>summary>small{color:#94adbd;font-size:11px;font-weight:400}
+.cooling-config-fold>summary:hover{background:#193543}
+.cooling-config-fold>.w-cooling-configuration{border-top:1px solid #294352;padding:13px;margin:0}
+@media(max-width:1100px){.cooling-insight-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.cooling-insight-grid{grid-template-columns:1fr}
+ .cooling-correlation-row{grid-template-columns:1fr 70px}
+ .cooling-correlation-row>span{grid-column:1/-1;grid-row:2}
+ .cooling-correlation-row>small{grid-column:1/-1;text-align:left}
+ .cooling-activity-row{flex-wrap:wrap;gap:3px}}
