@@ -1,4 +1,4 @@
-# SensorDash 0.6.0 — Persistent multi-fan control and responsive charts
+# SensorDash 0.6.1 — Persistent multi-fan control and responsive charts
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -29,8 +29,9 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Sensor frames and chart painting remain independent. While dragging or hovering a graph, periodic frame updates do not reset the canvas.
 - Sidebar and footer now say **Fan Control**, show the installed version from the running executable, and indicate whether persistent profiles or temporary manual control are active.
 - No physical fan commands are issued merely by installing or opening the UI. The Windows build tests remain manually triggered or on merge/push to Production only.
+- Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings. It does not change the sensor collection rate or fan-control logic.
 
-**Upgrade:** Close the tray application; install the v0.6.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.6.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -79,11 +80,11 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 ---
 
-# SensorDash
+# SensorDash — General capabilities (0.6.x)
 
-A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **simulation-only fan curves**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
+A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.4.0.** The feature branch may be ahead of the most recently validated installer. The full MSI pipeline runs on `Production` pushes, an explicitly created `validation/*` branch, or manual dispatch (once the workflow is registered on the default branch). Routine feature commits do not trigger it.
+**Development version: 0.6.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
 
 ## What Cooling Systems are for
 
@@ -123,7 +124,7 @@ Dashboards contain configurable metric, chart and live-reading widgets; create a
 
 Pin up to six independently configured Windows notification-area **numeric readouts**. Select the physical or virtual sensor, label, accent color and precision. Short, high-contrast digits optimize readability at native 16–32 px tray sizes. Hovering shows the complete value and name. The main tray menu opens the dashboard, reports collector status and closes the desktop UI without stopping logging.
 
-Fan curves use an editable **Temperature (°C) / Fan speed (%) numeric table** with add/remove rows, range checks, live preview and 1 Hz simulation. The simulator handles missing/stale inputs and doesn't write to fan or pump control outputs. **Continue using Fan Control or your other existing controller for real fan control.**
+Fan curves use an editable **Temperature (°C) / Fan speed (%) numeric table** with add/remove rows, range checks, live preview and 1 Hz simulation. Simulations never write to outputs. Saved curves can be added to persistent fan profiles, which require administrator approval and exclusive ownership of verified physical PWM channels. Do not run competing fan controllers on the same outputs.
 
 ## Installation and data
 
@@ -131,7 +132,7 @@ A successful [Windows build](https://github.com/CodyMathis123/SensorDash/actions
 
 The service's SQLite history and settings live under `%ProgramData%\SensorDash`. They are retained across MSI updates. Prior prototype-specific preferences are not maintained with compatibility shims; adjust any old custom configurations using the new editors if needed.
 
-The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens only on `http://127.0.0.1:8765/`. Hardware monitoring and fan-curve **simulation** work without cloud access. The MSI does not install, replace or configure Fan Control or PawnIO.
+The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens only on `http://127.0.0.1:8765/`. Hardware monitoring, fan-curve simulation, and locally approved fan profiles work without cloud access. The MSI does not install, replace or configure Fan Control or PawnIO.
 
 ## Build and test
 
@@ -148,6 +149,6 @@ dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
 
 The JavaScript regression test covers auto-generated cooling analytics, meaningful component types, in-use sensor references, exact Explorer→Cooling navigation, history query batching, hidden sensors, layout locks and generated dashboard widgets. The executable self-test covers virtual sensor arithmetic, simulated curves, missing/stale readings, tray formatting, collection groups, history filtering and cooling component normalization.
 
-The full Windows workflow also smoke-tests the service-to-dashboard named pipe and verifies MSI install, service startup, Start Menu shortcut creation, tray registration and uninstall. It runs on **`Production` pushes, explicitly created `validation/*` branches, or manual dispatch** once the workflow exists on the default branch. Ordinary feature commits never trigger it.
+The full Windows workflow also smoke-tests the service-to-dashboard named pipe and verifies MSI install, service startup, Start Menu shortcut creation, tray registration and uninstall. It runs on **`Production` pushes or manual dispatch** once the workflow exists on the default branch. A validation branch can temporarily enable its own build trigger. Ordinary feature commits do not trigger it.
 
-This application is not safety-rated fan-control software. Hardware writes, output ownership, calibration, watchdog recovery and tighter control authorization must be implemented and separately tested before any future live fan-control release.
+This application is not safety-rated fan-control software. Live fan profiles are implemented, but physical PWM channel mapping, fan startup at low duty, ownership, firmware-level recovery and fail-safe response must be verified on each target machine before relying on unattended control.

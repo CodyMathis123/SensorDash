@@ -151,6 +151,69 @@ const h={
   'Chart hover must include the sensor name alongside the color swatch');
  assert.ok(app.includes('status.version')&&app.includes('fanOutputStatus'),
   'Build version and fan output footer must be dynamic');
+ const executableVersion=source('src/SensorDash/SensorDash.csproj').split('<Version>')[1]?.split('</Version>')[0];
+ assert.ok(executableVersion,'Expected a versioned executable');
+ assert.equal(source('installer/SensorDash.wxs').split('Manufacturer="CodyMathis" Version="')[1]?.split('"')[0],executableVersion,
+  'MSI upgrade version must match the executable version');
+ assert.equal(source('installer/SensorDash.wixproj').split('<OutputName>SensorDash-Setup-')[1]?.split('-x64</OutputName>')[0],executableVersion,
+  'MSI artifact name must match the executable version');
+ assert.ok(backend.includes('process = ProcessTelemetry.Snapshot()') &&
+  source('src/SensorDash/ServiceBridge.cs').includes('process = ProcessTelemetry.Snapshot()'),
+  'Both collector and desktop process metrics must be reported separately');
+ assert.ok(app.includes('formatMb(p?.workingSetBytes)') &&
+  app.includes("id=\"refreshDiagnostics\"") &&
+  app.includes('S.chartStats.lastMs'),
+  'Performance diagnostics must be available without touching the hardware');
+ assert.ok(app.includes('const generation=++S.chartGeneration') &&
+  app.includes('performance.now()-frameStart<7') &&
+  app.includes('requestAnimationFrame(paintBatch)'),
+  'Chart rendering must be time-sliced and cancel outdated navigation work');
+ assert.ok(app.includes('S.historyStats.lastFetchMs=Date.now()-started'),
+  'History fetch duration must be observable');
+ assert.ok(!app.includes('Simulation only · No writes') &&
+  !script.includes("'Curve sandbox'"),
+  'Version 0.6 must not present real fan control as simulation-only');
+ // Exercise actual chart scheduler behavior with fake frame timing, without hardware or a browser.
+ const paintSource=app.slice(app.indexOf('function drawAll(){'),app.indexOf('function drawCanvas(canvas){'));
+ assert.ok(paintSource.includes('requestAnimationFrame(paintBatch)'));
+ const frames=[],painted=[],canvases=Array.from({length:7},(_,i)=>({id:i,isConnected:true}));
+ let clock=0,hovered=false;
+ const paintContext={
+  S:{chartGeneration:0,chartDirty:false,lastChartPaint:0,
+    chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0}},
+  document:{hidden:false,querySelectorAll:()=>canvases},
+  chartInUse:()=>hovered,
+  requestAnimationFrame:cb=>frames.push(cb),
+  performance:{now:()=>clock},
+  drawCanvas:canvas=>{painted.push(canvas);clock+=3}
+ };
+ const schedulePaint=vm.runInNewContext(paintSource+String.fromCharCode(10)+'drawAll;',paintContext);
+ const flushFrames=()=>{
+  let guard=0;
+  while(frames.length){
+   assert.ok(++guard<20,'Paint scheduler did not terminate');
+   frames.shift()();
+  }
+ };
+ // The first scheduled generation must cancel when navigation requests a newer paint.
+ schedulePaint();
+ schedulePaint();
+ flushFrames();
+ assert.equal(painted.length,7,'Only the newest generation should paint');
+ assert.ok(paintContext.S.chartStats.lastBatches>=2,'Large chart collections should yield frames');
+ assert.equal(paintContext.S.chartStats.lastCharts,7);
+ assert.equal(paintContext.S.chartStats.paints,1);
+ assert.ok(paintContext.S.chartStats.lastMs>=21);
+ painted.length=0;
+ schedulePaint();
+ paintContext.S.chartGeneration++; // A navigation destroyed the canvas elements.
+ flushFrames();
+ assert.equal(painted.length,0,'Detached navigation batches must be cancelled');
+ hovered=true;
+ schedulePaint();
+ assert.equal(frames.length,0);
+ assert.equal(paintContext.S.chartDirty,true);
+ hovered=false;
  await click('starter-radiators');
  const shared=S.settings.fanProfiles.at(-1);
  assert.equal(shared.curveIds.length,2);
@@ -168,5 +231,6 @@ const h={
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
  assert.ok(!curvesView.includes('This sandbox evaluates'));
  console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
+ console.log('PASS: read-only process diagnostics, browser chart timing, time-sliced navigation and accurate live-control labels');
  console.log('PASS: cooling analytics, chart groups, templates, sensor usage, deep links, visibility, dashboard creation and removal of legacy roles');
 })().catch(err=>{console.error(err);process.exitCode=1;});

@@ -139,6 +139,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
             storagePollSeconds = state.Settings.StoragePollSeconds,
             storageDevices = storage,
             storageSensorCount = readings.Length,
+            process = ProcessTelemetry.Snapshot(),
             storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
             storageLastPolled = state.LastStoragePoll,
             note = storage.Length == 0

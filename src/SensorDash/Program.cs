@@ -112,6 +112,7 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
     collectorOnline = state.Latest is { Error: null },
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
+    process = ProcessTelemetry.Snapshot(),
     lastSample = state.Latest?.Timestamp,
     error = state.Latest?.Error
 }));
@@ -237,6 +238,21 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 await app.RunAsync();
 
+// Lightweight on-demand process diagnostics. No hardware reads or GC collection are triggered.
+public static class ProcessTelemetry
+{
+    public static object Snapshot()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new
+        {
+            workingSetBytes = process.WorkingSet64,
+            privateBytes = process.PrivateMemorySize64,
+            managedHeapBytes = GC.GetTotalMemory(false),
+            threadCount = process.Threads.Count
+        };
+    }
+}
 public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null, string? DeviceId = null);
 public sealed record HardwareDevice(string Id, string Name, string Type, int SensorCount);
 public sealed record SensorFrame(DateTimeOffset Timestamp, List<SensorReading> Sensors, string? Error, List<HardwareDevice>? Devices = null);

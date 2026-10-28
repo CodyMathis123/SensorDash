@@ -143,7 +143,7 @@ const SDWorkspace = (() => {
       '<div class="w-grid">'+[
         ['dashboards','▦','Dashboards','Create views with metric cards, history charts and readings.'],
         ['cooling','◉','Cooling systems','Model any number of air, liquid or custom systems.'],
-        ['curves','⌁','Curve sandbox','Simulate fan curves at 1 Hz; no fan outputs are written.'],
+        ['curves','⌁','Fan Control','Configure persistent, authorized fan profiles and preview temperature curves.'],
         ['tray','▣','Tray readouts','Add independent live notification-area sensor icons.']
       ].map(([v,ico,title,desc])=>'<button class="w-feature" data-view="'+v+'"><strong>'+ico+' '+title+'</strong><span>'+desc+'</span></button>').join('')+'</div>');
  };

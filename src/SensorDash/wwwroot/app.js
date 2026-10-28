@@ -13,11 +13,12 @@ const titles={
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,requests:0},liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,misses:0,requests:0,lastFetchMs:null},chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0},chartGeneration:0,status:null,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
+const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'—';
 const shorttime=t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>{
@@ -155,7 +156,7 @@ function events(){
  '<div class="event-list">'+(S.events.length?S.events.map(e=>'<div class="event '+esc(e.severity)+'"><div class="dot"></div><div><b>'+esc(e.message)+'</b><p>'+when(e.t)+' · '+esc(e.sensor)+(e.value!=null?' · '+fmt(e.value):'')+'</p></div></div>').join('')
   :'<div class="empty">No events yet. Add a monitoring threshold in Settings.</div>')+'</div>')+
  panel('Alert behavior','Configurable monitoring',
- '<p class="help">Alerts are evaluated by the elevated collector. High-value thresholds are configured for individual sensor IDs; recovery uses a two-unit hysteresis. Simulated curves do not provide hardware protection and never write fan outputs.</p>')+
+ '<p class="help">Threshold events are informational. The collector evaluates configured limits with a two-unit recovery hysteresis. Motherboard firmware remains essential for hardware-level cooling safety; fan profiles are managed separately.</p>')+
  '</div>';
 }
 function settingsView(){
@@ -222,11 +223,30 @@ function settingsView(){
  choices.filter(s=>!(s.id in (cfg.highThresholds||{}))).map(s=>
  '<option value="'+esc(s.id)+'">'+esc(s.device+' / '+s.name+' ('+s.type+')')+'</option>').join('')+
  '</select><button class="btn secondary" id="addThreshold">+ Threshold</button></div>')+
+ panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
+ '<p class="note">These values are snapshots, not continuous profiling. Working set is physical memory currently held by the process; private bytes and managed heap are different measures, so they should not be added together.</p>'+
+ [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
+  '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
+  '<div class="stat-row"><label>Working set</label><strong>'+formatMb(p?.workingSetBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Private memory</label><strong>'+formatMb(p?.privateBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'
+ ).join('')+
+ '<h3 class="sensor-used-title">Browser chart workload</h3>'+
+ '<div class="stat-row"><label>Last paint CPU time</label><strong>'+fmt(S.chartStats.lastMs,1)+' ms across '+S.chartStats.lastCharts+' charts / '+S.chartStats.lastBatches+' frame(s)</strong></div>'+
+ '<div class="stat-row"><label>Slowest paint CPU time</label><strong>'+fmt(S.chartStats.slowestMs,1)+' ms</strong></div>'+
+ '<div class="stat-row"><label>Completed chart paints</label><strong>'+S.chartStats.paints+'</strong></div>'+
+ '<div class="stat-row"><label>History cache entries</label><strong>'+S.historyCache.size+' / 120</strong></div>'+
+ '<div class="stat-row"><label>Cache hits / misses</label><strong>'+S.historyStats.hits+' / '+S.historyStats.misses+'</strong></div>'+
+ '<div class="stat-row"><label>History fetch requests</label><strong>'+S.historyStats.requests+'</strong></div>'+
+ '<div class="stat-row"><label>Last history request</label><strong>'+(S.historyStats.lastFetchMs==null?'—':S.historyStats.lastFetchMs+' ms')+'</strong></div>'+
+ '<p class="note">Browser chart times exclude server/database work. The browser itself is a separate process and is not included in the desktop-host memory numbers.</p>'+
+ '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+
  panel('Service and storage','Local-only hardware access',
  '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
- '<div class="stat-row"><label>Hardware controls</label><strong>Simulation only · No writes</strong></div>'+
+ '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
  '<div class="stat-row"><label>Discovered storage devices</label><strong>'+(S.diagnostics?.storageDevices?.length??'—')+'</strong></div>'+
  '<p class="note">The browser host is unelevated; only the named-pipe collector reads hardware. Storage telemetry is available in the unified catalog.</p>')+
  '</div><div class="badge-line"><p class="note">Changes are validated by the collector service.</p>'+
@@ -306,6 +326,12 @@ function flushChartAfterHover(){
  },120);
 }
 
+async function loadStatus(shouldRender=false){
+ try{
+  S.status=await fetchJSON('/api/status');
+  if(shouldRender&&S.view==='settings')render();
+ }catch(e){console.warn('Desktop process status unavailable:',e.message)}
+}
 async function loadDiagnostics(shouldRender=true){
  try {
   const previous=JSON.stringify(S.diagnostics);
@@ -369,6 +395,7 @@ function ensureHistory(){
      S.history[id]=cached.points;
      if(now-cached.fetched<HISTORY_TTL_MS){S.historyStats.hits++;continue}
    }
+   if(!cached)S.historyStats.misses++;
    if(!S.historyRequests.has(k))needed.push(id);
  }
  drawAll(); // instant cached paint, even after returning from another page
@@ -381,7 +408,8 @@ function ensureHistory(){
    S.historyFetch=started;
    const work=fetchJSON('/api/history?ids='+encodeURIComponent(batch.join(','))+
      '&hours='+encodeURIComponent(hours))
-     .then(result=>{
+      .then(result=>{
+       S.historyStats.lastFetchMs=Date.now()-started;
        const found=new Map((result.series||[]).map(line=>[line.id,line.points||[]]));
        for(const id of batch){
          const key=hours+'|'+id;
@@ -408,11 +436,39 @@ function ensureHistory(){
  }
 }
 
+// Spread expensive canvas work across animation frames rather than blocking
+// page navigation with every history chart in a single synchronous task.
+// A newer navigation/paint invalidates the old canvas batch immediately.
 function drawAll(){
  if(document.hidden||chartInUse()){S.chartDirty=true;return}
- document.querySelectorAll('canvas[data-chart]').forEach(drawCanvas);
- S.lastChartPaint=performance.now();
- S.chartDirty=false;
+ const canvases=[...document.querySelectorAll('canvas[data-chart]')];
+ if(!canvases.length)return;
+ const generation=++S.chartGeneration;
+ let index=0,workMs=0,batches=0;
+ const paintBatch=()=>{
+  if(generation!==S.chartGeneration)return;
+  if(document.hidden||chartInUse()){S.chartDirty=true;return}
+  const frameStart=performance.now();
+  batches++;
+  do{
+   const canvas=canvases[index++];
+   if(canvas.isConnected){
+    const began=performance.now();
+    drawCanvas(canvas);
+    workMs+=performance.now()-began;
+   }
+  }while(index<canvases.length && performance.now()-frameStart<7);
+  if(index<canvases.length){requestAnimationFrame(paintBatch);return}
+  const stats=S.chartStats;
+  stats.paints++;
+  stats.lastMs=Math.round(workMs*10)/10;
+  stats.slowestMs=Math.max(stats.slowestMs,stats.lastMs);
+  stats.lastCharts=canvases.length;
+  stats.lastBatches=batches;
+  S.lastChartPaint=performance.now();
+  S.chartDirty=false;
+ };
+ requestAnimationFrame(paintBatch);
 }
 function drawCanvas(canvas){
  const ids=canvas.dataset.chart.split('|').filter(Boolean), series=ids.map((id,i)=>{
@@ -586,6 +642,7 @@ async function togglePin(id){
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
  const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
+ if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
@@ -624,6 +681,10 @@ document.addEventListener('click',e=>{
  if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
  if(e.target.closest('#addThreshold')){changeThreshold(byId('newThresholdId')?.value);return}
  const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
+ if(e.target.closest('#refreshDiagnostics')){
+  Promise.all([loadStatus(false),loadDiagnostics(false)]).then(()=>{if(S.view==='settings')render()});
+  return;
+ }
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
@@ -675,7 +736,7 @@ async function bootstrap(){
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
+   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
@@ -683,6 +744,7 @@ async function bootstrap(){
    setInterval(loadSimulation,2000);
    setInterval(loadFanControl,3000);
    setInterval(()=>loadDiagnostics(false),30000);
+   setInterval(()=>{if(S.view==='settings')loadStatus(true)},30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
    byId('content').innerHTML='<div class="help">Could not connect to the local API: '+esc(err.message)+'. Restart SensorDash.exe and refresh this page.</div>';
