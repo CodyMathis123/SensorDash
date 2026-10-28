@@ -1,3 +1,39 @@
+# SensorDash 0.6.0 — Persistent multi-fan control and responsive charts
+
+The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
+
+## Continuous fan profiles
+
+- Create as many independent profiles as needed (up to 20), with up to 12 physical PWM outputs and 8 temperature curves per profile.
+- Each curve references a discovered physical or virtual temperature source. The collector evaluates all its curves and takes the **maximum requested PWM percentage**, so CPU and GPU can jointly control radiator fans.
+- Supports a configurable minimum fan duty, temperature hysteresis (°C), immediate increases, and smoothed decreases. No fan-stop/zero RPM automation is enabled by default.
+- Unavailable or stale temperature source: request **100% duty (or the maximum supported by that controller)** until the source recovers. Outputs that disappear or cannot be written are reported as degraded rather than silently ignored.
+- A profile is a normal editable draft until clicked **Enable profile**, which requests Windows UAC. The elevated collector snapshots the selected curves and physical outputs and persists the approval separately in `%ProgramData%\SensorDash\approved-fan-profiles.json`.
+- Approved profiles **resume after service restart**. Merely editing or deleting a draft does not change approved hardware settings; select **Approve updated profile** to apply changes, or **Stop** to restore firmware/default control.
+- Stopping an output/profile and clean service shutdown call LibreHardwareMonitor's `SetDefault()`. Firmware-level recovery after a hard crash/power loss remains dependent on the actual motherboard; BIOS fan safety remains important.
+- A writable PWM output can be assigned to at most one approved profile. Optional manual tests cannot commandeer outputs already owned by approved profiles. SensorDash does not guess physical fan headers.
+- The DDC pump can remain monitored as a tachometer without an associated writable pump output.
+
+## Included optional curve starters (exact earlier values)
+
+**Shared radiator fans:** Create a CPU curve (40°C/20%, 65/20, 70/25, 75/35, 80/50, 85/75, 90/100) and GPU-hotspot curve (40°C/10%, 55/10, 60/20, 65/25, 70/35, 75/50, 85/75, 95/100). Combine them in one profile via MAX. Temperature hysteresis is 3°C, falling-speed response 10 seconds. The source sensor IDs are suggested from detected hardware; physical output assignments remain blank until verified.
+
+**NVMe cooler:** Create separate curve (35°C/30%, 40/30, 45/40, 50/55, 55/75, 60/100) with its own output assignment. Storage-sensor age and staleness are enforced, and the output goes to full available speed if the temperature stops updating.
+
+Starter profiles are **opt-in** and hardware-neutral. Installations do not automatically create or activate these profiles.
+
+## Graphs, performance and release labels
+
+- Hover tooltips display sensor names beside their color swatches and current values, rather than colors and numbers alone.
+- History queries cache sensor/range pairs for 60 seconds, survive page navigation and reuse in-flight requests. Missing IDs are batched 12 at a time. The cache is bounded to 120 entries; a manual Refresh discards it.
+- Sensor frames and chart painting remain independent. While dragging or hovering a graph, periodic frame updates do not reset the canvas.
+- Sidebar and footer now say **Fan Control**, show the installed version from the running executable, and indicate whether persistent profiles or temporary manual control are active.
+- No physical fan commands are issued merely by installing or opening the UI. The Windows build tests remain manually triggered or on merge/push to Production only.
+
+**Upgrade:** Close the tray application; install the v0.6.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+
+---
+
 # SensorDash 0.5.1 — More accurate fan takeover and simpler safety UI
 
 LibreHardwareMonitor IControl reports Undefined for newly initialized controls unless its own settings say otherwise. This is an internal library state, **not a measurement of whether firmware is active or a competing fan controller exists**. SensorDash v0.5.0 mistakenly required Default and conflated mode with supported PWM range; v0.5.1 accepts Undefined, Default and Software modes after explicit user confirmation that other fan-control software is closed.
