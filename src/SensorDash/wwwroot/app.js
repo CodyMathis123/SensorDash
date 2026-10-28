@@ -266,6 +266,8 @@ function render(){
   ? SDWorkspace.render(S,S.view,{metric,panel,chart})
   : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
+ // Cancel paint batches aimed at canvases removed by this navigation.
+ S.chartGeneration++;
  byId('content').innerHTML=error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
@@ -336,7 +338,7 @@ async function loadDiagnostics(shouldRender=true){
  try {
   const previous=JSON.stringify(S.diagnostics);
   S.diagnostics=await fetchJSON('/api/diagnostics');
-  if(shouldRender&&S.view==='storage'&&previous!==JSON.stringify(S.diagnostics))render();
+  if(shouldRender&&(S.view==='storage'||S.view==='settings')&&previous!==JSON.stringify(S.diagnostics))render();
  }catch(e){console.warn('Storage diagnostics unavailable:',e.message);}
 }
 async function saveAlias(clear=false){

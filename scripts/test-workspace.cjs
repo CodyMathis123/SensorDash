@@ -167,6 +167,47 @@ const h={
  assert.ok(!app.includes('Simulation only · No writes') &&
   !script.includes("'Curve sandbox'"),
   'Version 0.6 must not present real fan control as simulation-only');
+ // Exercise actual chart scheduler behavior with fake frame timing, without hardware or a browser.
+ const paintSource=app.slice(app.indexOf('function drawAll(){'),app.indexOf('function drawCanvas(canvas){'));
+ assert.ok(paintSource.includes('requestAnimationFrame(paintBatch)'));
+ const frames=[],painted=[],canvases=Array.from({length:7},(_,i)=>({id:i,isConnected:true}));
+ let clock=0,hovered=false;
+ const paintContext={
+  S:{chartGeneration:0,chartDirty:false,lastChartPaint:0,
+    chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0}},
+  document:{hidden:false,querySelectorAll:()=>canvases},
+  chartInUse:()=>hovered,
+  requestAnimationFrame:cb=>frames.push(cb),
+  performance:{now:()=>clock},
+  drawCanvas:canvas=>{painted.push(canvas);clock+=3}
+ };
+ const schedulePaint=vm.runInNewContext(paintSource+'\\ndrawAll;',paintContext);
+ const flushFrames=()=>{
+  let guard=0;
+  while(frames.length){
+   assert.ok(++guard<20,'Paint scheduler did not terminate');
+   frames.shift()();
+  }
+ };
+ // The first scheduled generation must cancel when navigation requests a newer paint.
+ schedulePaint();
+ schedulePaint();
+ flushFrames();
+ assert.equal(painted.length,7,'Only the newest generation should paint');
+ assert.ok(paintContext.S.chartStats.lastBatches>=2,'Large chart collections should yield frames');
+ assert.equal(paintContext.S.chartStats.lastCharts,7);
+ assert.equal(paintContext.S.chartStats.paints,1);
+ assert.ok(paintContext.S.chartStats.lastMs>=21);
+ painted.length=0;
+ schedulePaint();
+ paintContext.S.chartGeneration++; // A navigation destroyed the canvas elements.
+ flushFrames();
+ assert.equal(painted.length,0,'Detached navigation batches must be cancelled');
+ hovered=true;
+ schedulePaint();
+ assert.equal(frames.length,0);
+ assert.equal(paintContext.S.chartDirty,true);
+ hovered=false;
  await click('starter-radiators');
  const shared=S.settings.fanProfiles.at(-1);
  assert.equal(shared.curveIds.length,2);
