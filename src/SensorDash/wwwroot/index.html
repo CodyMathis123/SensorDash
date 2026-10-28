@@ -12,7 +12,7 @@
    <button class="nav active" data-view="overview"><span>▦</span> Overview</button>
    <button class="nav" data-view="dashboards"><span>▤</span> Dashboards</button>
    <button class="nav" data-view="cooling"><span>◉</span> Cooling Systems</button>
-   <button class="nav" data-view="curves"><span>⌁</span> Curve Sandbox</button>
+   <button class="nav" data-view="curves"><span>⌁</span> Fan Control</button>
    <button class="nav" data-view="virtual"><span>≋</span> Virtual Sensors</button>
    <button class="nav" data-view="tray"><span>▣</span> Tray Readouts</button>
    <button class="nav" data-view="storage"><span>▰</span> Storage</button>
@@ -21,7 +21,7 @@
   </nav>
   <div class="group-title config-title">SYSTEM</div>
   <nav><button class="nav" data-view="settings"><span>⚙</span> Settings</button></nav>
-  <div class="sidebar-foot"><div class="status-led"></div><div><b id="collectorStatus">Connecting…</b><small>Local • Read-only</small></div></div>
+  <div class="sidebar-foot"><div class="status-led"></div><div><b id="collectorStatus">Connecting…</b><small>Local • Collector controlled</small></div></div>
  </aside>
  <main class="workspace">
   <header class="topbar"><div class="crumb">SENSORDASH <span> / </span> <b id="crumbName">OVERVIEW</b></div>
@@ -30,7 +30,7 @@
   <div class="content-wrap">
    <div id="heading"></div>
    <div id="content"><div class="loading">Connecting to local sensor collector…</div></div>
-   <footer>SensorDash 0.3 · Local measurements · Curve simulation only · Physical fan outputs remain unchanged · <span id="lastUpdated">Waiting for first sample</span></footer>
+   <footer>SensorDash <span id="appVersion">…</span> · Local hardware telemetry · Fan outputs: <span id="fanOutputStatus">Firmware/default</span> · <span id="lastUpdated">Waiting for first sample</span></footer>
   </div>
  </main>
 </div>
