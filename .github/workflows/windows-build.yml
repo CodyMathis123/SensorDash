@@ -319,7 +319,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.6.0-x64
+          name: SensorDash-Setup-0.6.1-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

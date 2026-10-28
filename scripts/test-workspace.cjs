@@ -153,6 +153,8 @@ const h={
   'Build version and fan output footer must be dynamic');
  const executableVersion=source('src/SensorDash/SensorDash.csproj').split('<Version>')[1]?.split('</Version>')[0];
  assert.ok(executableVersion,'Expected a versioned executable');
+ assert.ok(source('.github/workflows/windows-build.yml').includes('name: SensorDash-Setup-'+executableVersion+'-x64'),
+  'Uploaded MSI artifact must carry the same release version');
  assert.equal(source('installer/SensorDash.wxs').split('Manufacturer="CodyMathis" Version="')[1]?.split('"')[0],executableVersion,
   'MSI upgrade version must match the executable version');
  assert.equal(source('installer/SensorDash.wixproj').split('<OutputName>SensorDash-Setup-')[1]?.split('-x64</OutputName>')[0],executableVersion,
