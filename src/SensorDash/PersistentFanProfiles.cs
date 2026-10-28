@@ -23,6 +23,7 @@ public sealed class PersistentFanProfiles
     private readonly object _sync = new();
     private Dictionary<string,ApprovedFanProfile> _approved = new(StringComparer.Ordinal);
     private readonly Dictionary<string,double> _previous = new(StringComparer.Ordinal);
+    private readonly Dictionary<string,double> _heldTemperatures = new(StringComparer.Ordinal);
     private readonly HashSet<string> _writtenChannels = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingReleases = new(StringComparer.Ordinal);
     private List<FanProfileReadout> _latest = [];
@@ -102,6 +103,8 @@ public sealed class PersistentFanProfiles
                 foreach(var id in previous)if(!keep.Contains(id))_pendingReleases.Add(id);
                 _approved=remaining;
                 foreach(var id in previous.Except(keep))_previous.Remove(id);
+                foreach(var key in _heldTemperatures.Keys.ToArray())
+                    if(!remaining.ContainsKey(key.Split('|')[0]))_heldTemperatures.Remove(key);
                 return new {accepted=true,message="Stopped profile; restoring firmware control on the next hardware poll."};
             }
 
@@ -152,8 +155,25 @@ public sealed class PersistentFanProfiles
             _approved=next;
             // Resending a deliberate user-approved edit must update hardware.
             foreach(var id in draft.ChannelIds)_previous.Remove(id);
+            foreach(var key in _heldTemperatures.Keys.Where(k=>k.StartsWith(draft.Id+"|",
+                StringComparison.Ordinal)).ToArray())_heldTemperatures.Remove(key);
             return new {accepted=true,message="Approved profile saved and enabled. Collector will continuously evaluate its curves."};
         }
+    }
+
+    private static double Interpolate(IReadOnlyList<CurvePointConfig> points,double temperature)
+    {
+        var ordered=points.OrderBy(p=>p.Temperature).ToArray();
+        if(temperature<=ordered[0].Temperature)return ordered[0].Percent;
+        if(temperature>=ordered[^1].Temperature)return ordered[^1].Percent;
+        for(var i=1;i<ordered.Length;i++)
+        {
+            if(temperature>ordered[i].Temperature)continue;
+            var previous=ordered[i-1];var next=ordered[i];
+            return previous.Percent+(next.Percent-previous.Percent)*
+                (temperature-previous.Temperature)/(next.Temperature-previous.Temperature);
+        }
+        return ordered[^1].Percent;
     }
 
     // Collection thread only. The runtime passes channel controls discovered
@@ -185,7 +205,25 @@ public sealed class PersistentFanProfiles
                 samples.Any(s=>s.State!="simulated"||!s.TargetPercent.HasValue);
             // Missing temperature readings (including unavailable NVMe data)
             // mean FULL FAN SPEED while this profile remains active.
-            var desired=invalid ? 100 : samples.Max(x=>x.TargetPercent!.Value);
+            var desired=100.0;
+            if(!invalid)
+            {
+                var values=new List<double>();
+                for(var i=0;i<samples.Count;i++)
+                {
+                    var curve=profile.Curves[i];
+                    var reading=samples[i];
+                    var temperature=reading.InputTemperature!.Value;
+                    var key=profile.Id+"|"+curve.Id;
+                    if(_heldTemperatures.TryGetValue(key,out var held) &&
+                       temperature<held &&
+                       temperature>held-profile.HysteresisDegrees)
+                        temperature=held;
+                    else _heldTemperatures[key]=temperature;
+                    values.Add(Interpolate(curve.Points,temperature));
+                }
+                desired=values.Max();
+            }
             desired=Math.Clamp(desired,profile.MinimumPercent,100);
             var problems=new List<string>();
             foreach(var id in profile.ChannelIds)
@@ -249,6 +287,7 @@ public sealed class PersistentFanProfiles
         }
         _writtenChannels.Clear();
         _previous.Clear();
+        _heldTemperatures.Clear();
         lock(_sync)_latest=[];
         // Approved persistent profiles are retained; they'll resume when the
         // service restarts. Firmware control is returned on graceful stop.
