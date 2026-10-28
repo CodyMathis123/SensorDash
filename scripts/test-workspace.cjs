@@ -151,11 +151,11 @@ const h={
   'Chart hover must include the sensor name alongside the color swatch');
  assert.ok(app.includes('status.version')&&app.includes('fanOutputStatus'),
   'Build version and fan output footer must be dynamic');
- const executableVersion=source('src/SensorDash/SensorDash.csproj').match(/<Version>([^<]+)<\\/Version>/)?.[1];
+ const executableVersion=source('src/SensorDash/SensorDash.csproj').split('<Version>')[1]?.split('</Version>')[0];
  assert.ok(executableVersion,'Expected a versioned executable');
- assert.equal(source('installer/SensorDash.wxs').match(/Manufacturer="CodyMathis" Version="([^"]+)"/)?.[1],executableVersion,
+ assert.equal(source('installer/SensorDash.wxs').split('Manufacturer="CodyMathis" Version="')[1]?.split('"')[0],executableVersion,
   'MSI upgrade version must match the executable version');
- assert.equal(source('installer/SensorDash.wixproj').match(/<OutputName>SensorDash-Setup-(.+?)-x64<\\/OutputName>/)?.[1],executableVersion,
+ assert.equal(source('installer/SensorDash.wixproj').split('<OutputName>SensorDash-Setup-')[1]?.split('-x64</OutputName>')[0],executableVersion,
   'MSI artifact name must match the executable version');
  assert.ok(backend.includes('process = ProcessTelemetry.Snapshot()') &&
   source('src/SensorDash/ServiceBridge.cs').includes('process = ProcessTelemetry.Snapshot()'),
