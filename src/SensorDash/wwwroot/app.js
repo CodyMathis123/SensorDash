@@ -34,10 +34,10 @@ const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--acc
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
 const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(unit||typeUnit(s?.type))}"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
 const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
-function chart(ids,unit='',small=false){
+function chart(ids,unit='',small=false,coolingId=''){
  const valid=ids.map(id=>typeof id==='string'?sensor(id):id).filter(Boolean);
  const labels=valid.map((s,i)=>`<span><i class="legend-key" style="background:${colors[i%colors.length]}"></i>${esc(label(s))}</span>`).join('');
- return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
+ return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"${coolingId?' data-cooling-timeline="'+esc(coolingId)+'"':''}></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
 }
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function explorer(){
@@ -372,7 +372,12 @@ function updateFrame(frame){
  scheduleChartPaint();
 }
 async function loadEvents(){
- try{S.events=await fetchJSON('/api/events');byId('eventCount').textContent=S.events.filter(e=>e.severity==='warning').length||'';if(S.view==='events')render()}catch{}
+ try{
+  S.events=await fetchJSON('/api/events');
+  byId('eventCount').textContent=S.events.filter(e=>e.severity==='warning').length||'';
+  if(S.view==='events')render();
+  if(S.view==='cooling')CoolingInsights.paintEvents(S);
+ }catch{}
 }
 async function fetchJSON(url,opts){
  const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text()||'Request failed');return r.json();
@@ -400,6 +405,7 @@ function ensureHistory(){
    if(!S.historyRequests.has(k))needed.push(id);
  }
  drawAll(); // instant cached paint, even after returning from another page
+ CoolingInsights.paint(S);
  if(!needed.length)return;
  for(let at=0;at<needed.length;at+=12){
    const batch=needed.slice(at,at+12);
@@ -429,6 +435,7 @@ function ensureHistory(){
        if(S.hours===hours && !document.hidden && !chartInUse())
          requestAnimationFrame(drawAll);
        else scheduleChartPaint();
+       if(S.hours===hours)CoolingInsights.paint(S);
      })
      .catch(e=>console.warn('History fetch:',e.message))
      .finally(()=>{for(const key of keys)if(S.historyRequests.get(key)===work)
@@ -518,21 +525,28 @@ function drawCanvas(canvas){
  const hoverCtx=overlay.getContext('2d');
  hoverCtx.setTransform(ratio,0,0,ratio,0,0);
  const clearHover=()=>hoverCtx.clearRect(0,0,w,h);
+ const layout={tx,ty,p,h,w,cw,ch,unit:canvas.dataset.unit||''};
+ const drawAt=time=>drawCanvasOverlay(hoverCtx,series,layout,time);
+ if(canvas.dataset.coolingTimeline)
+   CoolingTimeline.register(canvas,{clear:clearHover,draw:drawAt});
  canvas.onmousemove=e=>{
-   clearHover();
    const x=e.clientX-canvas.getBoundingClientRect().left;
    const desired=xmin+(x-p.l)/cw*(xmax-xmin);
-   if(desired>=xmin&&desired<=xmax)
-     drawCanvasOverlay(hoverCtx,series,{tx,ty,p,h,w,cw,ch,unit:canvas.dataset.unit||''},desired);
+   if(desired>=xmin&&desired<=xmax){
+     if(!CoolingTimeline.hover(canvas,desired)){clearHover();drawAt(desired);}
+   }
  };
- canvas.onmouseleave=()=>{clearHover();flushChartAfterHover()};
+ canvas.onmouseleave=()=>{
+   if(!CoolingTimeline.leave(canvas))clearHover();
+   flushChartAfterHover();
+ };
 }
 function drawCanvasOverlay(ctx,series,layout,desired){
  const {tx,p,h,w,unit}=layout;
  if(desired<Date.now()-S.hours*3600000||desired>Date.now())return;
  const values=series.map(s=>s.points.reduce((a,b)=>Math.abs(a.t-desired)<=Math.abs(b.t-desired)?a:b));
  if(!values.length)return;
- const x=tx(values[0].t);
+ const x=tx(desired);
  ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#819aab';
  ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,h-p.b);ctx.stroke();ctx.restore();
  const cap=s=>s.length>32?s.slice(0,29)+'…':s;
@@ -546,7 +560,7 @@ function drawCanvasOverlay(ctx,series,layout,desired){
  ctx.fillStyle='#101923ed';ctx.strokeStyle='#3b5867';
  ctx.fillRect(tipX,tipY,tipW,tipH);ctx.strokeRect(tipX,tipY,tipW,tipH);
  ctx.textAlign='left';ctx.fillStyle='#b1c5d2';
- ctx.fillText(shorttime(values[0].t),tipX+10,tipY+16);
+ ctx.fillText(shorttime(desired),tipX+10,tipY+16);
  values.forEach((q,i)=>{
    const rowY=tipY+35+i*20;
    ctx.fillStyle=series[i].color;ctx.fillRect(tipX+9,rowY-9,8,8);
@@ -644,10 +658,23 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
- const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
+ const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
+ const event=e.target.closest('[data-cooling-focus]');
+ if(event){
+   e.preventDefault();
+   CoolingTimeline.focus(event.dataset.coolingFocus,Number(event.dataset.coolingAt));
+   return;
+ }
+ const coolingFold=e.target.closest('.cooling-config-fold > summary');
+ if(coolingFold){
+  const details=coolingFold.parentElement;
+  S.coolingConfigOpen=S.coolingConfigOpen||{};
+  S.coolingConfigOpen[details.dataset.coolingConfig]=!details.open;
+  return;
+ }
  const fold=e.target.closest('.w-fan-fold > summary');
  if(fold){
   const details=fold.parentElement;
@@ -665,6 +692,10 @@ document.addEventListener('click',e=>{
      systemId:usages.dataset.usageSystem,
      componentId:usages.dataset.usageComponent
    }:null;
+   if(target==='cooling'&&usages.dataset.usageSystem){
+     S.coolingConfigOpen=S.coolingConfigOpen||{};
+     S.coolingConfigOpen[usages.dataset.usageSystem]=true;
+   }
    S.view=target;history.replaceState(null,'','#'+target);S.historyKey='';render();
    if(target==='cooling'&&S.focusCoolingTarget){
      const focus=S.focusCoolingTarget;

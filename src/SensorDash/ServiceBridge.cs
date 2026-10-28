@@ -175,6 +175,9 @@ public sealed class DashboardBridgeWorker(DashboardState display, ILogger<Dashbo
 }
 public sealed class SensorDashTray : ApplicationContext
 {
+    // Use the same immutable/latest frame as the web host. The previous tray
+    // poll opened and deserialized a second redundant 2-second IPC response.
+    private readonly DashboardState _display;
     private readonly NotifyIcon _icon;
     private readonly Icon _trayImage;
     private readonly ToolStripMenuItem _collectorStatus;
@@ -187,8 +190,9 @@ public sealed class SensorDashTray : ApplicationContext
     private bool _disposed;
     private int _cycles;
 
-    public SensorDashTray(IHostApplicationLifetime lifetime)
+    public SensorDashTray(DashboardState display,IHostApplicationLifetime lifetime)
     {
+        _display=display;
         var menu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("Open SensorDash", null, (_, _) => Open())
         { Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) };
@@ -235,14 +239,16 @@ public sealed class SensorDashTray : ApplicationContext
                 var settings = configuration.Deserialize<DashboardSettings>(PipeProtocol.Json);
                 if (settings != null) ReconcileIcons(settings.TrayWidgets ?? []);
             }
-            var live = await CollectorClient.AskAsync(new PipeCommand("live"));
-            if (_disposed) return;
-            var frame = live.Deserialize<SensorFrame>(PipeProtocol.Json);
+            // The bridge worker already refreshes this snapshot every 2 s.
+            // Reuse it instead of duplicating IPC reads and JSON parsing.
+            var frame = _display.Latest;
             var readings = frame?.Sensors.ToDictionary(r => r.Id, r => r) ?? [];
-            _collectorStatus.Text = frame?.Error is { Length: > 0 }
-                ? "Collector: Sensor warning" : $"Collector: Online ({readings.Count} sensors)";
-            _icon.Text = frame?.Error is { Length: > 0 }
-                ? "SensorDash — Sensor warning" : $"SensorDash — {readings.Count} sensors";
+            _collectorStatus.Text = frame is null ? "Collector: Connecting…" :
+                frame.Error is { Length: > 0 } ? "Collector: Sensor warning" :
+                $"Collector: Online ({readings.Count} sensors)";
+            _icon.Text = frame is null ? "SensorDash — Connecting" :
+                frame.Error is { Length: > 0 } ? "SensorDash — Sensor warning" :
+                $"SensorDash — {readings.Count} sensors";
             for (var i = 0; i < _configuration.Count && i < _readoutIcons.Count; i++)
             {
                 var cfg = _configuration[i];

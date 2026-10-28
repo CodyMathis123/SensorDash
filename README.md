@@ -1,4 +1,4 @@
-# SensorDash 0.6.4 — Live-profile change review, editor locks and mapped RPM feedback
+# SensorDash 0.7.0 — Role-aware cooling overview and synchronized thermal timeline
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -32,7 +32,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.6.4 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.7.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -85,7 +85,23 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.6.4.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.7.0.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+
+## Phase 1 Cooling Systems analysis (0.7.0)
+
+Cooling Systems now uses the existing saved component-to-sensor assignments for a **read-only, system-aware overview**: independent heat sources, fan banks, pumps, optional coolant, optional case air and optional room ambient. Dedicated `coolant-probe`, `case-air` and `room-ambient` roles are supported alongside the general temperature-probe role. A case-air measurement is **never** treated as room ambient. Missing probes are labeled *Not measured*, and the feature is useful with no coolant or ambient probe installed.
+
+- All automatic temperature, power, RPM, duty and flow graphs use the **existing cached SQLite history API** and a synchronized cross-chart hover cursor/time range for a given system. Individual cooling systems stay independent. Click a relevant event to inspect its instant across charts.
+- **Exploratory co-movement** compares the first assigned temperature and power reading within each heat-source component, only when at least 12 time-aligned samples have sufficient variation. Pearson r describes simultaneous co-movement, **not** heat rejection, cooling efficiency, causal impact or thermal lag. No CPU/GPU wattages are blindly summed.
+- The recent cooling activity strip filters the existing monitoring event feed to sensors or fan channels/profiles assigned to this system. New UAC-approved fan-test, profile-approval and stop requests are recorded by the elevated service using the existing event store. Events are explicitly labeled **requests** because physical PWM writes occur later on the collector thread; there is no invented retrospective event history.
+- Component configuration is collapsed by default to prioritize live analysis, expandable for edits, with existing per-system editor locks and saved assignments retained. The event list, correlations and fan timelines are observational only; **fan behavior and authorization remain unchanged**.
+- New modules `cooling-insights.js`, `cooling-timeline.js` and `CoolingEventRecorder.cs` keep analysis and activity tracking out of the existing UI/controller monolith. Dedicated deterministic JavaScript and C# self-tests exercise role normalization, missing probes, correlation, event filtering, cross-chart cursor, and accepted action audit.
+
+**Hardware note:** Coolant, case and room temperature probes are all optional. You can add a case-air sensor whenever ready without claiming it measures room ambient. Actual coolant-to-ambient delta and radiator efficiency analysis will be addressed in a later phase when appropriate sensors exist.
+
+### Desktop host resource footprint
+
+The non-elevated `SensorDash.exe` tray/web process now uses the ASP.NET Core **slim** minimal host and **reuses the bridge worker's latest 2-second sensor frame** when updating tray icons. Previously the tray made its own duplicate collector IPC request and parsed the same sensor JSON independently. The elevated hardware collector is unchanged, as are the server-sent events, local-only HTTP endpoints and per-user preferences. These changes reduce unnecessary initialization and duplicate allocation work; **do not assume a particular MB reduction** from CI, because Windows process working set includes runtime, DLL mappings and shared pages. Compare private bytes and thread counts after a cold startup and a warmed-up browsing session; the external browser's memory is not included in the tray process.
 
 ## Live-profile changes, compact sections and editor locks (0.6.4)
 

@@ -8,7 +8,8 @@ const SDWorkspace = (() => {
   {id:'heat-source',name:'Heat source',hint:'Associate the component temperatures and power measurements'},
   {id:'fan-group',name:'Fan group',hint:'Fan RPM, available output duty and optional nearby temperature'},
   {id:'pump',name:'Pump',hint:'Pump RPM, optional flow meter and output duty'},
-  {id:'temperature-probe',name:'Temperature probe',hint:'Coolant, ambient, inlet, outlet or any other temperature'},
+  {id:'temperature-probe',name:'Temperature probe',hint:'General temperature reading; classify coolant, case air and room ambient separately when known'},
+  ...CoolingInsights.roles,
   {id:'flow-meter',name:'Flow meter',hint:'Flow sensor readings for circulation monitoring'},
   {id:'other',name:'Other hardware',hint:'Any supported sensor or device'}
 
@@ -22,6 +23,9 @@ const SDWorkspace = (() => {
   'fan-group':['Fan','Control','Temperature'],
   'pump':['Fan','Flow','Control','Temperature'],
   'temperature-probe':['Temperature'],
+  'coolant-probe':['Temperature'],
+  'case-air':['Temperature'],
+  'room-ambient':['Temperature'],
   'flow-meter':['Flow']
  };
  // Fitting/physical parts aren't sensor types: descriptions remain optional.
@@ -255,7 +259,7 @@ const SDWorkspace = (() => {
        if(!series.length)return '';
        const limit=series.slice(0,8);
        return h.panel(title,description+(series.length>8?' · '+limit.length+'/'+series.length+' sensors shown':''),
-         h.chart(limit,unit(type)));
+         h.chart(limit,unit(type),false,sys.id));
      }).filter(Boolean);
      const chartsHtml=charts.length?
        '<div class="w-cooling-charts">'+charts.join('')+'</div>':
@@ -288,7 +292,14 @@ const SDWorkspace = (() => {
      }).join('');
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
-       summary+powerDetails+chartsHtml+
+       CoolingInsights.overview(S,sys)+summary+powerDetails+
+       CoolingInsights.analysis(S,sys)+
+       '<div class="cooling-timeline-intro"><strong>Synchronized thermal timeline</strong>'+
+       '<p class="note">Move across any chart to inspect the same instant in temperature, power, RPM, duty and flow. The global history range applies to every chart. Events appear underneath.</p></div>'+
+       chartsHtml+CoolingInsights.activity(S,sys)+
+       '<details class="cooling-config-fold" data-cooling-config="'+attr(sys.id)+'" '+
+       (S.coolingConfigOpen?.[sys.id]?'open':'')+'><summary><span>Cooling system components</span>'+
+       '<small>'+safe((sys.components||[]).length)+' configured · '+(editing?'Click to edit':'Read-only configuration')+'</small></summary>'+
        '<div class="w-cooling-configuration" data-cooling-system-id="'+attr(sys.id)+'">'+
        '<div class="w-dashboard-toolbar">'+WorkspaceLocks.action('toggle-cooling-lock',!editing,sys.id)+
          '<span class="note">'+(editing?'Editing enabled':'Viewing mode · Configuration locked')+'</span></div>'+
@@ -305,7 +316,7 @@ const SDWorkspace = (() => {
        (components||nothing('Add a component below to associate sensors.'))+
        (editing?'<div class="w-actions"><label>Component role<select data-new-kind="'+attr(sys.id)+'">'+
         componentOptions('heat-source')+'</select></label>'+
-       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div>':'')+'</div>');
+       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div>':'')+'</div></details>');
    }).join('');
    return heading('Cooling systems correlate temperatures, power, fan RPM, reported duty and optional flow. '+
      'Charts are generated automatically from the assigned sensors; no particular CPU, GPU or loop topology is assumed.')+
