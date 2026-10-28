@@ -11,6 +11,7 @@ public sealed class ApprovedFanProfile
     public List<string> ChannelIds { get; set; } = [];
     public List<SimulatedFanCurveConfig> Curves { get; set; } = [];
     public double MinimumPercent { get; set; } = 20;
+    public double HysteresisDegrees { get; set; } = 2;
     public double ResponseSeconds { get; set; } = 10;
 }
 
@@ -56,7 +57,8 @@ public sealed class PersistentFanProfiles
             c.Points.All(pt=>double.IsFinite(pt.Temperature) && double.IsFinite(pt.Percent)
                 && pt.Percent is >=0 and <=100)) &&
         double.IsFinite(p.MinimumPercent) && p.MinimumPercent is >=0 and <=100 &&
-        double.IsFinite(p.ResponseSeconds) && p.ResponseSeconds is >=0 and <=90;
+        double.IsFinite(p.ResponseSeconds) && p.ResponseSeconds is >=0 and <=90 &&
+        double.IsFinite(p.HysteresisDegrees) && p.HysteresisDegrees is >=0 and <=10;
 
     public bool HasActiveProfiles { get { lock(_sync)return _approved.Count>0; } }
     public bool OwnsChannel(string id)
@@ -140,6 +142,7 @@ public sealed class PersistentFanProfiles
                             Temperature=pt.Temperature,Percent=pt.Percent }).ToList()
                     }).ToList(),
                 MinimumPercent=configured.MinimumPercent,
+                HysteresisDegrees=configured.HysteresisDegrees,
                 ResponseSeconds=configured.ResponseSeconds
             };
             if(!Valid(draft))
