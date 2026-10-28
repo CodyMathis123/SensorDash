@@ -20,7 +20,13 @@ public sealed class FanControlRuntime
     public const int MaxSessionSeconds = 120;
     private readonly object _sync = new();
     private readonly PersistentFanProfiles _profiles;
-    public FanControlRuntime(string dataDirectory) => _profiles = new PersistentFanProfiles(dataDirectory);
+    private readonly FanControlTrace _trace;
+    public FanControlRuntime(string dataDirectory)
+    {
+        _trace=new FanControlTrace(dataDirectory);
+        _profiles=new PersistentFanProfiles(dataDirectory,_trace);
+        _trace.Event("START","Collector fan controller initialized; approved profiles loaded.");
+    }
     private IReadOnlyList<FanOutputInfo> _outputs = [];
     private Pending? _pending;
     private Session? _session;
@@ -51,13 +57,17 @@ public sealed class FanControlRuntime
         get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
 
+    public object DebugLog() => _trace.ReadRecent();
+    
     public object Snapshot(DashboardSettings? settings = null)
     {
         lock (_sync) return new {
             outputs = _outputs.ToArray(), status = _status,
             minimumDuty = MinExperimentalDuty, maximumSessionSeconds = MaxSessionSeconds,
             requiresAdministrator = true, experimental = true,
-            persistent = _profiles.Snapshot(settings)
+            persistent = _profiles.Snapshot(settings),
+            diagnostics = new { logPath = _trace.PathName,
+                resumeRearms = _trace.ResumeRearms }
         };
     }
 
@@ -68,7 +78,11 @@ public sealed class FanControlRuntime
             IReadOnlyList<FanOutputInfo> known;
             string? manual;
             lock(_sync) { known = _outputs.ToArray(); manual = _session?.ChannelId; }
-            return _profiles.Request(command,settings,known,manual);
+            var result=_profiles.Request(command,settings,known,manual);
+            if(CoolingEventRecorder.Accepted(result))
+                _trace.Event("APPROVED",command.Action+" profile="+command.ProfileId+
+                    " (request accepted; hardware application not verified)");
+            return result;
         }
         if (command == null || command.Action is not ("arm" or "release"))
             return new { accepted = false, message = "Unsupported fan-control request." };
@@ -79,6 +93,7 @@ public sealed class FanControlRuntime
             if (command.Action == "release")
             {
                 _pending = new Pending(command, null);
+                _trace.Event("REQUEST","Manual firmware release queued.");
                 return new { accepted = true, message = "Firmware-default restoration queued." };
             }
             if (settings.FanChannelMappings?.Any(m => m.ChannelId == command.ChannelId &&
@@ -194,7 +209,7 @@ public sealed class FanControlRuntime
                 _firstWritePending = true;
             }
         }
-        _profiles.Tick(controls,frame,now);
+        _profiles.Tick(controls,frame,now,settings);
         if (_session is not { } session) return;
         // Settings can change while a short manual session is active.
         // Revoke manual ownership on the next collector tick if the user
@@ -264,6 +279,7 @@ public sealed class FanControlRuntime
     // Must be called before the Computer is reinitialized/closed or service exits.
     public void ReleaseBeforeClose(Computer? computer, string reason)
     {
+        _trace.Event("STOP",reason);
         Dictionary<string, IControl> channels;
         try { channels = computer == null ? [] : FindControls(computer); }
         catch { channels = []; }

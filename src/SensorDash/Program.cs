@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -110,6 +110,7 @@ app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8")
 app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-commissioning.js", () => Resource("fan-commissioning.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-control-ux.js", () => Resource("fan-control-ux.js", "text/javascript; charset=utf-8"));
+app.MapGet("/fan-control-debug.js", () => Resource("fan-control-debug.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
@@ -157,6 +158,8 @@ app.MapGet("/api/simulation", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("simulation"), ct));
 app.MapGet("/api/fan-control", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("fanOutputs"), ct));
+app.MapGet("/api/fan-control/debug", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("fanDebug"), ct));
 app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
 {
     // Browser mutations require same-origin JSON with a non-simple custom

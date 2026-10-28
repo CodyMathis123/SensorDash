@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>SensorDash</AssemblyName>
-    <Version>0.7.0</Version>
+    <Version>0.7.1</Version>
     <ApplicationIcon>Assets\SensorDash.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -27,6 +27,7 @@
     <EmbeddedResource Include="wwwroot/workspace.js" LogicalName="SensorDash.Web.workspace.js" />
     <EmbeddedResource Include="wwwroot/fan-commissioning.js" LogicalName="SensorDash.Web.fan-commissioning.js" />
     <EmbeddedResource Include="wwwroot/fan-control-ux.js" LogicalName="SensorDash.Web.fan-control-ux.js" />
+    <EmbeddedResource Include="wwwroot/fan-control-debug.js" LogicalName="SensorDash.Web.fan-control-debug.js" />
     <EmbeddedResource Include="wwwroot/workspace-locks.js" LogicalName="SensorDash.Web.workspace-locks.js" />
     <EmbeddedResource Include="wwwroot/fan-feedback.js" LogicalName="SensorDash.Web.fan-feedback.js" />
     <EmbeddedResource Include="wwwroot/cooling-insights.js" LogicalName="SensorDash.Web.cooling-insights.js" />

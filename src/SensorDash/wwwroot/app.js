@@ -682,6 +682,7 @@ document.addEventListener('click',e=>{
   S.fanExpanded[details.dataset.fanFold]=!details.open;
   return;
  }
+ if(FanControlDebug.handle(e,{toast}))return;
  if(FanCommissioning.handle(e,S,{render,toast}))return;
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast,refreshFanControl:loadFanControl});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){

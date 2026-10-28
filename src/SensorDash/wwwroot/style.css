@@ -325,3 +325,12 @@
  .cooling-correlation-row>span{grid-column:1/-1;grid-row:2}
  .cooling-correlation-row>small{grid-column:1/-1;text-align:left}
  .cooling-activity-row{flex-wrap:wrap;gap:3px}}
+
+/* Fan-control diagnostic viewer, request driven; never a continuous log poller. */
+.fan-trace-panel{margin:6px 0 12px}
+.fan-trace-panel h3{margin:4px 0 8px;font-size:14px}
+.fan-trace-panel .w-actions{margin:12px 0}
+.fan-trace-panel code{user-select:all;overflow-wrap:anywhere;color:#9fe5df}
+.fan-trace-output{font-size:11px;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+ white-space:pre;overflow:auto;max-height:340px;min-height:85px;background:#0a1923;
+ border:1px solid #2e4857;color:#cde4ee;padding:12px;border-radius:9px}

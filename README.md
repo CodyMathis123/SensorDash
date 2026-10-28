@@ -1,4 +1,4 @@
-# SensorDash 0.7.0 — Role-aware cooling overview and synchronized thermal timeline
+# SensorDash 0.7.1 — Sleep/resume PWM rearm and diagnostics
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -32,7 +32,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.7.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.7.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -85,7 +85,16 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.7.0.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.7.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+
+## Sleep/resume hardware recovery and diagnostic trace (0.7.1)
+
+- The main collector detects a polling interval greater than **20 seconds** (or a backward clock jump). For an **already approved** persistent fan profile, it invalidates PWM writer cache and reasserts physical channel control through `SetDefault → SetSoftware` on the next hardware poll. Hardware write authorization does not change, no new channels are selected, and manual sessions still retain their own shorter authorization/failsafe rules.
+- This protects against motherboards resetting their PWM hardware on Windows wake while LibreHardwareMonitor still reports cached software mode/duty. It is a best-effort first recovery layer; **it cannot prove hardware accepted the command** and does not reinitialize underlying ITE/SuperIO device drivers. FanCtrl's explicit Windows resume-driven hardware reload is a useful reference for a future second-stage recovery if the measured problem persists.
+- The elevated collector now writes a **bounded, rotating plain-text file** at `C:\\ProgramData\\SensorDash\\logs\\fan-control.log` with `.1` as the previous segment. Each segment is at most roughly 2 MiB. On ordinary operation it records one snapshot per active profile channel per 60 seconds, plus state/duty transitions, approved requests, resume gaps and collector failure/reset messages. It records requested duty, last PWM command, LHM-reported control mode and the **mapped tachometer RPM** (when fresh); logging is best-effort and never blocks hardware control. A tachometer on a splitter only represents the reported sensor.
+- The Fan Control screen has a collapsible **Sleep / PWM diagnostic log** section. Show, copy or save the **latest 250 log lines** on demand over an existing authenticated local IPC read path. There is no continuous diagnostic file polling or per-second database write.
+- Hardware trace files are intentionally separate from normal SQLite time-series sensor history and events. Existing SQLite audit events log administrator-approved fan actions; the text file explains hardware controller state. Historical logs do not prove that physical PWM changed, nor that the fan spins solely because RPM is present.
+- Deterministic C# tests use a fake PWM output that retains a stale software-mode/duty after a simulated 65-second sleep, and verify it is reset and rewritten. Browser tests verify diagnostic fetch/copy, UI and bounded logging contracts. To report a repeat, capture the trace **before rebooting**, plus CPU/GPU temps and radiator fan RPM.
 
 ## Phase 1 Cooling Systems analysis (0.7.0)
 

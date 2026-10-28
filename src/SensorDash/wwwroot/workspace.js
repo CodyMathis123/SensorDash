@@ -645,7 +645,10 @@ const SDWorkspace = (() => {
         'Administrator-approved, time-limited direct PWM tests',
         editing?renderLiveFanControl(S):
           WorkspaceLocks.readonly('Manual tests')+
-          '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false);
+          '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false)+
+      FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
+        'Resume recovery, commands, RPM feedback and errors',
+        FanControlDebug.render(S),false);
  };
  const renderVirtual=(S)=>{
    const virtual=S.settings?.virtualSensors||[];
