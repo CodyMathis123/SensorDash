@@ -176,6 +176,60 @@ internal static class WorkspaceSelfTest
         if (FanControlRuntime.MinExperimentalDuty < 70 ||
             FanControlRuntime.MaxSessionSeconds > 120)
             throw new Exception("Experimental control limits changed without safety review");
+        // Approval is the privilege boundary: test persistence without
+        // creating IControl, opening hardware, or changing physical outputs.
+        var persistentTestDir=Directory.CreateTempSubdirectory("SensorDashFanTests-");
+        try
+        {
+            var profileCurve=new SimulatedFanCurveConfig {
+                Id="test-cpu-curve", Name="CPU curve", SourceSensorId="test-cpu-temp",
+                Points=[new(){Temperature=40,Percent=20},new(){Temperature=85,Percent=90}]
+            };
+            var profileSettings=new DashboardSettings {
+                FanProfiles=[new FanProfileConfig {
+                    Id="test-rads",Name="Test radiators",CurveIds=["test-cpu-curve"],
+                    ChannelIds=["/test/control/1"],MinimumPercent=15,
+                    HysteresisDegrees=3,ResponseSeconds=10
+                }],
+                SimulatedFanCurves=[profileCurve]
+            };
+            WorkspaceLogic.Normalize(profileSettings);
+            var advertised=new List<FanOutputInfo>{
+                new("/test/control/1","Test fan","Test mainboard","/test/mainboard",
+                    0,100,"Undefined",true)
+            };
+            var p=new PersistentFanProfiles(persistentTestDir.FullName);
+            var acceptedJson=System.Text.Json.JsonSerializer.Serialize(
+                p.Request(new FanCommand("start-profile",ProfileId:"test-rads",
+                    ConfirmExclusiveOwnership:true),profileSettings,advertised,null),
+                System.Text.Json.JsonSerializerOptions.Web);
+            if(!acceptedJson.Contains("\"accepted\":true",StringComparison.Ordinal))
+                throw new Exception("Admin-approved profile was not accepted");
+            if(!p.OwnsChannel("/test/control/1")||!p.HasActiveProfiles)
+                throw new Exception("Approved fan output was not retained");
+            var restarted=new PersistentFanProfiles(persistentTestDir.FullName);
+            if(!restarted.OwnsChannel("/test/control/1"))
+                throw new Exception("Approved profile did not survive collector restart");
+            var stoppedJson=System.Text.Json.JsonSerializer.Serialize(
+                restarted.Request(new FanCommand("stop-profile",ProfileId:"test-rads"),
+                    profileSettings,advertised,null),
+                System.Text.Json.JsonSerializerOptions.Web);
+            if(!stoppedJson.Contains("\"accepted\":true",StringComparison.Ordinal))
+                throw new Exception("Admin stop of fan profile rejected");
+            if(new PersistentFanProfiles(persistentTestDir.FullName).HasActiveProfiles)
+                throw new Exception("Stopping fan profile failed to revoke persistence");
+            acceptedJson=System.Text.Json.JsonSerializer.Serialize(
+                p.Request(new FanCommand("start-profile",ProfileId:"test-rads",
+                    ConfirmExclusiveOwnership:false),profileSettings,advertised,null),
+                System.Text.Json.JsonSerializerOptions.Web);
+            if(!acceptedJson.Contains("\"accepted\":false",StringComparison.Ordinal))
+                throw new Exception("Unconfirmed persistent fan profile was accepted");
+        }
+        finally
+        {
+            try{persistentTestDir.Delete(true);}catch{}
+        }
+
         // LHM reports Undefined on first instantiation, not firmware state.
         // Hardware eligibility should depend on the supported output range,
         // rather than which mode the LHM wrapper happens to remember.
