@@ -581,6 +581,7 @@ async function loadFanControl(){
     data.status?.state==='active'?'Manual test active':'Firmware/default';
   if(changed&&S.view==='curves')render();
   else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
+  FanCommissioning.paint(S);
  }catch(e){console.warn('Live fan channel inventory:',e.message);}
 }
 async function changeVisibility(field,value){
@@ -645,6 +646,7 @@ document.addEventListener('click',e=>{
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
+ if(FanCommissioning.handle(e,S,{render,toast}))return;
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){
    const target=usages.dataset.usageTarget;
@@ -705,6 +707,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
  if(e.target.id==='explorerGroup'){S.explorerGrouping=e.target.value;render()}
  if(e.target.id==='explorerShowHidden'){S.showHidden=e.target.checked;render()}

@@ -1,4 +1,4 @@
-# SensorDash 0.6.2 — Testable fan-control engine and diagnostics
+# SensorDash 0.6.3 — Guided fan mapping and safe-range calibration
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -32,7 +32,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.6.2 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.6.3 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -85,7 +85,19 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.6.2.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.6.3.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+
+## Guided physical channel identification and calibration (0.6.3)
+
+The Fan Control screen includes a dedicated **Identify → Name → Calibrate → Verify** assistant. It stores *advisory* mappings of discovered PWM outputs to fan-bank labels and optional tachometer (RPM) sensor IDs. It does not guess header wiring or use mapping metadata as hardware-write authorization.
+
+- Identify each channel as **fan**, **pump**, or **unknown**. Unknown/pump outputs have no commissioning test buttons, and the privileged controller also rejects timed manual tests for channels identified as pumps. The user must confirm fan versus pump wiring.
+- Test a named fan using the existing UAC-authorized exclusive **30-second manual session**, at **100%, 85%, or 70%** PWM only. Each test requires a new elevation prompt. Stop/release remains available.
+- When an RPM sensor is assigned, capture a **fresh, positive** reading during the **matching active manual test**, after a five-second stabilization period. Recordings are evidence of observed RPM, not proof all fans on a splitter are spinning.
+- User verification requires physical confirmation and at least two measurements separated by 10 PWM percentage points with an 8% RPM rise. Changes to channel type or tachometer clear observations/verification. Mappings and measured points persist with settings across upgrades.
+- **No automatic low-duty sweep, discovery of a minimum spinning duty, or fan-profile modification.** Actual spin-up duty, pump safety and firmware recovery remain hardware-specific.
+
+The implementation lives in `FanCommissioningModels.cs`, `FanCommissioningSelfTest.cs` and `fan-commissioning.js`, not a monolithic fan controller. C# normalization verifies bounds, deduplication and no pump calibration. A separate JavaScript regression suite runs in CI.
 
 ## Fan-control architecture and tests (0.6.2)
 

@@ -81,6 +81,9 @@ public sealed class FanControlRuntime
                 _pending = new Pending(command, null);
                 return new { accepted = true, message = "Firmware-default restoration queued." };
             }
+            if (settings.FanChannelMappings?.Any(m => m.ChannelId == command.ChannelId &&
+                    m.Kind == "pump") == true)
+                return new { accepted = false, message = "This channel is identified as a pump; manual fan-commissioning tests are disabled." };
             if (_session != null)
                 return new { accepted = false, message = "Release the current session first." };
             if (!command.ConfirmExclusiveOwnership)
@@ -193,6 +196,15 @@ public sealed class FanControlRuntime
         }
         _profiles.Tick(controls,frame,now);
         if (_session is not { } session) return;
+        // Settings can change while a short manual session is active.
+        // Revoke manual ownership on the next collector tick if the user
+        // identifies this physical channel as a pump.
+        if (settings.FanChannelMappings?.Any(m => m.ChannelId == session.ChannelId &&
+                m.Kind == "pump") == true)
+        {
+            Release(controls, "Channel identified as a pump; manual session stopped.");
+            return;
+        }
         if (now >= session.Expires)
         {
             Release(controls, "Session expired; firmware-default restoration requested.");

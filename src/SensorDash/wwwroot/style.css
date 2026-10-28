@@ -215,6 +215,16 @@
 .w-fan-ack input[type=checkbox]{appearance:auto;width:19px;height:19px;flex:none;margin-top:2px}
 .w-fan-ack span{font-size:12px}
 
+.fc-panel{margin-bottom:18px}
+.fc-panel .fc-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.fc-steps>div{border:1px solid #2c4352;border-radius:10px;padding:14px;min-width:0}
+.fc-steps h3{margin:2px 0 8px;font-size:14px}
+.fc-steps .table-container{max-height:280px;overflow:auto}
+.fc-steps .w-output-table{min-width:0}
+.fc-panel .w-fan-ack{margin:9px 0}
+.fc-panel .w-actions label{min-width:160px}
+@media(max-width:850px){.fc-panel .fc-steps{grid-template-columns:1fr}}
+
 /* Persistent fan profiles: one profile controls independent channels via
    MAX-mixed temperature curves; responsive editing stays legible. */
 .w-profile-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:15px 0}

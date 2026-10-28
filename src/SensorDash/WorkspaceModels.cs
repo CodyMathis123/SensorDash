@@ -121,6 +121,8 @@ public static class WorkspaceLogic
             Include([curve.SourceSensorId, curve.OutputSensorId]);
         foreach(var profile in cfg.FanProfiles ?? [])
             Include(profile.ChannelIds);
+        foreach(var mapping in cfg.FanChannelMappings ?? [])
+            Include([mapping.RpmSensorId]);
         return used;
     }
 
@@ -140,6 +142,7 @@ public static class WorkspaceLogic
             .Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();
         cfg.DisabledCollectionGroups = HardwareCollection.NormalizeGroups(cfg.DisabledCollectionGroups);
         cfg.DisabledCollectionDeviceIds = Ids(cfg.DisabledCollectionDeviceIds, 250);
+        cfg.FanChannelMappings = FanCommissioningRules.Normalize(cfg.FanChannelMappings);
         cfg.CoolingSystems = (cfg.CoolingSystems ?? []).Take(20).Select(system => {
             system.Id = Short(system.Id, 80);
             system.Name = Short(system.Name);
