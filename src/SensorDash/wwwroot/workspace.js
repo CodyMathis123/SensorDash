@@ -631,6 +631,20 @@ const SDWorkspace = (() => {
      const field=e.dataset.traySensor?'sensorId':e.dataset.trayLabel?'label':e.dataset.trayColor?'color':'decimals';
      o[field]=field==='decimals'?Number(e.value):e.value;
    }
+   for(const e of document.querySelectorAll('[data-profile-name],[data-profile-min],[data-profile-response]')){
+     const id=e.dataset.profileName||e.dataset.profileMin||e.dataset.profileResponse;
+     const p=(d.fanProfiles||[]).find(p=>p.id===id);if(!p)continue;
+     if(e.dataset.profileName)p.name=e.value;
+     if(e.dataset.profileMin)p.minimumPercent=Number(e.value);
+     if(e.dataset.profileResponse)p.responseSeconds=Number(e.value);
+   }
+   for(const p of d.fanProfiles||[]){
+     const selector=id=>'[data-profile-'+id+'="'+CSS.escape(p.id)+'"]';
+     if(document.querySelector(selector('curve')))
+       p.curveIds=[...document.querySelectorAll(selector('curve')+':checked')].map(el=>el.value);
+     if(document.querySelector(selector('channel')))
+       p.channelIds=[...document.querySelectorAll(selector('channel')+':checked')].map(el=>el.value);
+   }
    for(const e of document.querySelectorAll('[data-curve-name],[data-curve-input],[data-curve-output],[data-curve-age]')){
      const id=e.dataset.curveName||e.dataset.curveInput||e.dataset.curveOutput||e.dataset.curveAge;
      const o=d.simulatedFanCurves.find(c=>c.id===id);if(!o)continue;
@@ -680,6 +694,43 @@ const SDWorkspace = (() => {
        });
        if(!response.ok){h.toast('Authorization not started: '+(await response.text()).slice(0,150));return true;}
        h.toast('Windows elevation requested. The status above shows the actual hardware result.');
+       return true;
+     }
+     if(['starter-radiators','starter-nvme','add-profile'].includes(action)){
+       syncInputs(S);
+       await starterProfiles(action,S,h);
+       return true;
+     }
+     if(['start-profile','stop-profile','stop-all-profiles'].includes(action)){
+       if(action==='start-profile'){
+         syncInputs(S);
+         const p=S.settings.fanProfiles.find(p=>p.id===id);
+         if(!p?.curveIds.length||!p?.channelIds.length){
+           h.toast('Select at least one temperature curve and a physical PWM output.');return true;
+         }
+         await persist(S,h);
+       }
+       const command={
+         action:action==='start-profile'?'start-profile':
+                action==='stop-profile'?'stop-profile':'stop-all',
+         profileId:id||'',confirmExclusiveOwnership:action==='start-profile',
+         durationSeconds:60,percent:100
+       };
+       const response=await fetch('/api/fan-control/authorize',{
+         method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
+         body:JSON.stringify(command)
+       });
+       if(!response.ok){h.toast('Authorization unavailable: '+(await response.text()).slice(0,160));return true;}
+       h.toast('Confirm Windows elevation. Collector status will update.');
+       return true;
+     }
+     if(action==='remove-profile'){
+       if(S.fanControl?.persistent?.profiles?.some(p=>p.id===id)){
+         h.toast('Stop the active profile before deleting its draft.');return true;
+       }
+       syncInputs(S);
+       S.settings.fanProfiles=S.settings.fanProfiles.filter(p=>p.id!==id);
+       await persist(S,h);
        return true;
      }
      // Curve point row operations edit the local form. Saving is explicit,
@@ -857,6 +908,18 @@ const SDWorkspace = (() => {
      if(next!=null&&node.textContent!==next)node.textContent=next;
    });
  };
+ const paintProfiles=(S)=>{
+   const latest=S.fanControl?.persistent?.readings||[];
+   for(const report of latest){
+     const id=report.id;
+     for(const [attr,value] of [['state',report.state],['message',report.message],
+         ['target',report.targetPercent==null?'':Number(report.targetPercent).toFixed(1)+'%']]){
+       const element=[...document.querySelectorAll('[data-profile-'+attr+']')]
+         .find(el=>el.getAttribute('data-profile-'+attr)===id);
+       if(element&&element.textContent!==value)element.textContent=value;
+     }
+   }
+ };
  const paintFanControl=(S)=>{
    const data=S.fanControl?.status;
    if(!data)return;
@@ -879,5 +942,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation,paintCooling,paintFanControl,handleCurvePointInput,isHidden,displayName,usageIndex};
+ return {render,handle,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,isHidden,displayName,usageIndex};
 })();
