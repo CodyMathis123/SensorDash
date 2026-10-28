@@ -15,7 +15,9 @@ const FanCommissioning=(()=>{
   if(!m||m.kind!=='fan'||!m.visuallyIdentified||!m.rpmSensorId)return false;
   const points=[...(m.measurements||[])].sort((a,b)=>a.dutyPercent-b.dutyPercent);
   return points.length>=2&&points.at(-1).dutyPercent-points[0].dutyPercent>=10&&
-   points[0].rpm>0&&points.at(-1).rpm>=points[0].rpm*1.08;
+   points.every(p=>p.dutyPercent>=70&&p.dutyPercent<=100&&Number.isFinite(p.rpm)&&p.rpm>0)&&
+   points.every((p,i)=>i===0||p.rpm>=points[i-1].rpm*0.92)&&
+   points.at(-1).rpm>=points[0].rpm*1.08;
  };
  const choice=(id,label,chosen)=>'<option value="'+esc(id)+'" '+(id===chosen?'selected':'')+'>'+esc(label)+'</option>';
  const command=async(payload)=>{
@@ -137,7 +139,8 @@ const FanCommissioning=(()=>{
   }
   if(action==='test'){
    const duty=Number(el.dataset.duty);
-   if(!map||map.kind!=='fan'||!map.label)throw Error('Save the channel as a named fan bank first.');
+   if(!map||map.kind!=='fan'||!map.label||byId('fcKind')?.value!=='fan')
+    throw Error('Select Fan and save the identification before requesting a test.');
    if(![70,85,100].includes(duty))throw Error('Only the approved 70–100% test steps are available.');
    if(!channel.writable||activeProfile(S,selected))
     throw Error('This channel is unavailable or assigned to an enabled profile.');
@@ -149,8 +152,9 @@ const FanCommissioning=(()=>{
    return;
   }
   if(action==='capture'){
-   if(!map||map.kind!=='fan'||!map.rpmSensorId)
-    throw Error('Save a fan mapping with an RPM source first.');
+   if(!map||map.kind!=='fan'||!map.rpmSensorId||
+      byId('fcKind')?.value!=='fan'||byId('fcRpm')?.value!==map.rpmSensorId)
+    throw Error('Save the current fan type and RPM sensor before recording data.');
    const r=await fetch('/api/fan-control');
    if(!r.ok)throw Error('Could not confirm current hardware-control status.');
    const control=(await r.json()).status||{};
@@ -177,7 +181,9 @@ const FanCommissioning=(()=>{
    return persist(S,draft,h,'RPM observation recorded. Release the test or collect another duty.');
   }
   if(action==='verify'){
-   if(!map||map.kind!=='fan')throw Error('Select a saved fan mapping.');
+   if(!map||map.kind!=='fan'||byId('fcKind')?.value!=='fan'||
+      byId('fcRpm')?.value!==map.rpmSensorId)
+    throw Error('Save any identification edits before verifying the response.');
    if(!byId('fcVisual')?.checked)
     throw Error('Confirm the physical fan bank visibly responded to this PWM output.');
    const draft=structuredClone(S.settings);

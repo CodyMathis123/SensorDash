@@ -78,6 +78,10 @@ async function click(action,duty){
   kind:'fan',visuallyIdentified:true,rpmSensorId:'tach1',
   measurements:[{dutyPercent:70,rpm:1000},{dutyPercent:100,rpm:1030}]}),false);
  assert.equal(controller.qualifyResponse({
+  kind:'fan',visuallyIdentified:true,rpmSensorId:'tach1',
+  measurements:[{dutyPercent:70,rpm:700},{dutyPercent:85,rpm:2000},{dutyPercent:100,rpm:1500}]}),false,
+  'A contradictory middle RPM sample must block verification');
+ assert.equal(controller.qualifyResponse({
   kind:'pump',visuallyIdentified:true,rpmSensorId:'tach1',
   measurements:[{dutyPercent:70,rpm:600},{dutyPercent:100,rpm:1600}]}),false);
  assert.ok(source.includes("control.state!=='active'") &&

@@ -26,8 +26,14 @@ public static class FanCommissioningRules
         if(mapping.Kind!="fan" || !mapping.VisuallyIdentified ||
            string.IsNullOrWhiteSpace(mapping.RpmSensorId))return false;
         var sorted=mapping.Measurements.OrderBy(p=>p.DutyPercent).ToArray();
-        if(sorted.Length<2 || sorted[^1].DutyPercent-sorted[0].DutyPercent<10)return false;
-        return sorted[0].Rpm>0 && sorted[^1].Rpm>=sorted[0].Rpm*1.08;
+        if(sorted.Length<2 || sorted[^1].DutyPercent-sorted[0].DutyPercent<10 ||
+           sorted.Any(p => p.DutyPercent is <70 or >100 ||
+                !double.IsFinite(p.Rpm) || p.Rpm<=0))return false;
+        // Permit small tachometer noise; strongly decreasing intermediate
+        // readings contradict the claimed response even if endpoints rise.
+        for(var i=1;i<sorted.Length;i++)
+            if(sorted[i].Rpm < sorted[i-1].Rpm*0.92)return false;
+        return sorted[^1].Rpm>=sorted[0].Rpm*1.08;
     }
 
     public static List<FanChannelMapping> Normalize(IEnumerable<FanChannelMapping>? items)

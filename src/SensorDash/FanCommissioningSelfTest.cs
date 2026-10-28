@@ -55,6 +55,13 @@ internal static class FanCommissioningSelfTest
         };
         Check(!FanCommissioningRules.HasVerifiedResponse(unknown),
             "flat RPM response must not verify");
+        unknown.Measurements=[
+            new(){DutyPercent=70,Rpm=700,ObservedAt=now},
+            new(){DutyPercent=85,Rpm=2000,ObservedAt=now},
+            new(){DutyPercent=100,Rpm=1500,ObservedAt=now}
+        ];
+        Check(!FanCommissioningRules.HasVerifiedResponse(unknown),
+            "RPM response must not fall substantially at a higher duty");
         Check(FanCommissioningRules.Normalize([unknown])[0].VerifiedAt==null,
             "failed verification must be cleared");
 
