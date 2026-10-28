@@ -51,7 +51,7 @@ const settings={
   {id:'widget',title:'Coolant reading',kind:'metric',sensorIds:['coolant']}]}],
  pinnedSensors:[],highThresholds:{},
  trayWidgets:[{id:'tray',sensorId:'coolant',label:'Coolant'}],
- virtualSensors:[],
+ virtualSensors:[],fanProfiles:[],
  simulatedFanCurves:[{id:'curve',name:'Fan cooling',sourceSensorId:'coolant',
   outputSensorId:'rpm',points:[{temperature:25,percent:25},{temperature:50,percent:100}]}]
 };
@@ -143,7 +143,30 @@ const h={
 
  assert.ok(!backend.includes('SensorBindings')&&!app.includes('sensorBindings'));
  assert.ok(!model.includes('"radiator" or "fan" or "sensor"'));
- assert.ok(app.includes('for(let i=0;i<ids.length;i+=12)'),
-  'Batched history is required for multiple cooling charts');
+ assert.ok(app.includes('for(let at=0;at<needed.length;at+=12)'),
+  'History batching is required for multiple cooling charts');
+ assert.ok(app.includes('S.historyCache')&&app.includes('HISTORY_CACHE_LIMIT=120'),
+  'History should be cached and bounded across navigation');
+ assert.ok(app.includes('names[i]')&&app.includes('series[i].color'),
+  'Chart hover must include the sensor name alongside the color swatch');
+ assert.ok(app.includes('status.version')&&app.includes('fanOutputStatus'),
+  'Build version and fan output footer must be dynamic');
+ await click('starter-radiators');
+ const shared=S.settings.fanProfiles.at(-1);
+ assert.equal(shared.curveIds.length,2);
+ assert.equal(shared.channelIds.length,0,'Never guess a physical motherboard fan channel');
+ assert.deepEqual(Array.from(S.settings.simulatedFanCurves.at(-2).points.map(p=>[p.temperature,p.percent])),
+  [[40,20],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
+ assert.deepEqual(Array.from(S.settings.simulatedFanCurves.at(-1).points.map(p=>[p.temperature,p.percent])),
+  [[40,10],[55,10],[60,20],[65,25],[70,35],[75,50],[85,75],[95,100]]);
+ await click('starter-nvme');
+ const nvme=S.settings.simulatedFanCurves.at(-1);
+ assert.deepEqual(Array.from(nvme.points.map(p=>[p.temperature,p.percent])),
+  [[35,30],[40,30],[45,40],[50,55],[55,75],[60,100]]);
+ assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
+ const curvesView=workspace.render(S,'curves',h);
+ assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(!curvesView.includes('This sandbox evaluates'));
+ console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
  console.log('PASS: cooling analytics, chart groups, templates, sensor usage, deep links, visibility, dashboard creation and removal of legacy roles');
 })().catch(err=>{console.error(err);process.exitCode=1;});
