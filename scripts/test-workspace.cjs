@@ -252,10 +252,10 @@ const h={
  S.view='curves';
  await click('toggle-fan-lock');
  assert.equal(S.settings.fanControlLocked,true);
- const locked=workspace.render(S,'curves',h);
- assert.ok(locked.includes('Unlock editing')&&!locked.includes('data-curve-temperature'),
+ const lockedFans=workspace.render(S,'curves',h);
+ assert.ok(lockedFans.includes('Unlock editing')&&!lockedFans.includes('data-curve-temperature'),
   'Locked Fan Control hides point inputs');
- assert.ok(locked.includes('Release to firmware control'),
+ assert.ok(lockedFans.includes('Release to firmware control'),
   'Locked Fan Control must still allow manual release');
  const before=S.settings.simulatedFanCurves.length;
  await click('add-curve');
