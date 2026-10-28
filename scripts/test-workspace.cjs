@@ -9,6 +9,7 @@ const root = path.join(__dirname, '..');
 const source = file => fs.readFileSync(path.join(root,file),'utf8');
 const script=source('src/SensorDash/wwwroot/workspace.js');
 const fanUx=source('src/SensorDash/wwwroot/fan-control-ux.js');
+const fanDebug=source('src/SensorDash/wwwroot/fan-control-debug.js');
 const fanFeedback=source('src/SensorDash/wwwroot/fan-feedback.js');
 const coolingInsights=source('src/SensorDash/wwwroot/cooling-insights.js');
 const locks=source('src/SensorDash/wwwroot/workspace-locks.js');
@@ -26,7 +27,7 @@ const context={
  fetch:async(_url,opts)=>({ok:true,json:async()=>JSON.parse(opts.body)}),
  console
 };
-const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+script+'\nSDWorkspace;',context);
+const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanDebug+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+script+'\nSDWorkspace;',context);
 function sensor(id,name,type,value,device='Generic hardware',deviceType='Controller'){
  return {id,name,type,value,device,deviceType,deviceId:'device-'+deviceType};
 }
