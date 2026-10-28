@@ -1,32 +1,17 @@
 using System.Text.Json;
 using LibreHardwareMonitor.Hardware;
 
-// Persistent fan-control authority is distinct from ordinary dashboard settings.
-// Only the administrator-only IPC server can approve or stop this snapshot.
-// The collector thread is the sole owner of IControl instances.
-public sealed class ApprovedFanProfile
-{
-    public string Id { get; set; } = "";
-    public string Name { get; set; } = "";
-    public List<string> ChannelIds { get; set; } = [];
-    public List<SimulatedFanCurveConfig> Curves { get; set; } = [];
-    public double MinimumPercent { get; set; } = 20;
-    public double HysteresisDegrees { get; set; } = 2;
-    public double ResponseSeconds { get; set; } = 10;
-}
-
-public sealed record FanProfileReadout(string Id, string Name, string[] ChannelIds,
-    string State, double? TargetPercent, string Message);
-
 public sealed class PersistentFanProfiles
 {
     private readonly string _path;
     private readonly object _sync = new();
     private Dictionary<string,ApprovedFanProfile> _approved = new(StringComparer.Ordinal);
-    private readonly Dictionary<string,double> _previous = new(StringComparer.Ordinal);
-    private readonly Dictionary<string,double> _heldTemperatures = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _writtenChannels = new(StringComparer.Ordinal);
+    private readonly FanProfilePlanner _planner = new();
+    private readonly FanPwmWriter _writer = new();
+    // Admin requests enqueue changes. Only the collection thread mutates the evaluator and writer.
     private readonly HashSet<string> _pendingReleases = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pendingProfileResets = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pendingOutputResets = new(StringComparer.Ordinal);
     private List<FanProfileReadout> _latest = [];
 
     public PersistentFanProfiles(string dataDirectory)
@@ -41,8 +26,14 @@ public sealed class PersistentFanProfiles
             // A corrupt/duplicated file must never allow two profiles to
             // command the same physical output.
             var used=new HashSet<string>(StringComparer.Ordinal);
-            _approved = _approved.Values.Where(p=>p.ChannelIds.All(used.Add))
-                .ToDictionary(p=>p.Id,StringComparer.Ordinal);
+            var safe=new Dictionary<string,ApprovedFanProfile>(StringComparer.Ordinal);
+            foreach(var profile in _approved.Values)
+            {
+                if(profile.ChannelIds.Any(used.Contains))continue;
+                safe[profile.Id]=profile;
+                used.UnionWith(profile.ChannelIds);
+            }
+            _approved=safe;
         }
         catch { _approved = new(StringComparer.Ordinal); }
     }
@@ -51,9 +42,11 @@ public sealed class PersistentFanProfiles
         p.Id.Length is >0 and <=80 && p.ChannelIds.Count is >0 and <=12 &&
         p.ChannelIds.Distinct(StringComparer.Ordinal).Count()==p.ChannelIds.Count &&
         p.Curves.Count is >0 and <=8 &&
+        p.Curves.Select(c=>c.Id).Distinct(StringComparer.Ordinal).Count()==p.Curves.Count &&
         p.ChannelIds.All(id=>id.Length is >0 and <=256) &&
         p.Curves.All(c=>c.Points.Count>=2 && c.Points.Count<=16 &&
-            c.SourceSensorId.Length>0 &&
+            c.SourceSensorId.Length>0 && c.MaxSampleAgeSeconds is >=3 and <=300 &&
+            c.Points.Select(pt=>pt.Temperature).Distinct().Count()==c.Points.Count &&
             c.Points.All(pt=>double.IsFinite(pt.Temperature) && double.IsFinite(pt.Percent)
                 && pt.Percent is >=0 and <=100)) &&
         double.IsFinite(p.MinimumPercent) && p.MinimumPercent is >=0 and <=100 &&
@@ -104,9 +97,9 @@ public sealed class PersistentFanProfiles
                 var keep=remaining.Values.SelectMany(p=>p.ChannelIds).ToHashSet(StringComparer.Ordinal);
                 foreach(var id in previous)if(!keep.Contains(id))_pendingReleases.Add(id);
                 _approved=remaining;
-                foreach(var id in previous.Except(keep))_previous.Remove(id);
-                foreach(var key in _heldTemperatures.Keys.ToArray())
-                    if(!remaining.ContainsKey(key.Split('|')[0]))_heldTemperatures.Remove(key);
+                foreach(var id in previous.Except(keep))_pendingOutputResets.Add(id);
+                foreach(var id in _approved.Keys)
+                    if(!remaining.ContainsKey(id))_pendingProfileResets.Add(id);
                 return new {accepted=true,message="Stopped profile; restoring firmware control on the next hardware poll."};
             }
 
@@ -157,77 +150,41 @@ public sealed class PersistentFanProfiles
             catch(Exception ex){return new {accepted=false,message="Could not activate profile: "+ex.Message};}
             _approved=next;
             // Resending a deliberate user-approved edit must update hardware.
-            foreach(var id in draft.ChannelIds)_previous.Remove(id);
-            foreach(var key in _heldTemperatures.Keys.Where(k=>k.StartsWith(draft.Id+"|",
-                StringComparison.Ordinal)).ToArray())_heldTemperatures.Remove(key);
+            foreach(var id in draft.ChannelIds)_pendingOutputResets.Add(id);
+            _pendingProfileResets.Add(draft.Id);
             return new {accepted=true,message="Approved profile saved and enabled. Collector will continuously evaluate its curves."};
         }
     }
 
-    private static double Interpolate(IReadOnlyList<CurvePointConfig> points,double temperature)
-    {
-        var ordered=points.OrderBy(p=>p.Temperature).ToArray();
-        if(temperature<=ordered[0].Temperature)return ordered[0].Percent;
-        if(temperature>=ordered[^1].Temperature)return ordered[^1].Percent;
-        for(var i=1;i<ordered.Length;i++)
-        {
-            if(temperature>ordered[i].Temperature)continue;
-            var previous=ordered[i-1];var next=ordered[i];
-            return previous.Percent+(next.Percent-previous.Percent)*
-                (temperature-previous.Temperature)/(next.Temperature-previous.Temperature);
-        }
-        return ordered[^1].Percent;
-    }
+    // Same path for real IControl objects and test doubles.
+    public void Tick(Dictionary<string,IControl> controls, SensorFrame frame, DateTimeOffset now) =>
+        Tick(FanPwmChannelAdapter.Wrap(controls),frame,now);
 
-    // Collection thread only. The runtime passes channel controls discovered
-    // using the same Computer and thread that updates temperature sensors.
-    public void Tick(Dictionary<string,IControl> controls, SensorFrame frame, DateTimeOffset now)
+    internal void Tick(IReadOnlyDictionary<string,IFanPwmChannel> controls,
+        SensorFrame frame, DateTimeOffset now)
     {
         ApprovedFanProfile[] profiles;
-        string[] releases;
+        string[] releases, profileResets, outputResets;
         lock(_sync)
         {
             profiles=_approved.Values.ToArray();
             releases=_pendingReleases.ToArray();
             _pendingReleases.Clear();
+            profileResets=_pendingProfileResets.ToArray();
+            _pendingProfileResets.Clear();
+            outputResets=_pendingOutputResets.ToArray();
+            _pendingOutputResets.Clear();
         }
+        foreach(var id in profileResets)_planner.Reset(id);
+        _writer.ResetProfile(outputResets);
         foreach(var id in releases)
-        {
-            if(controls.TryGetValue(id,out var control))
-                try{control.SetDefault();}catch{}
-            _writtenChannels.Remove(id);
-        }
+            if(!_writer.Release(id,controls))
+                lock(_sync)_pendingReleases.Add(id);
 
         var readouts=new List<FanProfileReadout>();
         foreach(var profile in profiles)
         {
-            var samples=WorkspaceLogic.Evaluate(frame,new DashboardSettings{
-                SimulatedFanCurves=profile.Curves
-            },now);
-            var invalid=samples.Count!=profile.Curves.Count||
-                samples.Any(s=>s.State!="simulated"||!s.TargetPercent.HasValue);
-            // Missing temperature readings (including unavailable NVMe data)
-            // mean FULL FAN SPEED while this profile remains active.
-            var desired=100.0;
-            if(!invalid)
-            {
-                var values=new List<double>();
-                for(var i=0;i<samples.Count;i++)
-                {
-                    var curve=profile.Curves[i];
-                    var reading=samples[i];
-                    var temperature=reading.InputTemperature!.Value;
-                    var key=profile.Id+"|"+curve.Id;
-                    if(_heldTemperatures.TryGetValue(key,out var held) &&
-                       temperature<held &&
-                       temperature>held-profile.HysteresisDegrees)
-                        temperature=held;
-                    else _heldTemperatures[key]=temperature;
-                    values.Add(Interpolate(curve.Points,temperature));
-                }
-                desired=values.Max();
-            }
-            desired=Math.Clamp(desired,profile.MinimumPercent,100);
+            var demand=_planner.Evaluate(profile,frame,now);
             var problems=new List<string>();
             foreach(var id in profile.ChannelIds)
             {
@@ -236,63 +193,23 @@ public sealed class PersistentFanProfiles
                     problems.Add(id+" missing");
                     continue;
                 }
-                if(!float.IsFinite(channel.MinSoftwareValue)||
-                   !float.IsFinite(channel.MaxSoftwareValue)||
-                   channel.MinSoftwareValue>channel.MaxSoftwareValue ||
-                   channel.MaxSoftwareValue<=0)
-                {
-                    problems.Add(id+" unsupported");continue;
-                }
-                var commanded=Math.Clamp(desired,
-                    Math.Max(0,channel.MinSoftwareValue),Math.Min(100,channel.MaxSoftwareValue));
-                if(_previous.TryGetValue(id,out var previous) && commanded<previous && !invalid)
-                {
-                    // Rising temperature accelerates immediately. Falling
-                    // temperature decelerates gradually, avoiding fan hunting.
-                    var alpha=profile.ResponseSeconds<=0?1:
-                        1-Math.Exp(-1/Math.Max(1,profile.ResponseSeconds));
-                    commanded=previous+(commanded-previous)*alpha;
-                }
-                try
-                {
-                    if(!_writtenChannels.Contains(id) && channel.ControlMode==ControlMode.Software)
-                        channel.SetDefault();
-                    if(!_writtenChannels.Contains(id)||channel.ControlMode!=ControlMode.Software ||
-                        Math.Abs(channel.SoftwareValue-commanded)>0.45)
-                        channel.SetSoftware((float)commanded);
-                    _writtenChannels.Add(id);
-                    _previous[id]=commanded;
-                }
-                catch(Exception ex)
-                {
-                    problems.Add(id+" write failed ("+ex.GetType().Name+")");
-                    try{channel.SetDefault();}catch{}
-                    _writtenChannels.Remove(id);
-                    _previous.Remove(id);
-                }
+                var error=_writer.Apply(id,channel,demand,profile.ResponseSeconds,now);
+                if(error!=null)problems.Add(error);
             }
-            var state=problems.Count>0?"degraded":invalid?"failsafe":"running";
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
-                profile.ChannelIds.ToArray(),state,desired,
-                problems.Count>0?string.Join("; ",problems):
-                    invalid?"Temperature source missing/stale: commanding fail-safe full speed.":
-                    $"Max of {samples.Count} active temperature curve(s)."));
+                profile.ChannelIds.ToArray(),
+                problems.Count>0?"degraded":demand.Failsafe?"failsafe":"running",
+                demand.Percent,problems.Count>0?string.Join("; ",problems):demand.Reason));
         }
         lock(_sync)_latest=readouts;
     }
 
     public void ReleaseBeforeClose(Dictionary<string,IControl> controls)
     {
-        foreach(var id in _writtenChannels.ToArray())
-        {
-            if(controls.TryGetValue(id,out var c))
-                try{c.SetDefault();}catch{}
-        }
-        _writtenChannels.Clear();
-        _previous.Clear();
-        _heldTemperatures.Clear();
+        _writer.ReleaseAll(FanPwmChannelAdapter.Wrap(controls));
+        _planner.Clear();
         lock(_sync)_latest=[];
-        // Approved persistent profiles are retained; they'll resume when the
-        // service restarts. Firmware control is returned on graceful stop.
+        // Persistent approval survives clean shutdown; firmware restore is best-effort.
+        // A process crash cannot invoke a software recovery callback.
     }
 }

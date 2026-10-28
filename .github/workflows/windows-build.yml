@@ -3,7 +3,7 @@ name: Windows MSI and portable build
 # or through an explicit Actions -> Run workflow request.
 on:
   push:
-    branches: [Production]
+    branches: [Production, 'validation/fan-control-engine-20261027']
   workflow_dispatch:
 permissions:
   contents: read
@@ -101,11 +101,14 @@ jobs:
           $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
           $app = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
           $html = Get-Content 'src/SensorDash/wwwroot/index.html' -Raw
+          $writer = Get-Content 'src/SensorDash/FanPwmChannels.cs' -Raw
+          $planner = Get-Content 'src/SensorDash/FanProfilePlanner.cs' -Raw
           if ($model -notmatch 'approved-fan-profiles.json' -or
-              $model -notmatch 'SetDefault\(' -or $model -notmatch 'SetSoftware\(') {
-            throw 'Missing approved persistent hardware control and cleanup'
+              $writer -notmatch 'SetDefault\\(' -or $writer -notmatch 'SetSoftware\\(' -or
+              $model -notmatch 'FanPwmChannelAdapter.Wrap') {
+            throw 'Missing approved persistent control and hardware boundary'
           }
-          if ($model -notmatch 'Math.Max' -or
+          if ($planner -notmatch 'targets.Max' -or
               $ui -notmatch 'starter-radiators' -or $ui -notmatch 'starter-nvme') {
             throw 'Missing CPU/GPU MAX and NVMe fan profiles'
           }
