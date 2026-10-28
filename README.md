@@ -1,3 +1,4 @@
+<!-- One-time Windows MSI validation of persistent fan profiles and chart caching. -->
 # SensorDash 0.6.0 — Persistent multi-fan control and responsive charts
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
