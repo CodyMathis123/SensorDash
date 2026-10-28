@@ -3,7 +3,7 @@ const titles={
  overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
  dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
  cooling:['COOLING','Cooling systems','Model any number of air, liquid or custom cooling systems'],
- curves:['CONTROL','Fan curves & hardware','Design curves, inspect writable channels and authorize short live tests'],
+ curves:['FAN CONTROL','Fan control','Run persistent temperature-based fan profiles across your hardware channels'],
  virtual:['DERIVED','Virtual sensors','Define maximum, minimum, average and difference sensors'],
  tray:['NOTIFICATION AREA','Tray readouts','Configure up to six simultaneous Windows tray sensor icons'],
  storage:['HARDWARE','Storage sensors','SSD and drive telemetry in the unified sensor catalog'],
@@ -13,7 +13,7 @@ const titles={
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,requests:0},liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -273,6 +273,7 @@ function updateLiveValues(){
  SDWorkspace.paintSimulation(S);
  SDWorkspace.paintCooling(S);
  SDWorkspace.paintFanControl(S);
+ SDWorkspace.paintProfiles(S);
 }
 // Graph history draws at most once every 8 seconds. While a graph is being
 // inspected/dragged, freeze its base paint so the hover remains uninterrupted.
@@ -349,30 +350,64 @@ async function loadEvents(){
 async function fetchJSON(url,opts){
  const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text()||'Request failed');return r.json();
 }
+// Bounded per-sensor/per-range history cache. Re-entering a page immediately
+// paints its previous chart data; only expired/missing sensors are requested.
+// In-flight fetches survive navigation so rapid back/forward doesn't refetch.
+const HISTORY_TTL_MS=60000;
+const HISTORY_CACHE_LIMIT=120;
 function ensureHistory(){
  const nodes=[...document.querySelectorAll('canvas[data-chart]')];
  const ids=[...new Set(nodes.flatMap(c=>c.dataset.chart.split('|').filter(Boolean)))];
  if(!ids.length)return;
- const key=ids.sort().join(',')+'|'+S.hours;
- const now=Date.now();
- if(key===S.historyKey&&now-S.historyFetch<20000){drawAll();return}
- if(S.historyPending&&key===S.historyKey){drawAll();return}
- S.historyKey=key;S.historyFetch=now;S.historyPending=true;
- // The IPC history endpoint intentionally caps each request at 12 sensor IDs.
- // Batch dynamic cooling systems and custom dashboards instead of silently
- // dropping every chart after the first twelve sensors.
- const batches=[];
- for(let i=0;i<ids.length;i+=12)batches.push(ids.slice(i,i+12));
- Promise.all(batches.map(batch=>fetchJSON('/api/history?ids='+
-    encodeURIComponent(batch.join(','))+'&hours='+encodeURIComponent(S.hours))))
-   .then(results=>{
-     if(S.historyKey!==key)return;
-     S.history=Object.fromEntries(results.flatMap(data=>(data.series||[]).map(row=>[row.id,row.points])));
-     scheduleChartPaint();
-   })
-   .catch(err=>{console.warn('History fetch:',err.message)}).finally(()=>{S.historyPending=false});
- drawAll();
+ const hours=S.hours,now=Date.now();
+ const desired=new Set(ids.map(id=>hours+'|'+id));
+ const needed=[];
+ S.history={};
+ for(const id of ids){
+   const k=hours+'|'+id, cached=S.historyCache.get(k);
+   if(cached){
+     S.history[id]=cached.points;
+     if(now-cached.fetched<HISTORY_TTL_MS){S.historyStats.hits++;continue}
+   }
+   if(!S.historyRequests.has(k))needed.push(id);
+ }
+ drawAll(); // instant cached paint, even after returning from another page
+ if(!needed.length)return;
+ for(let at=0;at<needed.length;at+=12){
+   const batch=needed.slice(at,at+12);
+   const keys=batch.map(id=>hours+'|'+id);
+   const started=Date.now();
+   S.historyStats.requests++;
+   S.historyFetch=started;
+   const work=fetchJSON('/api/history?ids='+encodeURIComponent(batch.join(','))+
+     '&hours='+encodeURIComponent(hours))
+     .then(result=>{
+       const found=new Map((result.series||[]).map(line=>[line.id,line.points||[]]));
+       for(const id of batch){
+         const key=hours+'|'+id;
+         // Move refreshed entry to the back, retaining the most recent 120
+         // sensor/range pairs and avoiding unbounded browser memory growth.
+         S.historyCache.delete(key);
+         const data=found.get(id)||[];
+         S.historyCache.set(key,{fetched:Date.now(),points:data});
+         if(S.hours===hours && [...document.querySelectorAll('canvas[data-chart]')].some(canvas=>
+             canvas.dataset.chart.split('|').includes(id)))S.history[id]=data;
+       }
+       while(S.historyCache.size>HISTORY_CACHE_LIMIT)
+         S.historyCache.delete(S.historyCache.keys().next().value);
+       // New history should paint promptly on the active page, independently
+       // of the slower routine eight-second live-chart refresh.
+       if(S.hours===hours && !document.hidden && !chartInUse())
+         requestAnimationFrame(drawAll);
+       else scheduleChartPaint();
+     })
+     .catch(e=>console.warn('History fetch:',e.message))
+     .finally(()=>{for(const key of keys)if(S.historyRequests.get(key)===work)
+       S.historyRequests.delete(key)});
+   for(const key of keys)S.historyRequests.set(key,work);
+ }
 }
+
 function drawAll(){
  if(document.hidden||chartInUse()){S.chartDirty=true;return}
  document.querySelectorAll('canvas[data-chart]').forEach(drawCanvas);
@@ -478,12 +513,19 @@ async function loadFanControl(){
  if(S.view!=='curves')return;
  try{
   const data=await fetchJSON('/api/fan-control');
-  const signature=JSON.stringify((data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]));
+  const signature=JSON.stringify({
+    outputs:(data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]),
+    enabled:(data.persistent?.profiles||[]).map(p=>p.id).sort()
+  });
   const changed=signature!==S.fanOutputSignature;
   S.fanControl=data;
   S.fanOutputSignature=signature;
+  const enabled=data.persistent?.profiles?.length||0;
+  const footer=byId('fanOutputStatus');
+  if(footer)footer.textContent=enabled?enabled+' enabled fan profile'+(enabled===1?'':'s'):
+    data.status?.state==='active'?'Manual test active':'Firmware/default';
   if(changed&&S.view==='curves')render();
-  else SDWorkspace.paintFanControl(S);
+  else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
  }catch(e){console.warn('Live fan channel inventory:',e.message);}
 }
 async function changeVisibility(field,value){
@@ -608,7 +650,10 @@ document.addEventListener('change',e=>{
  if(e.target.id==='explorerShowHidden'){S.showHidden=e.target.checked;render()}
 });
 byId('range').addEventListener('change',e=>{S.hours=Number(e.target.value);S.historyKey='';render()});
-byId('refresh').addEventListener('click',()=>{S.historyKey='';loadEvents();render();toast('Refreshing sensor history')});
+byId('refresh').addEventListener('click',()=>{
+ S.historyCache.clear();S.historyKey='';
+ loadEvents();render();toast('Fetching fresh sensor history');
+});
 let resizePaint;
 window.addEventListener('resize',()=>{
   clearTimeout(resizePaint);
@@ -621,13 +666,15 @@ document.addEventListener('visibilitychange',()=>{
 // every 30 seconds to keep long-running graphs complete beyond liveCache's 140 samples.
 setInterval(()=>{
  if(document.hidden||!document.querySelector('canvas[data-chart]'))return;
- if(Date.now()-S.historyFetch>=30000)ensureHistory();
+ ensureHistory();
 },30000);
 async function bootstrap(){
  try{
-   const [cfg,frame,groups]=await Promise.all([
-     fetchJSON('/api/settings'),fetchJSON('/api/live'),fetchJSON('/api/collection-groups')
+   const [cfg,frame,groups,status]=await Promise.all([
+     fetchJSON('/api/settings'),fetchJSON('/api/live'),
+     fetchJSON('/api/collection-groups'),fetchJSON('/api/status')
    ]);
+   const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
    S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
