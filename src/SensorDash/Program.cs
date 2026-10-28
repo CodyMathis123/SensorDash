@@ -110,6 +110,7 @@ app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8")
 app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-commissioning.js", () => Resource("fan-commissioning.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-control-ux.js", () => Resource("fan-control-ux.js", "text/javascript; charset=utf-8"));
+app.MapGet("/fan-control-debug.js", () => Resource("fan-control-debug.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));

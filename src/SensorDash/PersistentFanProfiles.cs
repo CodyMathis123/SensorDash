@@ -8,14 +8,17 @@ public sealed class PersistentFanProfiles
     private Dictionary<string,ApprovedFanProfile> _approved = new(StringComparer.Ordinal);
     private readonly FanProfilePlanner _planner = new();
     private readonly FanPwmWriter _writer = new();
+    private readonly FanControlTrace? _trace;
+    private DateTimeOffset? _lastTick;
     // Admin requests enqueue changes. Only the collection thread mutates the evaluator and writer.
     private readonly HashSet<string> _pendingReleases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingProfileResets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingOutputResets = new(StringComparer.Ordinal);
     private List<FanProfileReadout> _latest = [];
 
-    public PersistentFanProfiles(string dataDirectory)
+    public PersistentFanProfiles(string dataDirectory, FanControlTrace? trace=null)
     {
+        _trace=trace;
         _path = Path.Combine(dataDirectory,"approved-fan-profiles.json");
         try
         {
@@ -159,11 +162,12 @@ public sealed class PersistentFanProfiles
     }
 
     // Same path for real IControl objects and test doubles.
-    public void Tick(Dictionary<string,IControl> controls, SensorFrame frame, DateTimeOffset now) =>
-        Tick(FanPwmChannelAdapter.Wrap(controls),frame,now);
+    public void Tick(Dictionary<string,IControl> controls, SensorFrame frame, DateTimeOffset now,
+        DashboardSettings? settings=null) =>
+        Tick(FanPwmChannelAdapter.Wrap(controls),frame,now,settings);
 
     internal void Tick(IReadOnlyDictionary<string,IFanPwmChannel> controls,
-        SensorFrame frame, DateTimeOffset now)
+        SensorFrame frame, DateTimeOffset now,DashboardSettings? settings=null)
     {
         ApprovedFanProfile[] profiles;
         string[] releases, profileResets, outputResets;
@@ -177,6 +181,18 @@ public sealed class PersistentFanProfiles
             outputResets=_pendingOutputResets.ToArray();
             _pendingOutputResets.Clear();
         }
+        // Windows sleep may reset the physical PWM header to BIOS control,
+        // while the LibreHardwareMonitor object still reports the old cached
+        // Software mode/value. On a long collector gap, invalidate the writer's
+        // ownership and force a real SetDefault/SetSoftware transition once.
+        var previouslyApproved=profiles.SelectMany(p=>p.ChannelIds)
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if(FanResumePolicy.NeedsRearm(_lastTick,now,profiles.Length>0))
+        {
+            _trace?.ResumeGap(now-_lastTick!.Value,previouslyApproved,now);
+            _writer.ForceRearm(previouslyApproved);
+        }
+        _lastTick=now;
         foreach(var id in profileResets)_planner.Reset(id);
         _writer.ResetProfile(outputResets);
         foreach(var id in releases)
@@ -193,10 +209,26 @@ public sealed class PersistentFanProfiles
                 if(!controls.TryGetValue(id,out var channel))
                 {
                     problems.Add(id+" missing");
+                    _trace?.Observe(profile.Id,id,"missing",demand.Percent,null,false,
+                        null,null,now);
                     continue;
                 }
                 var error=_writer.Apply(id,channel,demand,profile.ResponseSeconds,now);
                 if(error!=null)problems.Add(error);
+                if(_trace!=null)
+                {
+                    var mapped=settings?.FanChannelMappings?.FirstOrDefault(m=>
+                        m.ChannelId==id && m.Kind=="fan");
+                    var reading=mapped==null?null:frame.Sensors.FirstOrDefault(s=>
+                        s.Id==mapped.RpmSensorId && s.Type=="Fan" &&
+                        s.ObservedAt.HasValue &&
+                        Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
+                        s.Value is double v && double.IsFinite(v));
+                    _trace.Observe(profile.Id,id,error!=null?"degraded":
+                        demand.Failsafe?"failsafe":"running",demand.Percent,
+                        _writer.LastCommand(id),channel.IsSoftwareMode,
+                        mapped?.RpmSensorId,reading?.Value,now);
+                }
             }
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
                 profile.ChannelIds.ToArray(),
@@ -211,6 +243,7 @@ public sealed class PersistentFanProfiles
         _writer.ReleaseAll(FanPwmChannelAdapter.Wrap(controls));
         _planner.Clear();
         lock(_sync)_latest=[];
+        _lastTick=null;
         // Persistent approval survives clean shutdown; firmware restore is best-effort.
         // A process crash cannot invoke a software recovery callback.
     }

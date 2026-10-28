@@ -98,6 +98,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                     "events" => db.ReadEvents(),
                     "simulation" => new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest },
                     "fanOutputs" => liveFan.Snapshot(state.Settings),
+                    "fanDebug" => liveFan.DebugLog(),
                     "history" => new
                     {
                         series = db.ReadHistory((req.Ids ?? []).Where(s => s.Length <= 256).Distinct().Take(12).ToArray(),

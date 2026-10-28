@@ -86,6 +86,21 @@ internal sealed class FanPwmWriter
         }
     }
 
+    // Treat the LHM-cached mode/value as untrusted after a long collection
+    // gap (e.g. Windows sleep). Next Apply performs SetDefault + SetSoftware
+    // once for the *already approved* output, even when cached duty is equal.
+    internal void ForceRearm(IEnumerable<string> channelIds)
+    {
+        foreach(var id in channelIds)
+        {
+            _written.Remove(id);
+            _last.Remove(id);
+        }
+    }
+
+    internal double? LastCommand(string id) =>
+        _last.TryGetValue(id,out var value)?value.Duty:null;
+
     internal bool Release(string id, IReadOnlyDictionary<string, IFanPwmChannel> channels)
     {
         if (!channels.TryGetValue(id, out var channel)) return false;
