@@ -91,6 +91,8 @@ async function click(action,duty){
   model.includes('m.VerifiedAt=null'),
   'Server-side normalization must refuse pump data, unsafe points and invalid verification');
  assert.ok(workspace.includes('FanCommissioning.render(S)') &&
+  workspace.includes("mapping(o.id)?.label") &&
+  read('src/SensorDash/FanControlRuntime.cs').includes('Channel identified as a pump; manual session stopped.') &&
   app.includes('FanCommissioning.handle(e,S') &&
   app.includes('FanCommissioning.paint(S)') &&
   page.includes('/fan-commissioning.js') &&

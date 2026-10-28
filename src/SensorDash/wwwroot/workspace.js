@@ -466,6 +466,7 @@ const SDWorkspace = (() => {
   const active=approved.profiles||[], reports=approved.readings||[];
   const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
   const curves=S.settings?.simulatedFanCurves||[];
+  const mapping=id=>(S.settings?.fanChannelMappings||[]).find(m=>m.channelId===id);
   const header=card('Live fan profiles','Continuous multi-output control · Max curve mixing · UAC-approved activation',
    '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
    'Each enabled profile resumes after a service restart. Missing temperatures command the highest available fan speed.</p>'+
@@ -486,7 +487,10 @@ const SDWorkspace = (() => {
         '<p class="note">Create a temperature curve below first.</p>')+
        '</div><div><h3>Hardware PWM channels</h3>'+
        (outputs.length?outputs.map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
-        '<span>'+safe(o.device+' / '+o.name)+'<small>'+safe(o.id)+'</small></span></label>').join(''):
+        '<span>'+safe((mapping(o.id)?.label?mapping(o.id).label+' · ':'')+
+           o.device+' / '+o.name)+'<small>'+safe(
+          (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
+          o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?'Approve updated profile':'Enable profile','data-id="'+attr(p.id)+'"',false)+
