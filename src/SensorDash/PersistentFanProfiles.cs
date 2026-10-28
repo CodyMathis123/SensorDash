@@ -58,6 +58,10 @@ public sealed class PersistentFanProfiles
         double.IsFinite(p.ResponseSeconds) && p.ResponseSeconds is >=0 and <=90;
 
     public bool HasActiveProfiles { get { lock(_sync)return _approved.Count>0; } }
+    public bool OwnsChannel(string id)
+    {
+        lock(_sync)return _approved.Values.Any(p=>p.ChannelIds.Contains(id));
+    }
 
     public object Snapshot()
     {
