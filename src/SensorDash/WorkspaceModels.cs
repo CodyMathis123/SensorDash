@@ -46,6 +46,21 @@ public sealed class VirtualSensorConfig
     public string Operation { get; set; } = "max"; // max, min, average, delta
     public List<string> SensorIds { get; set; } = [];
 }
+// Generic physical-output profile. Drafts are editable via the normal settings
+// API but have NO hardware authority until explicitly approved via UAC. Approved
+// snapshots are held separately by FanControlRuntime.
+public sealed class FanProfileConfig
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "New fan profile";
+    public List<string> CurveIds { get; set; } = [];
+    public List<string> ChannelIds { get; set; } = [];
+    public string Mix { get; set; } = "max";
+    public double MinimumPercent { get; set; } = 20;
+    public double HysteresisDegrees { get; set; } = 2;
+    public double ResponseSeconds { get; set; } = 10;
+    public double FailsafePercent { get; set; } = 100;
+}
 public sealed class CurvePointConfig
 {
     public double Temperature { get; set; }
@@ -104,6 +119,8 @@ public static class WorkspaceLogic
         }
         foreach(var curve in cfg.SimulatedFanCurves ?? [])
             Include([curve.SourceSensorId, curve.OutputSensorId]);
+        foreach(var profile in cfg.FanProfiles ?? [])
+            Include(profile.ChannelIds);
         return used;
     }
 
@@ -169,6 +186,18 @@ public static class WorkspaceLogic
             v.SensorIds=Ids(v.SensorIds,8);
             return v;
         }).Where(v=>v.Id.Length>8 && v.Name.Length>0).DistinctBy(v=>v.Id).ToList();
+
+        cfg.FanProfiles = (cfg.FanProfiles ?? []).Take(20).Select(p=>{
+            p.Id=Short(p.Id,80);p.Name=Short(p.Name);
+            p.CurveIds=Ids(p.CurveIds,8);
+            p.ChannelIds=Ids(p.ChannelIds,12);
+            p.Mix="max"; // single predictable mixing function for v0.6
+            p.MinimumPercent=Math.Clamp(double.IsFinite(p.MinimumPercent)?p.MinimumPercent:20,0,100);
+            p.HysteresisDegrees=Math.Clamp(double.IsFinite(p.HysteresisDegrees)?p.HysteresisDegrees:2,0,10);
+            p.ResponseSeconds=Math.Clamp(double.IsFinite(p.ResponseSeconds)?p.ResponseSeconds:10,0,90);
+            p.FailsafePercent=100; // missing input always requests 100% when possible
+            return p;
+        }).Where(p=>p.Id.Length>0&&p.Name.Length>0).DistinctBy(p=>p.Id).ToList();
 
         cfg.SimulatedFanCurves = (cfg.SimulatedFanCurves ?? []).Take(24).Select(curve=>{
             curve.Id=Short(curve.Id,80);
