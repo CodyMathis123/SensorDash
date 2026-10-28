@@ -21,6 +21,7 @@ const nodes=new Map([
  ['fcVisual',{checked:false}]
 ]);
 const scope={
+ WorkspaceLocks:{fan:()=>false},
  document:{getElementById:id=>nodes.get(id)||null},
  fetch:async(url,opts)=>{requests.push({url,payload:JSON.parse(opts.body)});
   return {ok:true,json:async()=>({})};},

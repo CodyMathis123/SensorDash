@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <OutputName>SensorDash-Setup-0.6.3-x64</OutputName>
+    <OutputName>SensorDash-Setup-0.6.4-x64</OutputName>
     <DefineConstants>PublishDir=$(MSBuildThisFileDirectory)..\dist</DefineConstants>
     <OutputPath>$(MSBuildThisFileDirectory)..\installer-output\</OutputPath>
   </PropertyGroup>

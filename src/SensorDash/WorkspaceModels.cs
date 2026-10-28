@@ -8,6 +8,7 @@ public sealed class CoolingSystemConfig
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "New cooling system";
     public string Kind { get; set; } = "custom"; // liquid, air, custom
+    public bool Locked { get; set; } // Editor preference; does not restrict telemetry.
     public List<CoolingComponentConfig> Components { get; set; } = [];
 }
 public sealed class CoolingComponentConfig
@@ -118,7 +119,7 @@ public static class WorkspaceLogic
             Include(derived.SensorIds);
         }
         foreach(var curve in cfg.SimulatedFanCurves ?? [])
-            Include([curve.SourceSensorId, curve.OutputSensorId]);
+            Include([curve.SourceSensorId]);
         foreach(var profile in cfg.FanProfiles ?? [])
             Include(profile.ChannelIds);
         foreach(var mapping in cfg.FanChannelMappings ?? [])

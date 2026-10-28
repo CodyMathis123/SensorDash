@@ -8,6 +8,9 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const source = file => fs.readFileSync(path.join(root,file),'utf8');
 const script=source('src/SensorDash/wwwroot/workspace.js');
+const fanUx=source('src/SensorDash/wwwroot/fan-control-ux.js');
+const fanFeedback=source('src/SensorDash/wwwroot/fan-feedback.js');
+const locks=source('src/SensorDash/wwwroot/workspace-locks.js');
 const app=source('src/SensorDash/wwwroot/app.js');
 const css=source('src/SensorDash/wwwroot/style.css');
 const model=source('src/SensorDash/WorkspaceModels.cs');
@@ -22,7 +25,7 @@ const context={
  fetch:async(_url,opts)=>({ok:true,json:async()=>JSON.parse(opts.body)}),
  console
 };
-const workspace=vm.runInNewContext(script+'\nSDWorkspace;',context);
+const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanFeedback+'\n'+script+'\nSDWorkspace;',context);
 function sensor(id,name,type,value,device='Generic hardware',deviceType='Controller'){
  return {id,name,type,value,device,deviceType,deviceId:'device-'+deviceType};
 }
@@ -221,7 +224,7 @@ const h={
  assert.equal(shared.curveIds.length,2);
  assert.equal(shared.channelIds.length,0,'Never guess a physical motherboard fan channel');
  assert.deepEqual(Array.from(S.settings.simulatedFanCurves.at(-2).points.map(p=>[p.temperature,p.percent])),
-  [[40,20],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
+  [[40,10],[55,10],[60,15],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
  assert.deepEqual(Array.from(S.settings.simulatedFanCurves.at(-1).points.map(p=>[p.temperature,p.percent])),
   [[40,10],[55,10],[60,20],[65,25],[70,35],[75,50],[85,75],[95,100]]);
  await click('starter-nvme');
@@ -231,6 +234,34 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(curvesView.includes('data-fan-fold="profiles"')&&curvesView.includes('data-fan-fold="curves"')&&
+  curvesView.includes('data-fan-fold="commissioning"')&&curvesView.includes('data-fan-fold="manual"'),
+  'Fan control must be grouped into collapsible sections');
+ // Editor locks stay at the UI level and do not stop the service or remove
+ // readings. Verify cooling systems are individually lockable.
+ await click('toggle-cooling-lock',{id:'loop-1'});
+ assert.equal(S.settings.coolingSystems[0].locked,true);
+ let cooling=workspace.render(S,'cooling',h);
+ assert.ok(cooling.includes('Viewing mode')&&cooling.includes('Unlock editing'));
+ assert.ok(!cooling.includes('data-component-name="component:loop-1:'));
+ await click('add-component',{id:'loop-1'});
+ assert.equal(S.settings.coolingSystems[0].components.length,4,
+  'Cannot edit a locked cooling system');
+ await click('toggle-cooling-lock',{id:'loop-1'});
+ assert.equal(S.settings.coolingSystems[0].locked,false);
+ S.view='curves';
+ await click('toggle-fan-lock');
+ assert.equal(S.settings.fanControlLocked,true);
+ const lockedFans=workspace.render(S,'curves',h);
+ assert.ok(lockedFans.includes('Unlock editing')&&!lockedFans.includes('data-curve-temperature'),
+  'Locked Fan Control hides point inputs');
+ assert.ok(lockedFans.includes('Release to firmware control'),
+  'Locked Fan Control must still allow manual release');
+ const before=S.settings.simulatedFanCurves.length;
+ await click('add-curve');
+ assert.equal(S.settings.simulatedFanCurves.length,before,'Locked editor cannot add curves');
+ await click('toggle-fan-lock');
+ assert.equal(S.settings.fanControlLocked,false);
  assert.ok(!curvesView.includes('This sandbox evaluates'));
  console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
  console.log('PASS: read-only process diagnostics, browser chart timing, time-sliced navigation and accurate live-control labels');

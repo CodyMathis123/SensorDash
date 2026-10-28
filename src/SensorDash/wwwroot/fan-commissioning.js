@@ -199,6 +199,10 @@ const FanCommissioning=(()=>{
   const action=e.target.closest('[data-commissioning]');
   if(!action)return false;
   e.preventDefault();
+  if(WorkspaceLocks.fan(S)&&action.dataset.commissioning!=='release'){
+   h.toast('Unlock Fan Control before changing commissioning data or requesting a test.');
+   return true;
+  }
   void doAction(action.dataset.commissioning,action,S,h)
    .catch(error=>h.toast(error.message));
   return true;

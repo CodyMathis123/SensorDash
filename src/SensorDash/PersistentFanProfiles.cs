@@ -59,12 +59,14 @@ public sealed class PersistentFanProfiles
         lock(_sync)return _approved.Values.Any(p=>p.ChannelIds.Contains(id));
     }
 
-    public object Snapshot()
+    public object Snapshot(DashboardSettings? settings = null)
     {
         lock(_sync) return new {
             profiles = _approved.Values.Select(p=>new {id=p.Id,name=p.Name,
                 channelIds=p.ChannelIds.ToArray(),
-                curveNames=p.Curves.Select(c=>c.Name).ToArray()}).ToArray(),
+                curveNames=p.Curves.Select(c=>c.Name).ToArray(),
+                needsReapproval=FanProfileReview.Compare(p,settings).NeedsReapproval,
+                reviewReasons=FanProfileReview.Compare(p,settings).Reasons}).ToArray(),
             readings = _latest.ToArray(), persistent = true
         };
     }
