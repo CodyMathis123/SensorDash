@@ -98,7 +98,7 @@ internal sealed class FanPwmWriter
         }
     }
 
-    internal double? LastCommand(string id) =>
+    internal double? LastDuty(string id) =>
         _last.TryGetValue(id,out var value)?value.Duty:null;
 
     internal bool Release(string id, IReadOnlyDictionary<string, IFanPwmChannel> channels)

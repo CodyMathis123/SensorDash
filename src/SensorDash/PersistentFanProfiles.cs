@@ -16,7 +16,9 @@ public sealed class PersistentFanProfiles
     private readonly HashSet<string> _pendingOutputResets = new(StringComparer.Ordinal);
     private List<FanProfileReadout> _latest = [];
 
-    public PersistentFanProfiles(string dataDirectory, FanControlTrace? trace=null)
+    public PersistentFanProfiles(string dataDirectory) : this(dataDirectory,null) { }
+
+    internal PersistentFanProfiles(string dataDirectory, FanControlTrace? trace)
     {
         _trace=trace;
         _path = Path.Combine(dataDirectory,"approved-fan-profiles.json");
@@ -226,7 +228,7 @@ public sealed class PersistentFanProfiles
                         s.Value is double v && double.IsFinite(v));
                     _trace.Observe(profile.Id,id,error!=null?"degraded":
                         demand.Failsafe?"failsafe":"running",demand.Percent,
-                        _writer.LastCommand(id),channel.IsSoftwareMode,
+                        _writer.LastDuty(id),channel.IsSoftwareMode,
                         mapped?.RpmSensorId,reading?.Value,now);
                 }
             }
