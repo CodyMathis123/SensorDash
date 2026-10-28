@@ -1,4 +1,4 @@
-# SensorDash 0.6.1 — Persistent multi-fan control and responsive charts
+# SensorDash 0.6.2 — Testable fan-control engine and diagnostics
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -29,9 +29,10 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Sensor frames and chart painting remain independent. While dragging or hovering a graph, periodic frame updates do not reset the canvas.
 - Sidebar and footer now say **Fan Control**, show the installed version from the running executable, and indicate whether persistent profiles or temporary manual control are active.
 - No physical fan commands are issued merely by installing or opening the UI. The Windows build tests remain manually triggered or on merge/push to Production only.
-- Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings. It does not change the sensor collection rate or fan-control logic.
+- Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
+- Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.6.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.6.2 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -84,7 +85,24 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.6.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.6.2.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+
+## Fan-control architecture and tests (0.6.2)
+
+The live control path is deliberately split into small, testable responsibilities:
+
+| Module | Responsibility | Hardware dependency |
+| --- | --- | --- |
+| `FanCurveMath` | One source of truth for point interpolation; shared by simulation and live control | None |
+| `FanProfilePlanner` | Curve/source evaluation, MAX demand and temperature hysteresis; immediate full-speed failsafe if any required source is missing/stale | None |
+| `PersistentFanProfiles` | Persist separately approved snapshots, validate ownership, coordinate activation/stop on collector thread | Only thin adapter at tick boundary |
+| `IFanPwmChannel` / `LhmPwmChannel` | Abstract direct LibreHardwareMonitor control calls for real and synthetic channels | Adapter only |
+| `FanPwmWriter` | Bounds, takeover, immediate upward changes, smooth downward changes, recovery attempts | Injected interface |
+| `FanControlSelfTest` | Execute real profile/writer logic with fake outputs and deterministic timestamps | None |
+
+Run `SensorDash.exe --self-test` to run the deterministic workspace and fan-control suites without opening any hardware. The same test suite runs in the Windows CI workflow before the MSI is packaged. The short manual commissioning session retains its separate conservative 70–100% / 120-second limits.
+
+**Important safety limits:** a successful `SetSoftware` call does not verify actual fan RPM. There is no automatic mapping from PWM channels to tachometer sensors, and software cannot guarantee restoring firmware mode after a process crash or power loss. Real calibration, stall detection and hardware-specific firmware recovery must be validated on the machine. Use motherboard BIOS thermal protections and avoid running competing controllers.
 
 ## What Cooling Systems are for
 

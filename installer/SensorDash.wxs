@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="SensorDash"
-           Manufacturer="CodyMathis" Version="0.6.1" Scope="perMachine"
+           Manufacturer="CodyMathis" Version="0.6.2" Scope="perMachine"
            UpgradeCode="6D8F4B3B-3780-4A7C-AD1D-58343B1AD2CE">
     <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of SensorDash is already installed." />

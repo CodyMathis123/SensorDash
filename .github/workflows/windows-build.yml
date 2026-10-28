@@ -104,7 +104,7 @@ jobs:
           $writer = Get-Content 'src/SensorDash/FanPwmChannels.cs' -Raw
           $planner = Get-Content 'src/SensorDash/FanProfilePlanner.cs' -Raw
           if ($model -notmatch 'approved-fan-profiles.json' -or
-              $writer -notmatch 'SetDefault\\(' -or $writer -notmatch 'SetSoftware\\(' -or
+              $writer -notmatch 'SetDefault\(' -or $writer -notmatch 'SetSoftware\(' -or
               $model -notmatch 'FanPwmChannelAdapter.Wrap') {
             throw 'Missing approved persistent control and hardware boundary'
           }
@@ -322,7 +322,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.6.1-x64
+          name: SensorDash-Setup-0.6.2-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

@@ -47,7 +47,17 @@ internal sealed class FanPwmWriter
             var maximum = Math.Min(100, channel.Maximum);
             if (!double.IsFinite(minimum) || !double.IsFinite(maximum) ||
                 minimum > maximum || maximum <= 0)
+            {
+                // A previously writable channel can become invalid after a
+                // device reconnect. Never keep commanding its old duty.
+                // Preserve ownership if restore fails so the next tick retries.
+                if (_written.Contains(id))
+                {
+                    try { channel.SetDefault(); _written.Remove(id); _last.Remove(id); }
+                    catch { return id + " has unsupported PWM range; firmware restore failed"; }
+                }
                 return id + " has unsupported PWM range";
+            }
 
             var duty = Math.Clamp(demand.Percent, minimum, maximum);
             if (_last.TryGetValue(id, out var previous) && duty < previous.Duty && !demand.Failsafe)

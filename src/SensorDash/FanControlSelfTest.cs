@@ -165,6 +165,16 @@ internal static class FanControlSelfTest
         Assert(writer.Apply("narrow",limited,new FanDutyDecision(100,true,"failsafe"),10,now)==null,
             "supported restricted PWM channel");
         Close(85,limited.SoftwareValue,"hardware maximum respected");
+        var restoreBefore=limited.Resets;
+        limited.Minimum=95;
+        limited.Maximum=40;
+        Assert(writer.Apply("narrow",limited,new FanDutyDecision(90,false,"test"),0,now.AddSeconds(1))!=null &&
+            limited.Resets==restoreBefore+1 && !limited.IsSoftwareMode,
+            "PWM capability loss restores firmware control instead of retaining unsafe duty");
+        limited.Minimum=35;
+        limited.Maximum=85;
+        Assert(writer.Apply("narrow",limited,new FanDutyDecision(55,false,"test"),0,now.AddSeconds(2))==null,
+            "recovered PWM capability should be usable again");
         var broken=new FakePwm {FailWrites=true};
         var failure=writer.Apply("broken",broken,new FanDutyDecision(55,false,"test"),10,now);
         Assert(failure!=null && broken.Resets>=1,"write error attempts default");
