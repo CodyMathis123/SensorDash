@@ -1,4 +1,4 @@
-# SensorDash 0.6.3 — Guided fan mapping and safe-range calibration
+# SensorDash 0.6.4 — Live-profile change review, editor locks and mapped RPM feedback
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -16,7 +16,7 @@ The old **Curve Sandbox** screen is now **Fan Control**, with continuous service
 
 ## Included optional curve starters (exact earlier values)
 
-**Shared radiator fans:** Create a CPU curve (40°C/20%, 65/20, 70/25, 75/35, 80/50, 85/75, 90/100) and GPU-hotspot curve (40°C/10%, 55/10, 60/20, 65/25, 70/35, 75/50, 85/75, 95/100). Combine them in one profile via MAX. Temperature hysteresis is 3°C, falling-speed response 10 seconds. The source sensor IDs are suggested from detected hardware; physical output assignments remain blank until verified.
+**Shared radiator fans:** Create a CPU curve (40°C/10%, 55/10, 60/15, 65/20, 70/25, 75/35, 80/50, 85/75, 90/100) and GPU-hotspot curve (40°C/10%, 55/10, 60/20, 65/25, 70/35, 75/50, 85/75, 95/100). Combine them in one profile via MAX. Temperature hysteresis is 3°C, falling-speed response 10 seconds. The source sensor IDs are suggested from detected hardware; physical output assignments remain blank until verified.
 
 **NVMe cooler:** Create separate curve (35°C/30%, 40/30, 45/40, 50/55, 55/75, 60/100) with its own output assignment. Storage-sensor age and staleness are enforced, and the output goes to full available speed if the temperature stops updating.
 
@@ -32,7 +32,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.6.3 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.6.4 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -85,7 +85,16 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.6.3.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.6.4.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+
+## Live-profile changes, compact sections and editor locks (0.6.4)
+
+- Approved profiles retain a collector-owned snapshot: **saving a draft or curve does not silently change live PWM**. Each `fanOutputs` status read compares the approved hardware snapshot against the latest saved editable settings, reporting `needsReapproval` and clear reasons for changed PWM assignments, minimum duty, hysteresis, response time, curve assignments, source sensors, freshness or duty points. Renaming alone does not force reapproval.
+- Fan Control prominently displays a **saved changes pending** warning and per-curve impact on enabled profiles, with a one-click **Approve saved changes** action that still requires Windows UAC. The button approves the saved draft only; it never silently includes uncommitted input field edits. Saving a changed curve immediately refreshes collector status, and unsaved curve edits show a warning.
+- Fan Control is reorganized into collapsible **Profiles, Temperature curves, Commissioning, and Manual diagnostics**, with expandable individual profiles and curves. Collapse state persists through rerenders within the browser session.
+- **Cooling system lock**, **Fan Control editor lock** and the existing **Dashboard layout lock** use the same concept: a persistent preference that hides/disables editing, never a security boundary. Per-cooling-system locks preserve all live readings and charts. Fan Control editor lock leaves **Stop & restore defaults** and manual **Release** available even while other edits are locked. Administrator approval remains separate and mandatory.
+- Physical **PWM-to-RPM mapping is the single source of truth** for fan-bank labels and tachometer monitoring. The old optional RPM/control sensor selector is no longer shown on individual curves. Profiles show the mapped RPM live and report whether it is verified or unavailable. Historic `OutputSensorId` configuration remains loadable for compatibility but no longer drives active fan feedback or sensor-retention decisions. This is observational monitoring only, not RPM stall detection or proof every fan behind a splitter spins.
+- Newly created radiator starters now use the tuned **10% plateau from 40°C through 55°C**. Only two points are needed to define a flat interpolated segment; the redundant 50°C/10% point is omitted. Existing saved curves and active approved profiles are not overwritten or retuned by the upgrade. A 10% running duty observed on a fan is not proof of reliable startup at 10% across every fan in a bank.
 
 ## Guided physical channel identification and calibration (0.6.3)
 

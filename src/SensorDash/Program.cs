@@ -106,6 +106,9 @@ app.MapGet("/index.html", () => Resource("index.html", "text/html; charset=utf-8
 app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-commissioning.js", () => Resource("fan-commissioning.js", "text/javascript; charset=utf-8"));
+app.MapGet("/fan-control-ux.js", () => Resource("fan-control-ux.js", "text/javascript; charset=utf-8"));
+app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
+app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
@@ -277,6 +280,7 @@ public sealed class DashboardSettings {
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
     public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
     public List<FanProfileConfig> FanProfiles { get; set; } = [];
+    public bool FanControlLocked { get; set; } // UI editor lock only; not hardware authorization.
     // Advisory mapping metadata never authorizes a hardware command.
     public List<FanChannelMapping> FanChannelMappings { get; set; } = [];
     public List<SimulatedFanCurveConfig> SimulatedFanCurves { get; set; } = [];

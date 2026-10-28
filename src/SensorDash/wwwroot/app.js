@@ -368,6 +368,7 @@ function updateFrame(frame){
  const signature=S.sensors.map(s=>s.id).join('|');
  if(S.schemaKey!==signature){S.schemaKey=signature;render();return}
  scheduleLivePaint();
+ FanFeedback.paint(S);
  scheduleChartPaint();
 }
 async function loadEvents(){
@@ -570,7 +571,7 @@ async function loadFanControl(){
   const data=await fetchJSON('/api/fan-control');
   const signature=JSON.stringify({
     outputs:(data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]),
-    enabled:(data.persistent?.profiles||[]).map(p=>p.id).sort()
+    enabled:(data.persistent?.profiles||[]).map(p=>[p.id,p.needsReapproval,p.reviewReasons]).sort((a,b)=>a[0].localeCompare(b[0]))
   });
   const changed=signature!==S.fanOutputSignature;
   S.fanControl=data;
@@ -582,6 +583,7 @@ async function loadFanControl(){
   if(changed&&S.view==='curves')render();
   else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
   FanCommissioning.paint(S);
+  FanFeedback.paint(S);
  }catch(e){console.warn('Live fan channel inventory:',e.message);}
 }
 async function changeVisibility(field,value){
@@ -646,8 +648,15 @@ document.addEventListener('click',e=>{
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
+ const fold=e.target.closest('.w-fan-fold > summary');
+ if(fold){
+  const details=fold.parentElement;
+  S.fanExpanded=S.fanExpanded||{};
+  S.fanExpanded[details.dataset.fanFold]=!details.open;
+  return;
+ }
  if(FanCommissioning.handle(e,S,{render,toast}))return;
- if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast});return}
+ if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast,refreshFanControl:loadFanControl});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){
    const target=usages.dataset.usageTarget;
    if(target==='dashboards'&&usages.dataset.usageDashboard)
@@ -690,6 +699,7 @@ document.addEventListener('click',e=>{
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
+ if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  // Curve editor adds another blank key/value row once both numeric cells
  // are filled, without persisting or rebuilding the current form.
  if(SDWorkspace.handleCurvePointInput(e,S))return;
@@ -707,6 +717,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
  if(e.target.id==='explorerGroup'){S.explorerGrouping=e.target.value;render()}

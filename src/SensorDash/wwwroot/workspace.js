@@ -70,7 +70,7 @@ const SDWorkspace = (() => {
    for(const id of v.sensorIds||[])add(id,'Virtual sensor: '+v.name,'virtual');
   for(const c of cfg.simulatedFanCurves||[]){
    add(c.sourceSensorId,'Curve input: '+c.name,'curves');
-   add(c.outputSensorId,'Curve reference: '+c.name,'curves');
+   // Physical RPM feedback follows the PWM mapping, never a curve-level sensor.
   }
   for(const id of cfg.pinnedSensors||[])add(id,'Pinned for history','explorer');
   for(const [id] of Object.entries(cfg.highThresholds||{}))add(id,'Monitoring threshold','settings');
@@ -215,6 +215,7 @@ const SDWorkspace = (() => {
        'For liquid cooling, temperature probes can represent coolant, ambient, inlet or outlet readings. '+
        'There is no mandatory radiator component because a radiator itself does not supply telemetry.</p>'+starter);
    const systemHtml=systems.map(sys=>{
+     const editing=!WorkspaceLocks.cooling(S,sys.id);
      const telemetry=coolingReadings(S,sys);
      const live=telemetry.all.filter(s=>s.value!=null&&Number.isFinite(s.value));
      const temperatures=telemetry.byType('Temperature').filter(s=>Number.isFinite(s.value));
@@ -266,6 +267,12 @@ const SDWorkspace = (() => {
        const outOfKind=current.filter(s=>preferred&&!preferred.includes(s.type));
        const focused=S.focusCoolingTarget?.systemId===sys.id &&
          S.focusCoolingTarget?.componentId===c.id;
+       if(!editing)return '<div class="w-component'+(focused?' w-referenced-component':'')+
+         '" data-cooling-system-id="'+attr(sys.id)+'" data-cooling-component-id="'+attr(c.id)+'">'+
+         '<strong>'+safe(c.name)+'</strong><p class="note">'+safe(componentLabel(c.kind))+'</p>'+
+         '<div class="w-chips">'+(current.map(r=>'<span class="w-chip">'+
+           safe(S.settings?.aliases?.[r.id]||r.name)+'</span>').join('')||
+           '<span class="note">No assigned sensors</span>')+'</div></div>';
        return '<div class="w-component'+(focused?' w-referenced-component':'')+
          '" data-cooling-system-id="'+attr(sys.id)+'" data-cooling-component-id="'+attr(c.id)+'">'+
          '<div class="w-actions w-compact">'+
@@ -283,18 +290,22 @@ const SDWorkspace = (() => {
          ' logical components · '+live.length+' live readings',
        summary+powerDetails+chartsHtml+
        '<div class="w-cooling-configuration" data-cooling-system-id="'+attr(sys.id)+'">'+
-       '<h3>Configure components</h3>'+
-       '<p class="note">Component types guide sensor selection; they do not claim control of the hardware. '+
+       '<div class="w-dashboard-toolbar">'+WorkspaceLocks.action('toggle-cooling-lock',!editing,sys.id)+
+         '<span class="note">'+(editing?'Editing enabled':'Viewing mode · Configuration locked')+'</span></div>'+
+       '<h3>'+(editing?'Configure components':'Assigned components')+'</h3>'+
+       (editing?'<p class="note">Component types guide sensor selection; they do not claim control of the hardware. '+
         'An air-cooled PC can use the same model without a pump or coolant sensor.</p>'+
        '<div class="w-actions"><label>System name<input data-system-name="'+attr(sys.id)+'" value="'+attr(sys.name)+'"></label>'+
        '<label>Type<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
        button('save-editor','Save changes')+
        button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+
-       button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>'+
+       button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>':
+         WorkspaceLocks.readonly('Cooling system')+
+         '<div class="w-actions">'+button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+'</div>')+
        (components||nothing('Add a component below to associate sensors.'))+
-       '<div class="w-actions"><label>Component role<select data-new-kind="'+attr(sys.id)+'">'+
+       (editing?'<div class="w-actions"><label>Component role<select data-new-kind="'+attr(sys.id)+'">'+
         componentOptions('heat-source')+'</select></label>'+
-       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div></div>');
+       button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div>':'')+'</div>');
    }).join('');
    return heading('Cooling systems correlate temperatures, power, fan RPM, reported duty and optional flow. '+
      'Charts are generated automatically from the assigned sensors; no particular CPU, GPU or loop topology is assumed.')+
@@ -462,19 +473,36 @@ const SDWorkspace = (() => {
  };
 
  const renderProfiles=(S)=>{
+  const editing=!WorkspaceLocks.fan(S);
   const all=S.settings?.fanProfiles||[], approved=S.fanControl?.persistent||{};
   const active=approved.profiles||[], reports=approved.readings||[];
   const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
   const curves=S.settings?.simulatedFanCurves||[];
-  const mapping=id=>(S.settings?.fanChannelMappings||[]).find(m=>m.channelId===id);
+  const mapping=id=>FanFeedback.mapping(S,id);
   const header=card('Live fan profiles','Continuous multi-output control · Max curve mixing · UAC-approved activation',
    '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
    'Each enabled profile resumes after a service restart. Missing temperatures command the highest available fan speed.</p>'+
-   '<div class="w-actions">'+button('starter-radiators','+ CPU/GPU Max starter')+
-     button('starter-nvme','+ NVMe cooler starter')+button('add-profile','+ Blank fan profile')+'</div>');
+   (editing?'<div class="w-actions">'+button('starter-radiators','+ CPU/GPU Max starter')+
+     button('starter-nvme','+ NVMe cooler starter')+button('add-profile','+ Blank fan profile')+'</div>':
+     WorkspaceLocks.readonly('Fan Control')));
   const cards=all.map(p=>{
     const running=active.find(a=>a.id===p.id),status=reports.find(x=>x.id===p.id);
-    return card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
+    if(!editing){
+      const content=card(p.name,(running?'ENABLED':'DRAFT')+' · locked configuration',
+        '<div class="w-live-status"><strong>'+safe(status?.state|| (running?'Starting':'Not enabled'))+
+          '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
+        '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
+          ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
+        FanFeedback.render(S,p.channelIds)+
+        (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
+        (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
+      return FanControlUx.section(S,'profile:'+p.id,p.name,
+         (running?'Live · ':'Draft · ')+(running?.needsReapproval?'approval pending':'locked'),
+         content,false);
+    }
+    const review=FanControlUx.profile(S,p);
+    const form=card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
+      review+
       '<div class="w-live-status"><strong data-profile-state="'+attr(p.id)+'">'+safe(status?.state|| (running?'Starting':'Not enabled'))+'</strong>'+
         '<span data-profile-message="'+attr(p.id)+'">'+safe(status?.message||(running?'Waiting for the collector':'Ready to configure'))+'</span>'+
         '<strong data-profile-target="'+attr(p.id)+'">'+(status?.targetPercent==null?'':value({value:status.targetPercent})+'%')+'</strong></div>'+
@@ -492,15 +520,22 @@ const SDWorkspace = (() => {
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
+      FanFeedback.render(S,p.channelIds)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
-        button('start-profile',running?'Approve updated profile':'Enable profile','data-id="'+attr(p.id)+'"',false)+
+        button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
         button('remove-profile','Delete draft','data-id="'+attr(p.id)+'"')+'</div>'+
       '<p class="note">Enabling makes a durable collector-side copy. Changing this draft does not change live speeds until you reapprove. '+
       'Separate profiles cannot share the same output.</p>');
+    return FanControlUx.section(S,'profile:'+p.id,p.name,
+      (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
+      p.curveIds.length+' curve(s)',form,!!running?.needsReapproval);
   }).join('');
-  return header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
+  const content=header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
     (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
+  return FanControlUx.banner(S)+
+    FanControlUx.section(S,'profiles','Live fan profiles',
+      active.length+' enabled · '+all.length+' draft(s)',content,true);
  };
  const starterProfiles=async(action,S,h)=>{
    const cfg=S.settings;
@@ -518,7 +553,8 @@ const SDWorkspace = (() => {
      points:points.map(([temperature,percent])=>({temperature,percent}))
    });
    if(action==='starter-radiators'){
-     const cpu=create('CPU radiator curve','cpu',[[40,20],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
+     // Two points describe a flat 10% plateau: intermediate 50°C is redundant.
+     const cpu=create('CPU radiator curve','cpu',[[40,10],[55,10],[60,15],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
      const gpu=create('GPU hotspot radiator curve','gpu',[[40,10],[55,10],[60,20],[65,25],[70,35],[75,50],[85,75],[95,100]]);
      cfg.simulatedFanCurves.push(cpu,gpu);
      cfg.fanProfiles.push({id:uid(),name:'Radiators · CPU/GPU MAX',curveIds:[cpu.id,gpu.id],
@@ -537,11 +573,24 @@ const SDWorkspace = (() => {
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
+   const editing=!WorkspaceLocks.fan(S);
    const cards=curves.map(curve=>{
      const sample=simulation.find(s=>s.id===curve.id);
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
-     return card(curve.name,'Temperature-to-duty curve · preview updates every second',
+     if(!editing){
+       const readonly=card(curve.name,'Read-only · Unlock Fan Control to edit',
+          FanControlUx.curve(S,curve)+
+          '<div data-curve-preview="'+attr(scope)+'">'+
+            curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+'</div>'+
+          '<p class="note">Input: '+safe(source?.name||curve.sourceSensorId)+
+          ' · Current target: '+safe(sample?.targetPercent==null?'—':sample.targetPercent.toFixed(1)+'%')+'</p>');
+       return FanControlUx.section(S,'curve:'+curve.id,curve.name,
+          'Read-only',readonly,false);
+     }
+     const form=card(curve.name,'Temperature-to-duty curve · preview updates every second',
+       FanControlUx.curve(S,curve)+
+       '<p data-fan-unsaved hidden class="w-fan-unsaved"></p>'+
        '<div data-curve-preview="'+attr(scope)+'">'+
        curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+'</div>'+
        '<div class="w-sim-preview">'+
@@ -556,21 +605,36 @@ const SDWorkspace = (() => {
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
        curveTable(curve)+
-       '<div class="w-actions"><label>Optional related tachometer/control reading'+
-         select(S,curve.outputSensorId,s=>s.type==='Control'||s.type==='Fan','Optional RPM/control sensor',
-           'data-curve-output="'+attr(scope)+'"')+'</label>'+
-         '<label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
+       '<p class="note">RPM feedback is inherited automatically from the PWM channel mapping in Identify → Name → Calibrate → Verify. Curves only define duty by temperature.</p>'+
+       '<div class="w-actions"><label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
          button('save-editor','Save curve','',false)+button('remove-curve','Delete','data-id="'+attr(scope)+'"')+'</div>'+
-       '<p class="note">Assign this curve to an enabled fan profile to control the chosen hardware outputs. Saving the curve alone does not change active profiles.</p>'
+       '<p class="note">The graph is a preview. Saved curve edits affecting a live profile require reapproval.</p>'
      );
+     return FanControlUx.section(S,'curve:'+curve.id,curve.name,
+       (S.fanControl?.persistent?.profiles||[]).some(p=>p.curveNames?.includes(curve.name))?
+       'Linked to live fan control · expand to edit':'Temperature-to-duty curve',
+       '<div data-fan-curve-editor="'+attr(curve.id)+'">'+form+'</div>',false);
    }).join('');
-   return renderProfiles(S)+
-      (typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):'')+
-      card('Temperature curves','Reusable real-control curves · edit the points below',
-        '<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>')+
-      (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')))+
-      '<details class="w-manual-test"><summary>Manual fan test and hardware diagnostics</summary>'+
-        renderLiveFanControl(S)+'</details>';
+   const curveContent=card('Temperature curves','Reusable fan-control curves',
+      (editing?'<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>':
+       WorkspaceLocks.readonly('Temperature curves')))+
+      (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')));
+   const controls='<div class="w-fan-lock-toolbar">'+WorkspaceLocks.action('toggle-fan-lock',!editing)+
+     '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
+       'Editor locked · Live control and emergency release remain available')+'</span></div>';
+   return controls+renderProfiles(S)+
+      FanControlUx.section(S,'curves','Temperature curves',
+        curves.length+' curve(s) · expand to edit',curveContent,false)+
+      FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
+        'Hardware identification and measured RPM response',
+        editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):''):
+          WorkspaceLocks.readonly('Commissioning')+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',false)+
+      FanControlUx.section(S,'manual','Manual fan test and diagnostics',
+        'Administrator-approved, time-limited direct PWM tests',
+        editing?renderLiveFanControl(S):
+          WorkspaceLocks.readonly('Manual tests')+
+          '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false);
  };
  const renderVirtual=(S)=>{
    const virtual=S.settings?.virtualSensors||[];
@@ -603,9 +667,13 @@ const SDWorkspace = (() => {
        body:JSON.stringify(S.settings)});
      if(!response.ok)throw Error(await response.text());
      S.settings=await response.json();
+     // Re-read collector-owned snapshots after saving to surface a pending
+     // approval immediately rather than waiting for the periodic 3s poll.
+     if(S.view==='curves'&&h.refreshFanControl)await h.refreshFanControl();
      h.toast('Configuration saved');
      h.render();
-   }catch(e){h.toast('Could not save configuration: '+e.message);}
+     return true;
+   }catch(e){h.toast('Could not save configuration: '+e.message);return false;}
  }
  function syncInputs(S){
    const d=S.settings;
@@ -650,12 +718,11 @@ const SDWorkspace = (() => {
      if(document.querySelector(selector('channel')))
        p.channelIds=[...document.querySelectorAll(selector('channel')+':checked')].map(el=>el.value);
    }
-   for(const e of document.querySelectorAll('[data-curve-name],[data-curve-input],[data-curve-output],[data-curve-age]')){
-     const id=e.dataset.curveName||e.dataset.curveInput||e.dataset.curveOutput||e.dataset.curveAge;
+   for(const e of document.querySelectorAll('[data-curve-name],[data-curve-input],[data-curve-age]')){
+     const id=e.dataset.curveName||e.dataset.curveInput||e.dataset.curveAge;
      const o=d.simulatedFanCurves.find(c=>c.id===id);if(!o)continue;
      if(e.dataset.curveName)o.name=e.value;
      if(e.dataset.curveInput)o.sourceSensorId=e.value;
-     if(e.dataset.curveOutput)o.outputSensorId=e.value;
      if(e.dataset.curveAge)o.maxSampleAgeSeconds=Number(e.value);
 
    }
@@ -674,6 +741,27 @@ const SDWorkspace = (() => {
    e.preventDefault();e.stopPropagation();
    const action=el.dataset.work,id=el.dataset.id,scope=el.dataset.scope;
    try{
+     if(action==='toggle-fan-lock'){
+       S.settings.fanControlLocked=!WorkspaceLocks.fan(S);
+       await persist(S,h);return true;
+     }
+     if(action==='toggle-cooling-lock'){
+       const sys=S.settings?.coolingSystems?.find(x=>x.id===id);
+       if(sys){sys.locked=!sys.locked;await persist(S,h);}
+       return true;
+     }
+     if(WorkspaceLocks.fan(S)&&S.view==='curves'&&
+        ['fan-authorize','start-profile','save-editor','remove-curve-point',
+         'add-curve','remove-curve','starter-radiators','starter-nvme','add-profile',
+         'remove-profile'].includes(action)){
+       h.toast('Unlock Fan Control before editing or approving changes.');
+       return true;
+     }
+     const coolingSystemId=id||((scope||'').startsWith('component:')?scope.split(':')[1]:'');
+     if(WorkspaceLocks.cooling(S,coolingSystemId)&&
+       ['add-component','remove-component','remove-system','add-sensor','remove-sensor'].includes(action)){
+       h.toast('Unlock the cooling system before editing.');return true;
+     }
      if(action==='fan-authorize'||action==='fan-release'){
        const release=action==='fan-release';
        const channel=document.getElementById('liveFanChannel')?.value||'';
@@ -708,12 +796,15 @@ const SDWorkspace = (() => {
      }
      if(['start-profile','stop-profile','stop-all-profiles'].includes(action)){
        if(action==='start-profile'){
-         syncInputs(S);
+         // The banner approves the already saved draft only. Do not silently
+         // read and approve unsaved edits from unrelated open curve editors.
+         const savedOnly=el.dataset.approvalOnly==='true';
+         if(!savedOnly)syncInputs(S);
          const p=S.settings.fanProfiles.find(p=>p.id===id);
          if(!p?.curveIds.length||!p?.channelIds.length){
            h.toast('Select at least one temperature curve and a physical PWM output.');return true;
          }
-         await persist(S,h);
+         if(!savedOnly&&!await persist(S,h))return true;
        }
        const command={
          action:action==='start-profile'?'start-profile':

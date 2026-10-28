@@ -26,6 +26,9 @@
     <EmbeddedResource Include="wwwroot/app.js" LogicalName="SensorDash.Web.app.js" />
     <EmbeddedResource Include="wwwroot/workspace.js" LogicalName="SensorDash.Web.workspace.js" />
     <EmbeddedResource Include="wwwroot/fan-commissioning.js" LogicalName="SensorDash.Web.fan-commissioning.js" />
+    <EmbeddedResource Include="wwwroot/fan-control-ux.js" LogicalName="SensorDash.Web.fan-control-ux.js" />
+    <EmbeddedResource Include="wwwroot/workspace-locks.js" LogicalName="SensorDash.Web.workspace-locks.js" />
+    <EmbeddedResource Include="wwwroot/fan-feedback.js" LogicalName="SensorDash.Web.fan-feedback.js" />
     <EmbeddedResource Include="wwwroot/style.css" LogicalName="SensorDash.Web.style.css" />
   </ItemGroup>
 </Project>

@@ -51,13 +51,13 @@ public sealed class FanControlRuntime
         get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
 
-    public object Snapshot()
+    public object Snapshot(DashboardSettings? settings = null)
     {
         lock (_sync) return new {
             outputs = _outputs.ToArray(), status = _status,
             minimumDuty = MinExperimentalDuty, maximumSessionSeconds = MaxSessionSeconds,
             requiresAdministrator = true, experimental = true,
-            persistent = _profiles.Snapshot()
+            persistent = _profiles.Snapshot(settings)
         };
     }
 
