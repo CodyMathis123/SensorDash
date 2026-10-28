@@ -3,7 +3,7 @@ name: Windows MSI and portable build
 # or through an explicit Actions -> Run workflow request.
 on:
   push:
-    branches: [Production]
+    branches: [Production, 'validation/fan-commissioning-20261027']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,8 +21,11 @@ jobs:
         run: |
           node --check src/SensorDash/wwwroot/app.js
           node --check src/SensorDash/wwwroot/workspace.js
+          node --check src/SensorDash/wwwroot/fan-commissioning.js
       - name: Test configurable cooling systems and sensor usage
         run: node scripts/test-workspace.cjs
+      - name: Test fan commissioning frontend contracts
+        run: node scripts/test-fan-commissioning.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
@@ -322,7 +325,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.6.2-x64
+          name: SensorDash-Setup-0.6.3-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

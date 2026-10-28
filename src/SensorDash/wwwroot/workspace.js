@@ -561,6 +561,7 @@ const SDWorkspace = (() => {
      );
    }).join('');
    return renderProfiles(S)+
+      (typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):'')+
       card('Temperature curves','Reusable real-control curves · edit the points below',
         '<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>')+
       (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')))+
