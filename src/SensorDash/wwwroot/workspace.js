@@ -460,6 +460,76 @@ const SDWorkspace = (() => {
     'and releases control at the timer, on a stale input, or when you press Release. '+
     'Abrupt crashes may prevent cleanup; firmware behavior varies by motherboard.</p>');
  };
+
+ const renderProfiles=(S)=>{
+  const all=S.settings?.fanProfiles||[], approved=S.fanControl?.persistent||{};
+  const active=approved.profiles||[], reports=approved.readings||[];
+  const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
+  const curves=S.settings?.simulatedFanCurves||[];
+  const header=card('Live fan profiles','Continuous multi-output control · Max curve mixing · UAC-approved activation',
+   '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
+   'Each enabled profile resumes after a service restart. Missing temperatures command the highest available fan speed.</p>'+
+   '<div class="w-actions">'+button('starter-radiators','+ CPU/GPU Max starter')+
+     button('starter-nvme','+ NVMe cooler starter')+button('add-profile','+ Blank fan profile')+'</div>');
+  const cards=all.map(p=>{
+    const running=active.find(a=>a.id===p.id),status=reports.find(x=>x.id===p.id);
+    return card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
+      '<div class="w-live-status"><strong data-profile-state="'+attr(p.id)+'">'+safe(status?.state|| (running?'Starting':'Not enabled'))+'</strong>'+
+        '<span data-profile-message="'+attr(p.id)+'">'+safe(status?.message||(running?'Waiting for the collector':'Ready to configure'))+'</span>'+
+        '<strong data-profile-target="'+attr(p.id)+'">'+(status?.targetPercent==null?'':value({value:status.targetPercent})+'%')+'</strong></div>'+
+      '<div class="w-actions"><label>Name<input data-profile-name="'+attr(p.id)+'" value="'+attr(p.name)+'"></label>'+
+       '<label>Minimum duty (%)<input type="number" min="0" max="100" step="1" data-profile-min="'+attr(p.id)+'" value="'+p.minimumPercent+'"></label>'+
+       '<label>Ramp-down time (seconds)<input type="number" min="0" max="90" step="1" data-profile-response="'+attr(p.id)+'" value="'+p.responseSeconds+'"></label></div>'+
+      '<div class="w-profile-columns"><div><h3>Temperature curves · MAX</h3>'+
+       (curves.length?curves.map(c=>'<label class="w-profile-item"><input type="checkbox" data-profile-curve="'+attr(p.id)+'" value="'+attr(c.id)+'" '+(p.curveIds.includes(c.id)?'checked':'')+'>'+
+        '<span>'+safe(c.name)+'<small>'+safe(displayName(S,S.byId.get(c.sourceSensorId)||{name:'Select source sensor'}))+'</small></span></label>').join(''):
+        '<p class="note">Create a temperature curve below first.</p>')+
+       '</div><div><h3>Hardware PWM channels</h3>'+
+       (outputs.length?outputs.map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
+        '<span>'+safe(o.device+' / '+o.name)+'<small>'+safe(o.id)+'</small></span></label>').join(''):
+        '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
+      '<div class="w-actions">'+button('save-editor','Save draft')+
+        button('start-profile',running?'Approve updated profile':'Enable profile','data-id="'+attr(p.id)+'"',false)+
+        (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
+        button('remove-profile','Delete draft','data-id="'+attr(p.id)+'"')+'</div>'+
+      '<p class="note">Enabling makes a durable collector-side copy. Changing this draft does not change live speeds until you reapprove. '+
+      'Separate profiles cannot share the same output.</p>');
+  }).join('');
+  return header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
+    (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
+ };
+ const starterProfiles=async(action,S,h)=>{
+   const cfg=S.settings;
+   const candidates=S.sensors.filter(s=>s.type==='Temperature');
+   const pick=type=>{
+     const qualified=candidates.filter(s=>type==='cpu'?/cpu|processor|ryzen/i.test(s.device+' '+s.deviceType):
+       type==='gpu'?/gpu|radeon|geforce/i.test(s.device+' '+s.deviceType):
+       /storage|nvme|ssd/i.test(s.device+' '+s.deviceType));
+     const priority=type==='cpu'?/package|tctl|tdie/i:type==='gpu'?/hot.?spot|junction/i:/composite/i;
+     qualified.sort((a,b)=>Number(priority.test(b.name))-Number(priority.test(a.name)));
+     return qualified[0]?.id||'';
+   };
+   const create=(name,type,points)=>({
+     id:uid(),name,sourceSensorId:pick(type),outputSensorId:'',maxSampleAgeSeconds:30,
+     points:points.map(([temperature,percent])=>({temperature,percent}))
+   });
+   if(action==='starter-radiators'){
+     const cpu=create('CPU radiator curve','cpu',[[40,20],[65,20],[70,25],[75,35],[80,50],[85,75],[90,100]]);
+     const gpu=create('GPU hotspot radiator curve','gpu',[[40,10],[55,10],[60,20],[65,25],[70,35],[75,50],[85,75],[95,100]]);
+     cfg.simulatedFanCurves.push(cpu,gpu);
+     cfg.fanProfiles.push({id:uid(),name:'Radiators · CPU/GPU MAX',curveIds:[cpu.id,gpu.id],
+       channelIds:[],mix:'max',minimumPercent:10,responseSeconds:10,hysteresisDegrees:3,failsafePercent:100});
+   }else if(action==='starter-nvme'){
+     const curve=create('NVMe cooler curve','nvme',[[35,30],[40,30],[45,40],[50,55],[55,75],[60,100]]);
+     cfg.simulatedFanCurves.push(curve);
+     cfg.fanProfiles.push({id:uid(),name:'NVMe cooler',curveIds:[curve.id],channelIds:[],
+       mix:'max',minimumPercent:30,responseSeconds:10,hysteresisDegrees:2,failsafePercent:100});
+   }else{
+     cfg.fanProfiles.push({id:uid(),name:'New fan profile',curveIds:[],channelIds:[],
+       mix:'max',minimumPercent:20,responseSeconds:10,hysteresisDegrees:2,failsafePercent:100});
+   }
+   await persist(S,h);
+ };
  const renderCurves=(S)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
@@ -467,7 +537,7 @@ const SDWorkspace = (() => {
      const sample=simulation.find(s=>s.id===curve.id);
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
-     return card(curve.name,'1 Hz simulation • no motherboard, pump or controller writes',
+     return card(curve.name,'Temperature-to-duty curve · preview updates every second',
        '<div data-curve-preview="'+attr(scope)+'">'+
        curveDiagram(curve.points||[],sample?.inputTemperature,sample?.targetPercent)+'</div>'+
        '<div class="w-sim-preview">'+
@@ -482,18 +552,20 @@ const SDWorkspace = (() => {
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
        curveTable(curve)+
-       '<div class="w-actions"><label>Read-only output reference'+
+       '<div class="w-actions"><label>Optional related tachometer/control reading'+
          select(S,curve.outputSensorId,s=>s.type==='Control'||s.type==='Fan','Optional RPM/control sensor',
            'data-curve-output="'+attr(scope)+'"')+'</label>'+
          '<label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
          button('save-editor','Save curve','',false)+button('remove-curve','Delete','data-id="'+attr(scope)+'"')+'</div>'+
-       '<p class="note">Only interpolated percentages are produced. Unavailable/stale input results in no simulated target. Reference channels are shown for comparison and never written.</p>'
+       '<p class="note">Assign this curve to an enabled fan profile to control the chosen hardware outputs. Saving the curve alone does not change active profiles.</p>'
      );
    }).join('');
-   return '<div class="help">Read-only mode is enforced in the elevated collector. This sandbox evaluates each saved curve every second without claiming a fan-output channel or calling hardware control APIs.</div>'+
-      '<div class="w-actions">'+button('add-curve','+ New simulated curve','',false)+'</div>'+
-      (cards||card('Create a fan curve','Choose a detected temperature sensor',nothing('No simulated curves yet.')))+
-      renderLiveFanControl(S);
+   return renderProfiles(S)+
+      card('Temperature curves','Reusable real-control curves · edit the points below',
+        '<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>')+
+      (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')))+
+      '<details class="w-manual-test"><summary>Manual fan test and hardware diagnostics</summary>'+
+        renderLiveFanControl(S)+'</details>';
  };
  const renderVirtual=(S)=>{
    const virtual=S.settings?.virtualSensors||[];
