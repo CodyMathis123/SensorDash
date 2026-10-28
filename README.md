@@ -1,4 +1,4 @@
-# SensorDash 0.6.0 — Persistent multi-fan control and responsive charts
+# SensorDash 0.6.1 — Persistent multi-fan control and responsive charts
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -29,9 +29,9 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Sensor frames and chart painting remain independent. While dragging or hovering a graph, periodic frame updates do not reset the canvas.
 - Sidebar and footer now say **Fan Control**, show the installed version from the running executable, and indicate whether persistent profiles or temporary manual control are active.
 - No physical fan commands are issued merely by installing or opening the UI. The Windows build tests remain manually triggered or on merge/push to Production only.
-- Subsequent performance improvements spread chart rendering across animation frames and add on-demand process memory and browser chart/cache diagnostics in Settings. They do not change the sensor collection rate or fan-control logic.
+- Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings. It does not change the sensor collection rate or fan-control logic.
 
-**Upgrade:** Close the tray application; install the v0.6.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.6.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -84,7 +84,7 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.6.0.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.6.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
 
 ## What Cooling Systems are for
 
