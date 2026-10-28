@@ -5,7 +5,8 @@ using LibreHardwareMonitor.Hardware;
 // All LHM hardware access stays serialized on SensorWorker's collection thread.
 public sealed record FanCommand(
     string Action, string ChannelId = "", string CurveId = "",
-    double Percent = 100, int DurationSeconds = 60, bool ConfirmExclusiveOwnership = false);
+    double Percent = 100, int DurationSeconds = 60, bool ConfirmExclusiveOwnership = false,
+    string ProfileId = "");
 
 public sealed record FanOutputInfo(string Id, string Name, string Device, string DeviceId,
     float Minimum, float Maximum, string Mode, bool Writable);
@@ -18,6 +19,8 @@ public sealed class FanControlRuntime
     public const int MinExperimentalDuty = 70;
     public const int MaxSessionSeconds = 120;
     private readonly object _sync = new();
+    private readonly PersistentFanProfiles _profiles;
+    public FanControlRuntime(string dataDirectory) => _profiles = new PersistentFanProfiles(dataDirectory);
     private IReadOnlyList<FanOutputInfo> _outputs = [];
     private Pending? _pending;
     private Session? _session;
@@ -39,7 +42,7 @@ public sealed class FanControlRuntime
 
     public bool IsActive
     {
-        get { lock (_sync) return _pending != null || _session != null; }
+        get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
 
     public object Snapshot()
@@ -47,12 +50,20 @@ public sealed class FanControlRuntime
         lock (_sync) return new {
             outputs = _outputs.ToArray(), status = _status,
             minimumDuty = MinExperimentalDuty, maximumSessionSeconds = MaxSessionSeconds,
-            requiresAdministrator = true, experimental = true
+            requiresAdministrator = true, experimental = true,
+            persistent = _profiles.Snapshot()
         };
     }
 
     public object Request(FanCommand? command, DashboardSettings settings)
     {
+        if(command!=null && command.Action is "start-profile" or "stop-profile" or "stop-all")
+        {
+            IReadOnlyList<FanOutputInfo> known;
+            string? manual;
+            lock(_sync) { known = _outputs.ToArray(); manual = _session?.ChannelId; }
+            return _profiles.Request(command,settings,known,manual);
+        }
         if (command == null || command.Action is not ("arm" or "release"))
             return new { accepted = false, message = "Unsupported fan-control request." };
         lock (_sync)
@@ -72,6 +83,8 @@ public sealed class FanControlRuntime
                 command.DurationSeconds is < 15 or > MaxSessionSeconds ||
                 !double.IsFinite(command.Percent))
                 return new { accepted = false, message = "Invalid channel, duration or duty." };
+            if(_profiles.OwnsChannel(command.ChannelId))
+                return new { accepted=false, message="This output belongs to an active fan profile. Stop the profile before running a manual test." };
             var selected = _outputs.FirstOrDefault(o => o.Id == command.ChannelId);
             if (selected == null || !selected.Writable)
                 return new { accepted = false, message = "Selected channel is not a supported writable output." };
@@ -172,6 +185,7 @@ public sealed class FanControlRuntime
                 _firstWritePending = true;
             }
         }
+        _profiles.Tick(controls,frame,now);
         if (_session is not { } session) return;
         if (now >= session.Expires)
         {
@@ -236,6 +250,7 @@ public sealed class FanControlRuntime
         try { channels = computer == null ? [] : FindControls(computer); }
         catch { channels = []; }
         Release(channels, reason);
+        _profiles.ReleaseBeforeClose(channels);
     }
 
     private void Release(Dictionary<string, IControl> controls, string message)
