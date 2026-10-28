@@ -58,7 +58,7 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
             services.AddSingleton(new DashboardState(data));
             services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
             services.AddSingleton<SimulationState>();
-            services.AddSingleton<FanControlRuntime>();
+            services.AddSingleton(new FanControlRuntime(data));
             services.AddHostedService<SensorWorker>();
             services.AddHostedService<SimulationWorker>();
             services.AddHostedService<CollectorPipeServer>();
@@ -163,12 +163,12 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
             context.Request.Body,JsonSerializerOptions.Web,context.RequestAborted);
     }
     catch(JsonException){return Results.BadRequest("Invalid control request.");}
-    if(command is null || command.Action is not ("arm" or "release") ||
+    if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all") ||
        command.ChannelId.Length>256 || command.CurveId.Length>80 ||
        command.DurationSeconds is < 15 or > FanControlRuntime.MaxSessionSeconds ||
        !double.IsFinite(command.Percent) ||
-       (command.Action=="arm" && (!command.ConfirmExclusiveOwnership ||
-         (command.CurveId.Length==0 && command.Percent < FanControlRuntime.MinExperimentalDuty))))
+       ((command.Action=="arm" || command.Action=="start-profile") &&
+           !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
     try
     {
@@ -259,6 +259,7 @@ public sealed class DashboardSettings {
     ];
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
     public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
+    public List<FanProfileConfig> FanProfiles { get; set; } = [];
     public List<SimulatedFanCurveConfig> SimulatedFanCurves { get; set; } = [];
     // Visibility affects default views and sensor pickers, not collection,
     // history, configured charts, alerts or simulated curves.
