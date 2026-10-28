@@ -31,6 +31,12 @@ public sealed class FanControlRuntime
     private sealed record Pending(FanCommand Command, SimulatedFanCurveConfig? AuthorizedCurve);
     private sealed record Session(string ChannelId, string CurveId, string Mode,
         double ManualDuty, DateTimeOffset Expires, SimulatedFanCurveConfig? AuthorizedCurve);
+    // General hardware capability is separate from the conservative duty
+    // range used by temporary manual commissioning tests.
+    internal static bool SupportsControl(float minimum, float maximum) =>
+        float.IsFinite(minimum) && float.IsFinite(maximum) &&
+        minimum <= maximum && maximum > 0 && minimum < 100;
+
     internal static bool SupportsTestRange(float minimum, float maximum) =>
         float.IsFinite(minimum) && float.IsFinite(maximum) && minimum <= maximum &&
         Math.Max((double)minimum, MinExperimentalDuty) <= Math.Min((double)maximum, 100);
@@ -145,7 +151,7 @@ public sealed class FanControlRuntime
                 listing.Add(new FanOutputInfo(sensor.Identifier.ToString(), sensor.Name,
                     hardware.Name, hardware.Identifier.ToString(), c.MinSoftwareValue,
                     c.MaxSoftwareValue, c.ControlMode.ToString(),
-                    SupportsTestRange(c.MinSoftwareValue, c.MaxSoftwareValue)));
+                    SupportsControl(c.MinSoftwareValue, c.MaxSoftwareValue)));
             }
             foreach (var child in hardware.SubHardware) Visit(child);
         }
