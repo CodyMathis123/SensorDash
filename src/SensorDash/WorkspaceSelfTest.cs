@@ -158,7 +158,8 @@ internal static class WorkspaceSelfTest
         }
         // Read-only workspace evaluation is independent of the experimental
         // privileged controller. A new runtime must never own outputs by default.
-        var live = new FanControlRuntime();
+        var live = new FanControlRuntime(Path.Combine(Path.GetTempPath(),
+            "SensorDash-Fan-Test-" + Guid.NewGuid().ToString("N")));
         var snapshot = System.Text.Json.JsonSerializer.Serialize(live.Snapshot(),
             System.Text.Json.JsonSerializerOptions.Web);
         if (!snapshot.Contains("\"state\":\"off\"", StringComparison.Ordinal))
