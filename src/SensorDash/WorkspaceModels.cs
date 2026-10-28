@@ -253,20 +253,7 @@ public static class WorkspaceLogic
             if ((now-observed).TotalSeconds>curve.MaxSampleAgeSeconds || (now-observed).TotalSeconds< -5)
                 return new SimulatedFanCurveReading(curve.Id,curve.Name,curve.SourceSensorId,curve.OutputSensorId,
                     value,null,"stale-input",now);
-            var points=curve.Points;
-            double result=points[0].Percent;
-            // Outside the configured temperature range, hold the nearest
-            // endpoint; never extrapolate through the first line segment.
-            if(value<=points[0].Temperature) result=points[0].Percent;
-            else if(value>=points[^1].Temperature) result=points[^1].Percent;
-            else {
-                for(var i=1;i<points.Count;i++){
-                    if(value>points[i].Temperature)continue;
-                    var prev=points[i-1];var next=points[i];
-                    result=prev.Percent+(next.Percent-prev.Percent)*(value-prev.Temperature)/(next.Temperature-prev.Temperature);
-                    break;
-                }
-            }
+            var result=FanCurveMath.Interpolate(curve.Points,value);
             return new SimulatedFanCurveReading(curve.Id,curve.Name,curve.SourceSensorId,curve.OutputSensorId,
                 value,Math.Clamp(result,0,100),"simulated",now);
         }).ToList();
