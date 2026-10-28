@@ -151,6 +151,22 @@ const h={
   'Chart hover must include the sensor name alongside the color swatch');
  assert.ok(app.includes('status.version')&&app.includes('fanOutputStatus'),
   'Build version and fan output footer must be dynamic');
+ assert.ok(backend.includes('process = ProcessTelemetry.Snapshot()') &&
+  source('src/SensorDash/ServiceBridge.cs').includes('process = ProcessTelemetry.Snapshot()'),
+  'Both collector and desktop process metrics must be reported separately');
+ assert.ok(app.includes('formatMb(p?.workingSetBytes)') &&
+  app.includes("id=\"refreshDiagnostics\"") &&
+  app.includes('S.chartStats.lastMs'),
+  'Performance diagnostics must be available without touching the hardware');
+ assert.ok(app.includes('const generation=++S.chartGeneration') &&
+  app.includes('performance.now()-frameStart<7') &&
+  app.includes('requestAnimationFrame(paintBatch)'),
+  'Chart rendering must be time-sliced and cancel outdated navigation work');
+ assert.ok(app.includes('S.historyStats.lastFetchMs=Date.now()-started'),
+  'History fetch duration must be observable');
+ assert.ok(!app.includes('Simulation only · No writes') &&
+  !script.includes("'Curve sandbox'"),
+  'Version 0.6 must not present real fan control as simulation-only');
  await click('starter-radiators');
  const shared=S.settings.fanProfiles.at(-1);
  assert.equal(shared.curveIds.length,2);
@@ -168,5 +184,6 @@ const h={
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
  assert.ok(!curvesView.includes('This sandbox evaluates'));
  console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
+ console.log('PASS: read-only process diagnostics, browser chart timing, time-sliced navigation and accurate live-control labels');
  console.log('PASS: cooling analytics, chart groups, templates, sensor usage, deep links, visibility, dashboard creation and removal of legacy roles');
 })().catch(err=>{console.error(err);process.exitCode=1;});
