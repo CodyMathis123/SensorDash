@@ -181,7 +181,7 @@ const h={
   performance:{now:()=>clock},
   drawCanvas:canvas=>{painted.push(canvas);clock+=3}
  };
- const schedulePaint=vm.runInNewContext(paintSource+'\\ndrawAll;',paintContext);
+ const schedulePaint=vm.runInNewContext(paintSource+String.fromCharCode(10)+'drawAll;',paintContext);
  const flushFrames=()=>{
   let guard=0;
   while(frames.length){
