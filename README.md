@@ -1,4 +1,4 @@
-# SensorDash 0.7.2 — Honest history gaps and accurate hover
+# SensorDash 0.7.3 — Readable calendar dates on multi-day charts
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -22,6 +22,14 @@ The old **Curve Sandbox** screen is now **Fan Control**, with continuous service
 
 Starter profiles are **opt-in** and hardware-neutral. Installations do not automatically create or activate these profiles.
 
+## Calendar-aware history time axis (0.7.3)
+
+- **7-day charts** show readable *weekday + month/day* labels positioned at local calendar midnights, rather than ambiguous AM/PM-only labels. Wide charts show approximately one label per day; narrow charts automatically space labels out.
+- **30-day charts** show *month/day* at calendar-aligned intervals (roughly every 4–7 days depending on width), including correct rollover across month and year boundaries.
+- **15-minute, 1-hour, 6-hour and 24-hour charts** retain conventional clock-time labels; hovering any history chart now shows **full weekday, date, year and local time**, even when the graph crosses midnight.
+- Date ticks advance using local calendar days rather than assuming every day lasts exactly 24 hours, avoiding daylight-saving shifts; and tooltip width accommodates the longer timestamp.
+- Formatting lives in a small pure `chart-time-axis.js` module with deterministic locale/date-boundary tests. No extra sampling, cached history, IPC, database or fan-control work.
+
 ## Accurate history gaps (0.7.2)
 
 - Temperature, power, fan RPM, duty and other canvas histories now **break the plotted line wherever the sample gap exceeds the supported recording interval**. A long outage no longer creates artificial sloped or flat lines between unrelated observations. Isolated readings render as small points.
@@ -40,7 +48,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.7.2 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.7.3 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -93,7 +101,7 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.7.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.7.3.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
 
 ## Sleep/resume hardware recovery and diagnostic trace (0.7.1)
 

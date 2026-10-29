@@ -116,6 +116,7 @@ app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascrip
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
 app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
+app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
