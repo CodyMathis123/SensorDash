@@ -37,7 +37,7 @@ const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
 function chart(ids,unit='',small=false,coolingId=''){
  const valid=ids.map(id=>typeof id==='string'?sensor(id):id).filter(Boolean);
  const labels=valid.map((s,i)=>`<span><i class="legend-key" style="background:${colors[i%colors.length]}"></i>${esc(label(s))}</span>`).join('');
- return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"${coolingId?' data-cooling-timeline="'+esc(coolingId)+'"':''}></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div>`;
+ return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"${coolingId?' data-cooling-timeline="'+esc(coolingId)+'"':''}></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div><div class="chart-gap-note" hidden></div>`;
 }
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function explorer(){
@@ -483,7 +483,8 @@ function drawCanvas(canvas){
    const base=S.history[id]||[], live=S.liveCache.get(id)||[], first=Date.now()-S.hours*3600000;
    const points=base.filter(p=>p.t>=first);
    live.forEach(p=>{if(p.t>=first&&(!points.length||p.t>points[points.length-1].t))points.push(p)});
-   return {id,name:label(sensor(id)),color:colors[i%colors.length],points};
+   const prepared=ChartGaps.prepare(points,S.hours);
+   return {id,name:label(sensor(id)),color:colors[i%colors.length],...prepared};
  }).filter(s=>s.points.length);
  const rect=canvas.getBoundingClientRect(),w=Math.max(100,rect.width),h=Math.max(100,rect.height);
  const ratio=Math.min(window.devicePixelRatio||1,2);
@@ -510,10 +511,50 @@ function drawCanvas(canvas){
    const x=p.l+i*cw/4;ctx.fillStyle='#7990a3';ctx.textAlign='center';
    ctx.fillText(shorttime(xmin+i*(xmax-xmin)/4),x,h-8);
  }
- series.forEach((s,i)=>{
-    ctx.strokeStyle=s.color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';
-    ctx.beginPath();s.points.forEach((q,j)=>{const x=tx(q.t),y=ty(q.v);if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});
-    ctx.stroke();if(s.points.length===1){ctx.beginPath();ctx.arc(tx(s.points[0].t),ty(s.points[0].v),3,0,7);ctx.fillStyle=s.color;ctx.fill()}
+ // A shared telemetry outage gets a subtle background; individual sensor
+ // outages still appear only as breaks in that sensor's own line.
+ const outages=ChartGaps.sharedOutages(series);
+ for(const gap of outages){
+   const left=tx(gap.start),right=tx(gap.end),width=right-left;
+   if(width<=0)continue;
+   ctx.fillStyle='rgba(108,135,155,0.13)';
+   ctx.fillRect(left,p.t,width,ch);
+   ctx.strokeStyle='rgba(155,180,197,0.48)';
+   ctx.setLineDash([3,5]);
+   for(const x of [left,right]){
+     ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,p.t+ch);ctx.stroke();
+   }
+   ctx.setLineDash([]);
+   if(width>=100){
+     ctx.fillStyle='#acc3d2';ctx.textAlign='center';ctx.font='10px Segoe UI';
+     ctx.fillText('NO DATA · '+ChartGaps.duration(gap.end-gap.start),
+       left+width/2,p.t+14,Math.max(35,width-10));
+     ctx.font='11px Segoe UI';
+   }
+ }
+ const gapNote=canvas.parentElement?.nextElementSibling?.nextElementSibling;
+ if(gapNote?.classList.contains('chart-gap-note')){
+   const hasBreaks=series.some(s=>s.gaps.length);
+   const message=outages.length?'Shaded bands = collector-wide missing readings; line breaks = sensor-specific gaps':
+     'Line breaks indicate missing sensor readings';
+   if(hasBreaks && gapNote.textContent!==message)gapNote.textContent=message;
+   gapNote.hidden=!hasBreaks;
+ }
+ series.forEach(s=>{
+   ctx.strokeStyle=s.color;ctx.fillStyle=s.color;
+   ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';
+   for(const segment of s.segments){
+     if(segment.length===1){
+       const q=segment[0];
+       ctx.beginPath();ctx.arc(tx(q.t),ty(q.v),2.5,0,Math.PI*2);ctx.fill();
+       continue;
+     }
+     ctx.beginPath();
+     segment.forEach((q,j)=>{const x=tx(q.t),y=ty(q.v);
+       if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+     });
+     ctx.stroke();
+   }
  });
  // The base canvas contains the graph only. Mouse interaction draws into a
  // transparent, independently cleared overlay so moving the cursor cannot leave
@@ -544,7 +585,7 @@ function drawCanvas(canvas){
 function drawCanvasOverlay(ctx,series,layout,desired){
  const {tx,p,h,w,unit}=layout;
  if(desired<Date.now()-S.hours*3600000||desired>Date.now())return;
- const values=series.map(s=>s.points.reduce((a,b)=>Math.abs(a.t-desired)<=Math.abs(b.t-desired)?a:b));
+ const values=series.map(s=>ChartGaps.closest(s,desired));
  if(!values.length)return;
  const x=tx(desired);
  ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#819aab';
@@ -553,7 +594,8 @@ function drawCanvasOverlay(ctx,series,layout,desired){
  const names=series.map(s=>cap(s.name||s.id));
  ctx.font='11px Segoe UI';
  const labelWidth=Math.max(50,...names.map(n=>ctx.measureText(n).width));
- const valWidth=Math.max(45,...values.map(q=>ctx.measureText(fmt(q.v,1)+(unit?' '+unit:'')).width));
+ const valWidth=Math.max(45,...values.map(q=>ctx.measureText(
+   q?fmt(q.v,1)+(unit?' '+unit:''):'No data').width));
  const tipW=Math.min(w-10,Math.max(175,Math.ceil(labelWidth+valWidth+45)));
  const tipH=26+values.length*20;
  const tipX=Math.max(5,Math.min(w-tipW-5,x+11)),tipY=5;
@@ -570,7 +612,8 @@ function drawCanvasOverlay(ctx,series,layout,desired){
    ctx.fillText(names[i],tipX+23,rowY);
    ctx.restore();
    ctx.fillStyle=series[i].color;ctx.textAlign='right';
-   ctx.fillText(fmt(q.v,1)+(unit?' '+unit:''),tipX+tipW-10,rowY);
+   ctx.fillStyle=q?series[i].color:'#829aab';
+   ctx.fillText(q?fmt(q.v,1)+(unit?' '+unit:''):'No data',tipX+tipW-10,rowY);
    ctx.textAlign='left';
  });
 }
