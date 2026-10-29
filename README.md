@@ -1,4 +1,4 @@
-# SensorDash 0.7.1 — Sleep/resume PWM rearm and diagnostics
+# SensorDash 0.7.2 — Honest history gaps and accurate hover
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -22,6 +22,14 @@ The old **Curve Sandbox** screen is now **Fan Control**, with continuous service
 
 Starter profiles are **opt-in** and hardware-neutral. Installations do not automatically create or activate these profiles.
 
+## Accurate history gaps (0.7.2)
+
+- Temperature, power, fan RPM, duty and other canvas histories now **break the plotted line wherever the sample gap exceeds the supported recording interval**. A long outage no longer creates artificial sloped or flat lines between unrelated observations. Isolated readings render as small points.
+- Gap tolerance follows the backend's actual SQLite history bucketing (`max(10 seconds, range/500)`, with a 90-second minimum gap tolerance). It scales from the short-history chart through 7-/30-day views without assuming every sensor is collected every second.
+- Only when multiple reporting sensors share the same outage do charts display a subtle shaded **NO DATA** band with the missing duration. Individual sensor gaps break only that sensor's line. A small legend explanation appears only when the graph has real gaps.
+- Hover and synchronized cooling-system cursors now use bounded, timestamp-aware nearest readings. Hovering midway through an outage shows **No data** for each unavailable sensor rather than an hours-old value.
+- `chart-gaps.js` implements the pure gap segmentation, shared-outage intersection, and binary-search hover lookup. Deterministic Node regression tests exercise missing periods, SQL bucket scaling, stale hovers, isolated points, and the actual canvas drawing calls. Changes do not affect collector sampling, SQLite history storage, or hardware fan control.
+
 ## Graphs, performance and release labels
 
 - Hover tooltips display sensor names beside their color swatches and current values, rather than colors and numbers alone.
@@ -32,7 +40,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.7.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.7.2 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 

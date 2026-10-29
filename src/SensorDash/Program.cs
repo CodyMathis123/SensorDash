@@ -115,6 +115,7 @@ app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/jav
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
+app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {

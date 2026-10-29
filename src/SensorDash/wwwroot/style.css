@@ -334,3 +334,8 @@
 .fan-trace-output{font-size:11px;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
  white-space:pre;overflow:auto;max-height:340px;min-height:85px;background:#0a1923;
  border:1px solid #2e4857;color:#cde4ee;padding:12px;border-radius:9px}
+
+/* The visible chart gap explanation appears only when actual missing samples
+   are present. The base canvas owns shading; the overlay owns hover labels. */
+.chart-gap-note{margin:8px 0 0;font-size:11px;color:#97afc0;line-height:1.4}
+.chart-gap-note[hidden]{display:none}
