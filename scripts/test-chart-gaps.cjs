@@ -46,10 +46,10 @@ const shared=chart.sharedOutages([data,gpu]);
 assert.equal(shared.length,1);
 assert.equal(shared[0].start,t0+10*min);
 assert.equal(shared[0].end,t0+6*hour);
-const active=chart.prepare(points([t0,t0+3*hour,t0+6*hour]),range);
+const active=chart.prepare(points(Array.from({length:121},(_,i)=>t0+i*3*min)),range);
 assert.equal(chart.sharedOutages([data,active]).length,0,
  'No shared shade when another sensor remained active');
-assert.equal(chart.sharedOutages([data,only]).length,1,
+assert.equal(chart.sharedOutages([data,only]).length,0,
  'One isolated sample cannot establish shared downtime');
 assert.equal(chart.duration(192*min),'3h 12m');
 

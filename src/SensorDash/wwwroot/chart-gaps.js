@@ -49,8 +49,11 @@ const ChartGaps=(()=>{
  const sharedOutages=preparedSeries=>{
   // Sensors with a single isolated sample offer no evidence of an outage's
   // boundaries, so don't use them to establish shared downtime.
-  const eligible=(preparedSeries||[]).filter(s=>s?.points?.length>1);
-  if(!eligible.length)return [];
+  const all=preparedSeries||[];
+  // One isolated reading cannot establish that a sensor was absent for the
+  // entire interval; don't label a partly-observed chart "collector-wide".
+  if(!all.length||all.some(s=>!s?.points||s.points.length<2))return [];
+  const eligible=all;
   let common=eligible[0].gaps;
   for(const series of eligible.slice(1)){
    const next=[],other=series.gaps;
