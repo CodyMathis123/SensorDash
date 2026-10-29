@@ -8,6 +8,7 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const source=read('src/SensorDash/wwwroot/chart-gaps.js');
 const app=read('src/SensorDash/wwwroot/app.js');
 const chart=vm.runInNewContext(source+'\nChartGaps;',{Math,Number});
+const timeAxis=vm.runInNewContext(read('src/SensorDash/wwwroot/chart-time-axis.js')+'\nChartTimeAxis;',{Date,Math,Number,Intl});
 const points=(times,value=32)=>times.map((t,i)=>({t,v:value+i}));
 const min=60000,hour=60*min;
 const t0=Date.UTC(2026,9,29,4,0,0);
@@ -88,7 +89,7 @@ const mock={
  S:{history:{cpu:data.points,gpu:gpu.points},liveCache:new Map(),hours:24},
  Date:{now:()=>now},window:{devicePixelRatio:1},
  ChartGaps:chart,colors,label:s=>s.name,sensor:id=>({name:id}),fmt:(v,d)=>v.toFixed(d),
- shorttime:()=>'',CoolingTimeline:{register:()=>{}},Math,Number
+ ChartTimeAxis:timeAxis,CoolingTimeline:{register:()=>{}},Math,Number
 };
 const painter=vm.runInNewContext(drawSource+'\ndrawCanvas;',mock);
 painter(canvas);

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>SensorDash</AssemblyName>
-    <Version>0.7.2</Version>
+    <Version>0.7.3</Version>
     <ApplicationIcon>Assets\SensorDash.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -33,6 +33,7 @@
     <EmbeddedResource Include="wwwroot/cooling-insights.js" LogicalName="SensorDash.Web.cooling-insights.js" />
     <EmbeddedResource Include="wwwroot/cooling-timeline.js" LogicalName="SensorDash.Web.cooling-timeline.js" />
     <EmbeddedResource Include="wwwroot/chart-gaps.js" LogicalName="SensorDash.Web.chart-gaps.js" />
+    <EmbeddedResource Include="wwwroot/chart-time-axis.js" LogicalName="SensorDash.Web.chart-time-axis.js" />
     <EmbeddedResource Include="wwwroot/style.css" LogicalName="SensorDash.Web.style.css" />
   </ItemGroup>
 </Project>

@@ -19,7 +19,8 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
 const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'—';
-const shorttime=t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+// ChartTimeAxis owns date/time formatting for every history chart so the
+// 7-/30-day views never show ambiguous time-of-day-only labels.
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>{
  const alias=S.settings?.aliases?.[s?.id];
@@ -507,9 +508,10 @@ function drawCanvas(canvas){
    const y=p.t+i*ch/4;ctx.strokeStyle='#263b4a';ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();
    ctx.textAlign='right';ctx.fillStyle='#7990a3';ctx.fillText(fmt(hi-i*(hi-lo)/4,0),p.l-9,y+4);
  }
- for(let i=0;i<=4;i++){
-   const x=p.l+i*cw/4;ctx.fillStyle='#7990a3';ctx.textAlign='center';
-   ctx.fillText(shorttime(xmin+i*(xmax-xmin)/4),x,h-8);
+ for(const tick of ChartTimeAxis.ticks(xmin,xmax,cw,S.hours)){
+   const x=tx(tick.t);
+   ctx.fillStyle='#7990a3';ctx.textAlign='center';
+   ctx.fillText(tick.label,x,h-8,Math.max(50,cw/4));
  }
  // A shared telemetry outage gets a subtle background; individual sensor
  // outages still appear only as breaks in that sensor's own line.
@@ -596,13 +598,15 @@ function drawCanvasOverlay(ctx,series,layout,desired){
  const labelWidth=Math.max(50,...names.map(n=>ctx.measureText(n).width));
  const valWidth=Math.max(45,...values.map(q=>ctx.measureText(
    q?fmt(q.v,1)+(unit?' '+unit:''):'No data').width));
- const tipW=Math.min(w-10,Math.max(175,Math.ceil(labelWidth+valWidth+45)));
+ const header=ChartTimeAxis.tooltip(desired);
+ const headerWidth=ctx.measureText(header).width;
+ const tipW=Math.min(w-10,Math.max(175,Math.ceil(labelWidth+valWidth+45),Math.ceil(headerWidth+20)));
  const tipH=26+values.length*20;
  const tipX=Math.max(5,Math.min(w-tipW-5,x+11)),tipY=5;
  ctx.fillStyle='#101923ed';ctx.strokeStyle='#3b5867';
  ctx.fillRect(tipX,tipY,tipW,tipH);ctx.strokeRect(tipX,tipY,tipW,tipH);
  ctx.textAlign='left';ctx.fillStyle='#b1c5d2';
- ctx.fillText(shorttime(desired),tipX+10,tipY+16);
+ ctx.fillText(header,tipX+10,tipY+16,Math.max(60,tipW-20));
  values.forEach((q,i)=>{
    const rowY=tipY+35+i*20;
    ctx.fillStyle=series[i].color;ctx.fillRect(tipX+9,rowY-9,8,8);
