@@ -333,61 +333,15 @@ jobs:
       - name: Extract previous installer
         shell: pwsh
         run: Expand-Archive -LiteralPath "$env:RUNNER_TEMP/sensordash-baseline.zip" -DestinationPath "$env:RUNNER_TEMP/sensordash-baseline"
-      - name: Verify previous-version upgrade, repair and downgrade rejection
+      - name: Verify MSI upgrade, repair, downgrade rejection and uninstall
         shell: pwsh
         run: ./scripts/Test-MsiUpgrade.ps1
-      - name: Verify MSI installation and uninstallation on Windows
-        shell: pwsh
-        run: |
-          $msi = (Get-ChildItem installer-output -Filter '*.msi' -Recurse | Select-Object -First 1).FullName
-          if (!$msi) { throw 'No MSI found' }
-          $installLog = Join-Path $env:RUNNER_TEMP 'sensordash-install.log'
-          $uninstallLog = Join-Path $env:RUNNER_TEMP 'sensordash-uninstall.log'
-          $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$msi`" /qn /norestart /L*v `"$installLog`"" -WindowStyle Hidden -PassThru
-          if (!$install.WaitForExit(180000)) { Get-Content $installLog -Tail 100; throw "MSI install timed out" }
-          $install.Refresh()
-          Write-Host "MSI install exit code: $($install.ExitCode)"
-          if ($install.ExitCode -ne 0) {
-            if (Test-Path $installLog) { Get-Content $installLog -Tail 100 }
-            throw "MSI install failed: $($install.ExitCode)"
-          }
-          $service = Get-Service -Name 'SensorDashCollector' -ErrorAction Stop
-          if ($service.Status -ne 'Running') { throw "Installed collector did not start: $($service.Status)" }
-          $startup = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction Stop
-          if (!$startup.SensorDash) { throw 'MSI did not create tray autostart entry' }
-          if (!(Test-Path "$env:ProgramFiles\SensorDash\SensorDash.exe")) { throw 'MSI did not install executable' }
-          $commonPrograms = [Environment]::GetFolderPath('CommonPrograms')
-          $startLink = Join-Path $commonPrograms 'SensorDash.lnk'
-          if (!(Test-Path $startLink)) { throw "MSI did not create all-users Start Menu shortcut: $startLink" }
-          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
-          Write-Host "Installed Start Menu shortcut: $startLink"
-          Write-Host "Start Menu shortcut icon: $($shortcut.IconLocation)"
-
-          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$uninstallLog`"" -WindowStyle Hidden -PassThru
-          if (!$uninstall.WaitForExit(180000)) { Get-Content $uninstallLog -Tail 100; throw "MSI uninstall timed out" }
-          $uninstall.Refresh()
-          Write-Host "MSI uninstall exit code: $($uninstall.ExitCode)"
-          if ($uninstall.ExitCode -ne 0) {
-            if (Test-Path $uninstallLog) { Get-Content $uninstallLog -Tail 100 }
-            throw "MSI uninstall failed: $($uninstall.ExitCode)"
-          }
-          if (Get-Service -Name 'SensorDashCollector' -ErrorAction SilentlyContinue) {
-            throw 'Uninstall left collector service registered'
-          }
-          if (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction SilentlyContinue) {
-            throw 'Uninstall left tray startup entry registered'
-          }
-          if (Test-Path $startLink) { throw 'MSI uninstall left the Start Menu shortcut behind' }
-          Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - name: Upload installer diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: installer-diagnostics
-          path: |
-            ${{ runner.temp }}/sensordash-upgrade-test/*.log
-            ${{ runner.temp }}/sensordash-install.log
-            ${{ runner.temp }}/sensordash-uninstall.log
+          path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:

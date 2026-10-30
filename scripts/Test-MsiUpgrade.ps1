@@ -69,6 +69,10 @@ if ((Products).Count -ne 1) { throw 'Downgrade changed product registration.' }
 $desktop = Start-Desktop $exe
 Install-Msi $current '/x' 'remove-upgraded-product'
 Assert-Closed $desktop
+if (Get-Service SensorDashCollector -ErrorAction SilentlyContinue) { throw 'Uninstall left collector service registered.' }
+if (Get-ItemProperty -Path $startupKey -Name SensorDash -ErrorAction SilentlyContinue) { throw 'Uninstall left tray startup entry.' }
+if (Test-Path $startLink) { throw 'Uninstall left Start Menu shortcut.' }
+if (Test-Path $exe) { throw 'Uninstall left installed executable.' }
 if ((Products).Count -ne 0) { throw 'Uninstall left product registrations.' }
 if (!(Test-Path $marker) -or (Get-Content $marker) -ne 'user data must survive') { throw 'Servicing removed user data.' }
-Write-Host 'PASS: previous Production major upgrade, repeat install, repair, downgrade rejection and data preservation'
+Write-Host 'PASS: previous Production major upgrade, repeat install, repair, downgrade rejection, uninstall and data preservation'
