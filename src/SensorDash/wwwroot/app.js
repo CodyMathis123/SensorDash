@@ -350,7 +350,7 @@ async function saveAlias(clear=false){
  const name=clear?'':byId('sensorAlias')?.value.trim()||'';
  if(name)cfg.aliases[current]=name;else delete cfg.aliases[current];
  try {
-   S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+   await SDWorkspace.saveSettings(S,cfg);
    toast(name?'Sensor name saved':'Original sensor name restored');render();
  }catch(e){toast('Could not save alias: '+e.message);}
 }
@@ -658,7 +658,7 @@ async function changeVisibility(field,value){
  const has=draft[field].includes(value);
  draft[field]=has?draft[field].filter(s=>s!==value):[...draft[field],value];
  try{
-  S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});
+  await SDWorkspace.saveSettings(S,draft);
   render();toast((has?'Showing':'Hiding')+' '+value);
  }catch(e){toast('Cannot update visibility: '+e.message)}
 }
@@ -671,7 +671,7 @@ async function changeThreshold(id,remove=false){
   cfg.highThresholds[id]=Math.round((reading?.value??40)+10);
  }
  try{
-  S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  await SDWorkspace.saveSettings(S,cfg);
   render();toast(remove?'Threshold removed':'Threshold added');
  }catch(e){toast('Could not update threshold: '+e.message)}
 }
@@ -697,14 +697,14 @@ async function saveSettings(){
 
  document.querySelectorAll('[data-alias]').forEach(el=>{if(el.value.trim())cfg.aliases[el.dataset.alias]=el.value.trim();else delete cfg.aliases[el.dataset.alias]});
  document.querySelectorAll('[data-threshold]').forEach(el=>{if(el.value.trim())cfg.highThresholds[el.dataset.threshold]=Number(el.value);else delete cfg.highThresholds[el.dataset.threshold]});
- try{S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});toast('Settings saved');render()}
+ try{await SDWorkspace.saveSettings(S,cfg);toast('Settings saved');render()}
  catch(err){toast('Could not save settings: '+err.message)}
 }
 async function togglePin(id){
  const cfg=structuredClone(S.settings);
  cfg.pinnedSensors=cfg.pinnedSensors||[];
  cfg.pinnedSensors=cfg.pinnedSensors.includes(id)?cfg.pinnedSensors.filter(x=>x!==id):[...cfg.pinnedSensors,id];
- try{S.settings=await fetchJSON('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});toast(cfg.pinnedSensors.includes(id)?'Sensor pinned':'Sensor unpinned');render()}
+ try{await SDWorkspace.saveSettings(S,cfg);toast(cfg.pinnedSensors.includes(id)?'Sensor pinned':'Sensor unpinned');render()}
  catch(err){toast(err.message)}
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
@@ -712,6 +712,7 @@ document.addEventListener('click',e=>{
  if(e.target.id==='refreshStorageFootprint'){
   HistoryInsights.handle(e,S);return;
  }
+ if(S.view==='cooling'&&e.target.closest('[data-view],[data-usage-target]'))void SDWorkspace.flushCooling(S).catch(()=>{});
  const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
@@ -785,6 +786,7 @@ document.addEventListener('click',e=>{
  if(e.target.closest('#saveSettings'))saveSettings();
 });
 document.addEventListener('input',e=>{
+ if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  // Curve editor adds another blank key/value row once both numeric cells
  // are filled, without persisting or rebuilding the current form.
@@ -803,6 +805,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(HistoryInsights.handle(e,S))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
@@ -820,7 +823,11 @@ window.addEventListener('resize',()=>{
   clearTimeout(resizePaint);
   resizePaint=setTimeout(()=>{S.chartDirty=true;flushChartAfterHover();if(!chartInUse())drawAll()},200);
 });
+window.addEventListener('beforeunload',e=>{
+ if(SDWorkspace.hasPendingCooling(S)){e.preventDefault();e.returnValue='';}
+});
 document.addEventListener('visibilitychange',()=>{
+ if(document.hidden)void SDWorkspace.flushCooling(S).catch(()=>{});
  if(!document.hidden){scheduleLivePaint();scheduleChartPaint()}
 });
 // A history query is cheap compared to polling hardware; perform it separately

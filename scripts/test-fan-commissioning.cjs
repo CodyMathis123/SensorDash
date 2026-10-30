@@ -31,6 +31,10 @@ const scope={
  Date
 };
 const controller=vm.runInNewContext(source+'\nFanCommissioning;',scope);
+scope.SDWorkspace={saveSettings:async(S,draft)=>{
+ const r=await scope.fetch('/api/settings',{body:JSON.stringify(draft)});
+ S.settings=await r.json();return S.settings;
+}};
 const S={
  view:'curves',
  frame:{timestamp:new Date().toISOString()},

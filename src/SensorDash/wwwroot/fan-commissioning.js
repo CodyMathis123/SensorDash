@@ -28,10 +28,7 @@ const FanCommissioning=(()=>{
   if(!r.ok)throw Error((await r.text()).slice(0,150));
  };
  const persist=async(S,draft,h,message)=>{
-  const r=await fetch('/api/settings',{method:'PUT',
-   headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});
-  if(!r.ok)throw Error((await r.text()).slice(0,180));
-  S.settings=await r.json();
+  await SDWorkspace.saveSettings(S,draft);
   h.toast(message);h.render();
  };
  const render=S=>{
