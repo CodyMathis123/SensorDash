@@ -296,6 +296,7 @@ function updateLiveValues(){
  });
  SDWorkspace.paintSimulation(S);
  SDWorkspace.paintCooling(S);
+ CoolingElectrical.paint(S);
  SDWorkspace.paintFanControl(S);
  SDWorkspace.paintProfiles(S);
 }
