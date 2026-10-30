@@ -1,4 +1,4 @@
-# SensorDash 0.8.1 — Cooling fan and pump electrical inventory
+# SensorDash 0.8.2 — Cooling electrical preset click fix and Production consolidation
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -21,6 +21,12 @@ The old **Curve Sandbox** screen is now **Fan Control**, with continuous service
 **NVMe cooler:** Create separate curve (35°C/30%, 40/30, 45/40, 50/55, 55/75, 60/100) with its own output assignment. Storage-sensor age and staleness are enforced, and the output goes to full available speed if the temperature stops updating.
 
 Starter profiles are **opt-in** and hardware-neutral. Installations do not automatically create or activate these profiles.
+
+## Electrical preset action regression (0.8.2)
+
+The Cooling Systems **Use ARCTIC P12 Pro PST LN ×19** and **Use MCP355 / DDC 3.2** buttons previously referenced the shared settings `cfg` before its JavaScript `const` declaration, causing `Cannot access 'cfg' before initialization`. The shared settings binding now occurs at the beginning of the event handler. A **real action-dispatch regression** in `scripts/test-workspace.cjs` clicks both presets, verifies settings persisted, confirms existing RPM assignments survive, checks the **43.08 W** nameplate summary, and verifies that a locked cooling system refuses preset changes.
+
+After successful Windows validation, this fixes the final known blocker before bringing the development work into the repository's `Production` branch. This change is only in the web component editor and has no influence on privileged PWM hardware authorization.
 
 ## Cooling electrical component inventory (0.8.1)
 
@@ -76,7 +82,7 @@ Tests cover exact raw peaks, bounded gap-aware energy integration, missing-energ
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.8.1 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.8.2 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -129,7 +135,7 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.8.1.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.8.2.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
 
 ## Sleep/resume hardware recovery and diagnostic trace (0.7.1)
 
