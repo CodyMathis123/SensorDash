@@ -10,18 +10,15 @@ assert.match(product,/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/);
 assert.equal(value(props,'SensorDashUpgradeCode'),'6D8F4B3B-3780-4A7C-AD1D-58343B1AD2CE');
 assert.ok(fs.readFileSync('installer/SensorDash.wxs','utf8').includes('ProductCode="$(var.SensorDashProductCode)"'));
 assert.ok(fs.readFileSync('installer/SensorDash.wixproj','utf8').includes('SensorDash-Setup-$(SensorDashVersion)-x64'));
-// A PR that changes shipped code or installer content must advance release identity.
-if(process.env.GITHUB_EVENT_NAME==='pull_request'){
- const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH));
- const base=event.pull_request.base.sha,head=event.pull_request.head.sha;
- const changed=cp.execFileSync('git',['diff','--name-only',base,head],{encoding:'utf8'}).trim().split('\n');
- let previous;
- try {previous=cp.execFileSync('git',['show',`${base}:Directory.Build.props`],{encoding:'utf8',stdio:['ignore','pipe','ignore']});}
- catch {previous=cp.execFileSync('git',['show',`${base}:src/SensorDash/SensorDash.csproj`],{encoding:'utf8'});}
- const old=value(previous,'SensorDashVersion')||value(previous,'Version');
- if(changed.some(p=>/^(src\/|installer\/|Directory.Build.props$)/.test(p))){
-  const a=old.split('.').map(Number);assert.ok(parts[0]>a[0]||parts[0]===a[0]&&(parts[1]>a[1]||parts[1]===a[1]&&parts[2]>a[2]),'Shipped changes require a new MSI version');
-  assert.notEqual(product,value(previous,'SensorDashProductCode'),'A major upgrade requires a new ProductCode');
- }
+const {identity}=require('./prepare-ci-release.cjs');
+assert.equal(identity('0.8',240).version,'0.8.240');
+assert.notEqual(identity('0.8',240).product,identity('0.8',241).product);
+assert.deepEqual(identity('0.8',240),identity('0.8',240));
+assert.throws(()=>identity('0.8',65536));
+assert.throws(()=>identity('256.8',1));
+if(process.env.GITHUB_ACTIONS==='true'){
+ const expected=identity(version.split('.').slice(0,2).join('.'),Number(process.env.GITHUB_RUN_NUMBER));
+ assert.equal(version,expected.version,'CI version must use this workflow run number');
+ assert.equal(product,expected.product,'CI ProductCode must match allocated version');
 }
-console.log('PASS: MSI release identity and version policy');
+console.log('PASS: monotonic CI MSI versions and stable per-version ProductCodes');
