@@ -982,7 +982,9 @@ const SDWorkspace = (() => {
        if(!scope||!parent||WorkspaceLocks.cooling(S,sysId)){
          h.toast('Unlock the cooling system before editing electrical specifications.');return true;
        }
-       if(!CoolingElectrical.applyPreset(S,scope,el.dataset.electricalPreset)){
+       const preset=el.closest('.electrical-presets')?.querySelector('[data-electrical-preset-picker]')?.value;
+       if(!preset){h.toast('Choose a preset first.');return true;}
+       if(!CoolingElectrical.applyPreset(S,scope,preset)){
          h.toast('Preset is not compatible with this component.');return true;
        }
        await persist(S,h);return true;

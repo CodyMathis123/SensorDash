@@ -21,5 +21,8 @@ The owner authorizes the normal delivery loop: implement, test, push a PR, run t
 
 Follow [the full workflow](docs/development.md). Never merge on a pending, failed, cancelled or skipped validation run. Validate the latest PR revision; new commits require a new run. Respect branch protection and review requirements. Report concrete blockers rather than treating local environment failures as successful validation. After merging, monitor the Production run and report its result.
 
+## Cooling presets
+Add or update fan/pump product data in `presets/cooling/*.json`, following [the catalog guide](presets/README.md). Require source evidence and increment revisions for corrections. Keep installation-specific quantities, wiring, sensor IDs and user calibration out of presets. Do not hardcode product buttons or silently update saved component snapshots. Run catalog validation and verify embedded catalog delivery.
+
 ## UI changes
 Follow [UI guidance](docs/ui-guidelines.md): concise user-facing copy, field limits in tooltips, compact editable rows and accessible information icons. Keep implementation notes in documentation or collapsed diagnostics. Preserve meaningful hardware consent and distinguish measurements from estimates.

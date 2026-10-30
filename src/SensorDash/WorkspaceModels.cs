@@ -29,6 +29,8 @@ public sealed class ElectricalPowerPoint
 }
 public sealed class CoolingElectricalConfig
 {
+    public string PresetId { get; set; } = "";
+    public int? PresetRevision { get; set; }
     public List<ElectricalPowerPoint> PowerCurve { get; set; } = [];
     public string PowerCurveSource { get; set; } = "";
     public string Model { get; set; } = "";
@@ -191,6 +193,8 @@ public static class WorkspaceLogic
                 component.SensorIds = Ids(component.SensorIds);
                 if(component.Electrical is { } e)
                 {
+                    e.PresetId=Short(e.PresetId,80);
+                    if(e.PresetRevision is < 1)e.PresetRevision=null;
                     e.Model=Short(e.Model,100);
                     e.PowerSource=Short(e.PowerSource,100);
                     e.Quantity=Math.Clamp(e.Quantity,1,100);

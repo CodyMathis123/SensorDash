@@ -58,6 +58,8 @@ jobs:
         run: node scripts/test-chart-time-axis.cjs
       - name: Test overview peaks and storage insights
         run: node scripts/test-history-insights.cjs
+      - name: Validate packaged cooling preset catalog
+        run: node scripts/test-cooling-presets.cjs
       - name: Test fan and pump electrical component modeling
         run: node scripts/test-cooling-electrical.cjs
       - name: Test fan commissioning frontend contracts
@@ -242,6 +244,14 @@ jobs:
               } catch { }
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
+            $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
+            $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
+            if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }
+            foreach ($file in $sourcePresets) {
+              $expectedPreset = Get-Content $file.FullName -Raw | ConvertFrom-Json
+              $actualPreset = $presets | Where-Object id -eq $expectedPreset.id
+              if (!$actualPreset -or $actualPreset.revision -ne $expectedPreset.revision) { throw 'Packaged preset missing or outdated' }
+            }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
             if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing

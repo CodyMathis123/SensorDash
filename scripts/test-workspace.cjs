@@ -21,6 +21,7 @@ const model=source('src/SensorDash/WorkspaceModels.cs');
 const backend=source('src/SensorDash/Program.cs');
 let seq=0;
 const context={
+ presetCatalog:require('./validate-cooling-presets.cjs').readCatalog(),
  crypto:{randomUUID:()=>'test-'+(++seq)},
  document:{querySelectorAll:()=>[],querySelector:()=>({value:'heat-source'})},
  history:{replaceState:()=>{}},
@@ -29,7 +30,7 @@ const context={
  fetch:async(_url,opts)=>({ok:true,json:async()=>JSON.parse(opts.body)}),
  console
 };
-const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanDebug+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+historyInsights+'\n'+coolingElectrical+'\n'+script+'\nSDWorkspace;',context);
+const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanDebug+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+historyInsights+'\n'+coolingElectrical+'\n'+script+'\nCoolingElectrical.setCatalog(presetCatalog);\nSDWorkspace;',context);
 function sensor(id,name,type,value,device='Generic hardware',deviceType='Controller'){
  return {id,name,type,value,device,deviceType,deviceId:'device-'+deviceType};
 }
@@ -94,7 +95,7 @@ const h={
  settings.hiddenHardwareTypes=[];
  async function click(action,dataset={}){
   return workspace.handle({target:{closest:selector=>
-   selector==='[data-work]'?{dataset:{work:action,...dataset}}:null},
+   selector==='[data-work]'?{dataset:{work:action,...dataset},closest:()=>({querySelector:()=>({value:dataset.electricalPreset||''})})}:null},
    preventDefault(){},stopPropagation(){}},S,h);
  }
  await click('add-system',{kind:'liquid'});
@@ -273,7 +274,7 @@ const h={
  assert.equal(radResult,true);
  radiator=S.settings.coolingSystems.find(x=>x.id==='loop-1')
    .components.find(x=>x.id==='fans-1');
- assert.equal(radiator.electrical.quantity,19,
+ assert.equal(radiator.electrical.quantity,1,
    'ARCTIC button must persist the preset without cfg initialization errors');
  assert.equal(radiator.electrical.ampsPerUnit,0.11);
  assert.equal(radiator.electrical.volts,12);
@@ -288,7 +289,7 @@ const h={
    .components.find(x=>x.id==='pump-1');
  assert.equal(pump.electrical.wattsPerUnit,18,
    'MCP355 preset button must execute through the actual click handler');
- assert.match(workspace.render(S,'cooling',h),/43.08 W/);
+ assert.match(workspace.render(S,'cooling',h),/19.32 W/);
  // Locked components must reject preset application.
  await click('toggle-cooling-lock',{id:'loop-1'});
  radiator=S.settings.coolingSystems.find(x=>x.id==='loop-1')

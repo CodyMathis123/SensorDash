@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -120,6 +120,7 @@ app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/jav
 app.MapGet("/history-insights.js", () => Resource("history-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-electrical.js", () => Resource("cooling-electrical.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
+app.MapGet("/api/cooling-presets", () => Results.Ok(CoolingPresetCatalog.Items));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
     app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
