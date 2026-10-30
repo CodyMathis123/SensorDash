@@ -13,6 +13,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release identity
+        shell: pwsh
+        run: |
+          node scripts/test-release.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Release policy failed" }
+          $v = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.SensorDashVersion
+          "SENSORDASH_VERSION=$v" >> $env:GITHUB_ENV
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
@@ -311,6 +320,9 @@ jobs:
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify upgrades, duplicate recovery, repair and downgrade rejection
+        shell: pwsh
+        run: ./scripts/Test-MsiUpgrade.ps1
       - name: Verify MSI installation and uninstallation on Windows
         shell: pwsh
         run: |
@@ -352,7 +364,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.8.2-x64
+          name: SensorDash-Setup-${{ env.SENSORDASH_VERSION }}-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

@@ -21,6 +21,10 @@ Check each command's exit status. The Windows workflow is authoritative for the 
 
 ## Required PR workflow
 
+Release identity lives in `Directory.Build.props`: increment `SensorDashVersion` and generate a new `SensorDashProductCode` for shipped application/installer changes. Keep `SensorDashUpgradeCode` unchanged. Executable, MSI and artifact naming consume that single source. PR CI enforces advancement relative to the base revision. Rebuilds of the same release retain their ProductCode; changed distributed payloads require a new version. Use the exact tested MSI for distribution rather than silently replacing a released artifact.
+
+The disposable Windows runner tests two legacy 0.8.2 registrations, replacement with the new version, one remaining registration, service restart, repeat installation, repair, downgrade blocking, uninstall and user-data preservation. `scripts/Test-MsiUpgrade.ps1` must never be run on a personal machine.
+
 1. Inspect relevant implementation and tests; make a focused change on a branch from `Production`.
 2. Run appropriate local checks, review the diff, update documentation and add an ADR only for meaningful architectural decisions.
 3. Push and create/update a PR targeting `Production`. Its description states the problem, resulting behavior, validation and known limits.

@@ -14,6 +14,8 @@ Read [project and source map](docs/project.md), [development workflow](docs/deve
 - Record significant architectural decisions in an ADR; routine fixes need only clear code and a PR description. Do not add parallel agent/tool-specific rule files that duplicate this document.
 
 ## Completion policy
+For shipped application or installer changes, advance the three-part version and assign a new release ProductCode in `Directory.Build.props` before building. Keep the UpgradeCode permanent and the ProductCode stable across builds of that release. Never distribute changed payloads under an already shipped version. Follow [MSI release identity](docs/adr/0002-msi-release-identity.md); the Windows upgrade regression and release-policy gate must pass before merge.
+
 The owner authorizes the normal delivery loop: implement, test, push a PR, run the Windows pipeline, inspect the complete result, and merge when all required tests and the pipeline pass. No additional merge confirmation is needed for that loop.
 
 Follow [the full workflow](docs/development.md). Never merge on a pending, failed, cancelled or skipped validation run. Validate the latest PR revision; new commits require a new run. Respect branch protection and review requirements. Report concrete blockers rather than treating local environment failures as successful validation. After merging, monitor the Production run and report its result.
