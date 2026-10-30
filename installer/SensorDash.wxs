@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="SensorDash"
+           Manufacturer="CodyMathis" Version="0.8.2" Scope="perMachine"
+           UpgradeCode="6D8F4B3B-3780-4A7C-AD1D-58343B1AD2CE">
+    <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of SensorDash is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <!-- Advertised EXE shortcuts require icon data in PE format with an .exe Icon ID.
+         The tiny build-only carrier contains the same icon as SensorDash.exe. -->
+    <Icon Id="SensorDashShortcutIcon.exe" SourceFile="$(var.PublishDir)\..\installer-assets\SensorDashShortcutIcon.exe" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="SensorDash">
+        <Component Id="SensorDashExecutable" Guid="*">
+          <File Id="SensorDashExe" Source="$(var.PublishDir)\SensorDash.exe" KeyPath="yes">
+            <Shortcut Id="OpenSensorDash" Directory="ProgramMenuFolder" Name="SensorDash"
+                      Description="Open SensorDash hardware dashboard" Advertise="yes" Icon="SensorDashShortcutIcon.exe" WorkingDirectory="INSTALLFOLDER" />
+          </File>
+          <ServiceInstall Id="InstallSensorDashCollector" Name="SensorDashCollector"
+                          DisplayName="SensorDash Collector"
+                          Description="Hardware telemetry and opt-in fan control; local named-pipe IPC only."
+                          Type="ownProcess" Start="auto" ErrorControl="normal"
+                          Arguments="--collector" Vital="yes" />
+          <ServiceControl Id="ControlSensorDashCollector" Name="SensorDashCollector"
+                          Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="TrayAutoStart" Guid="*">
+          <RegistryValue Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                         Name="SensorDash"
+                         Type="string"
+                         Value="&quot;[INSTALLFOLDER]SensorDash.exe&quot; --desktop --no-browser"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="SensorDash" Level="1">
+      <ComponentRef Id="SensorDashExecutable" />
+      <ComponentRef Id="TrayAutoStart" />
+    </Feature>
+  </Package>
+</Wix>

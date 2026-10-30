@@ -1,0 +1,9 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+    <OutputName>SensorDash-Setup-0.8.2-x64</OutputName>
+    <DefineConstants>PublishDir=$(MSBuildThisFileDirectory)..\dist</DefineConstants>
+    <OutputPath>$(MSBuildThisFileDirectory)..\installer-output\</OutputPath>
+  </PropertyGroup>
+</Project>

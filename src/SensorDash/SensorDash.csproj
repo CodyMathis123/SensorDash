@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <OutputType>WinExe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SensorDash</AssemblyName>
+    <Version>0.8.2</Version>
+    <ApplicationIcon>Assets\SensorDash.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <Target Name="GenerateSensorDashApplicationIcon" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Generate-SensorDashIcon.ps1&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\Assets\SensorDash.ico&quot;" />
+  </Target>
+  <ItemGroup>
+    <None Include="Assets\SensorDash.ico" CopyToPublishDirectory="Always" TargetPath="SensorDash.ico" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
+    <EmbeddedResource Include="wwwroot/index.html" LogicalName="SensorDash.Web.index.html" />
+    <EmbeddedResource Include="wwwroot/app.js" LogicalName="SensorDash.Web.app.js" />
+    <EmbeddedResource Include="wwwroot/workspace.js" LogicalName="SensorDash.Web.workspace.js" />
+    <EmbeddedResource Include="wwwroot/fan-commissioning.js" LogicalName="SensorDash.Web.fan-commissioning.js" />
+    <EmbeddedResource Include="wwwroot/fan-control-ux.js" LogicalName="SensorDash.Web.fan-control-ux.js" />
+    <EmbeddedResource Include="wwwroot/fan-control-debug.js" LogicalName="SensorDash.Web.fan-control-debug.js" />
+    <EmbeddedResource Include="wwwroot/workspace-locks.js" LogicalName="SensorDash.Web.workspace-locks.js" />
+    <EmbeddedResource Include="wwwroot/fan-feedback.js" LogicalName="SensorDash.Web.fan-feedback.js" />
+    <EmbeddedResource Include="wwwroot/cooling-insights.js" LogicalName="SensorDash.Web.cooling-insights.js" />
+    <EmbeddedResource Include="wwwroot/cooling-timeline.js" LogicalName="SensorDash.Web.cooling-timeline.js" />
+    <EmbeddedResource Include="wwwroot/chart-gaps.js" LogicalName="SensorDash.Web.chart-gaps.js" />
+    <EmbeddedResource Include="wwwroot/chart-time-axis.js" LogicalName="SensorDash.Web.chart-time-axis.js" />
+    <EmbeddedResource Include="wwwroot/history-insights.js" LogicalName="SensorDash.Web.history-insights.js" />
+    <EmbeddedResource Include="wwwroot/cooling-electrical.js" LogicalName="SensorDash.Web.cooling-electrical.js" />
+    <EmbeddedResource Include="wwwroot/style.css" LogicalName="SensorDash.Web.style.css" />
+  </ItemGroup>
+</Project>

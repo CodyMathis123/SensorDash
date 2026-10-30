@@ -1,0 +1,359 @@
+name: Windows MSI and portable build
+# Full Windows/MSI validation runs only after changes land in Production
+# or through an explicit Actions -> Run workflow request.
+on:
+  push:
+    branches: [Production]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
+      - name: Check dashboard JavaScript syntax
+        run: |
+          node --check src/SensorDash/wwwroot/app.js
+          node --check src/SensorDash/wwwroot/workspace.js
+          node --check src/SensorDash/wwwroot/fan-commissioning.js
+          node --check src/SensorDash/wwwroot/fan-control-ux.js
+          node --check src/SensorDash/wwwroot/fan-control-debug.js
+          node --check src/SensorDash/wwwroot/workspace-locks.js
+          node --check src/SensorDash/wwwroot/fan-feedback.js
+          node --check src/SensorDash/wwwroot/cooling-insights.js
+          node --check src/SensorDash/wwwroot/cooling-timeline.js
+          node --check src/SensorDash/wwwroot/chart-gaps.js
+          node --check src/SensorDash/wwwroot/chart-time-axis.js
+          node --check src/SensorDash/wwwroot/history-insights.js
+          node --check src/SensorDash/wwwroot/cooling-electrical.js
+      - name: Test configurable cooling systems and sensor usage
+        run: node scripts/test-workspace.cjs
+      - name: Test gap-aware charts and hover behavior
+        run: node scripts/test-chart-gaps.cjs
+      - name: Test multi-day calendar axes and date tooltips
+        run: node scripts/test-chart-time-axis.cjs
+      - name: Test overview peaks and storage insights
+        run: node scripts/test-history-insights.cjs
+      - name: Test fan and pump electrical component modeling
+        run: node scripts/test-cooling-electrical.cjs
+      - name: Test fan commissioning frontend contracts
+        run: node scripts/test-fan-commissioning.cjs
+      - name: Test sleep resume fan diagnostics
+        run: node scripts/test-fan-resume.cjs
+      - name: Test fan profile review and editor locks
+        run: node scripts/test-fan-review.cjs
+      - name: Test role-aware Cooling Systems analysis
+        run: node scripts/test-cooling-phase1.cjs
+      - name: Check tray editor and fan curve UI contracts
+        shell: pwsh
+        run: |
+          $workspace = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $css = Get-Content 'src/SensorDash/wwwroot/style.css' -Raw
+          if ($workspace -notmatch 'data-curve-temperature' -or $workspace -notmatch 'data-curve-percentage') {
+            throw 'Missing numeric curve point editor'
+          }
+          if ($workspace -match 'data-curve-points=') { throw 'Comma-separated fan curve editor should be removed' }
+          if ($css -notmatch 'grid-template-areas:"index sensor label color precision remove"') {
+            throw 'Tray precision/color controls lack dedicated layout tracks'
+          }
+      - name: Check generic collection and visibility editor contracts
+        shell: pwsh
+        run: |
+          $appJs = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          $workspace = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $model = Get-Content 'src/SensorDash/HardwareCollection.cs' -Raw
+          $collector = Get-Content 'src/SensorDash/Program.cs' -Raw
+          if ($appJs -notmatch 'data-collect-group' -or $appJs -notmatch 'data-collect-device') {
+            throw 'Generic hardware collection controls missing'
+          }
+          if ($appJs -match 'collectNetworkSensors' -or $collector -match 'CollectNetworkSensors') {
+            throw 'Legacy network-only collection switch must not be used'
+          }
+          if ($model -notmatch 'IsCpuEnabled' -or $model -notmatch 'IsNetworkEnabled' -or
+              $model -notmatch 'IsPowerMonitorEnabled' -or $model -notmatch 'IsStorageEnabled') {
+            throw 'Missing LHM family hardware switches'
+          }
+          if ($collector -notmatch 'HardwareCollection.CreateComputer' -or
+              $collector -notmatch 'DisabledCollectionDeviceIds') {
+            throw 'Service collection must use the generic hardware/group switch'
+          }
+          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-dashboard-lock') {
+            throw 'Sensor usage or dashboard locking missing'
+          }
+      - name: Verify experimental fan-control security boundary
+        shell: pwsh
+        run: |
+          $backend = Get-Content 'src/SensorDash/ServiceBridge.cs' -Raw
+          $admin = Get-Content 'src/SensorDash/AdminFanControl.cs' -Raw
+          $runtime = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          if ($backend -notmatch 'fanOutputs' -or $backend -match '"arm"\s*=>') {
+            throw 'Only read-only control status may be accessible from telemetry pipe'
+          }
+          if ($admin -notmatch 'BuiltinAdministratorsSid' -or
+              $admin -match 'AuthenticatedUserSid') {
+            throw 'Hardware-control pipe must remain administrator-only'
+          }
+          if ($runtime -notmatch 'SetDefault\(' -or $runtime -notmatch 'SetSoftware\(' -or
+              $runtime -notmatch 'MaxSessionSeconds') {
+            throw 'Timed hardware ownership/release implementation missing'
+          }
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          if ($ui -notmatch 'Request elevated takeover' -or $ui -notmatch 'fan-release') {
+            throw 'Missing explicit live fan-control UI actions'
+          }
+      - name: Verify fan control accepts LHM initial modes and honors duty range
+        shell: pwsh
+        run: |
+          $control = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          if ($control -match 'control.ControlMode != ControlMode.Default') {
+            throw 'LHM Undefined mode must not block a configured PWM channel'
+          }
+          if ($control -notmatch 'SupportsTestRange\(' -or $control -notmatch 'CanApplyManualDuty\(') {
+            throw 'Missing per-channel PWM validation'
+          }
+          if ($ui -match 'firmware recovery after a power loss' -or $ui -notmatch 'I have closed other fan-control software') {
+            throw 'Fan control acknowledgment should be concise and accurate'
+          }
+      - name: Verify persistent fan-control and performance contracts
+        shell: pwsh
+        run: |
+          $model = Get-Content 'src/SensorDash/PersistentFanProfiles.cs' -Raw
+          $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
+          $app = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          $html = Get-Content 'src/SensorDash/wwwroot/index.html' -Raw
+          $writer = Get-Content 'src/SensorDash/FanPwmChannels.cs' -Raw
+          $planner = Get-Content 'src/SensorDash/FanProfilePlanner.cs' -Raw
+          if ($model -notmatch 'approved-fan-profiles.json' -or
+              $writer -notmatch 'SetDefault\(' -or $writer -notmatch 'SetSoftware\(' -or
+              $model -notmatch 'FanPwmChannelAdapter.Wrap') {
+            throw 'Missing approved persistent control and hardware boundary'
+          }
+          if ($planner -notmatch 'targets.Max' -or
+              $ui -notmatch 'starter-radiators' -or $ui -notmatch 'starter-nvme') {
+            throw 'Missing CPU/GPU MAX and NVMe fan profiles'
+          }
+          if ($app -notmatch 'HISTORY_CACHE_LIMIT' -or $app -notmatch 'tipW' -or
+              $html -match 'Curve simulation only') {
+            throw 'Chart cache, hover tooltip, or live-control footer missing'
+          }
+      - name: Check polling / rendering separation
+        shell: pwsh
+        run: |
+          $js = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
+          if ($js -notmatch 'CHART_PAINT_INTERVAL_MS=8000') { throw 'Missing throttled chart painting' }
+          if ($js -notmatch 'scheduleChartPaint\(\)') { throw 'Missing chart paint scheduling' }
+          if ($js -notmatch 'if\(document.hidden\|\|chartInUse\(\)\)') { throw 'Missing hover redraw guard' }
+          if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
+      - name: Publish portable Windows build
+        run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
+      - name: Validate generic models and simulation engine
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path 'dist/SensorDash.exe').Path
+          $test = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
+          if ($test.ExitCode -ne 0) {
+            $log = Join-Path $env:TEMP 'SensorDash-workspace-selftest-error.txt'
+            if (Test-Path $log) { Get-Content $log }
+            throw "Workspace self-test failed: $($test.ExitCode)"
+          }
+          Write-Host 'Validated virtual sensors, curves, generic hardware collection, cooling references, history rules and tray icons'
+      - name: Verify executable and assets
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/SensorDash.exe)) { throw 'Missing SensorDash.exe' }
+          # Generated during managed build; copy into the portable artifact for inspection.
+          Copy-Item 'src/SensorDash/Assets/SensorDash.ico' 'dist/SensorDash.ico' -Force
+          if (!(Test-Path dist/SensorDash.ico)) { throw 'Missing published SensorDash icon' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path dist/SensorDash.ico))
+          if ($bytes.Length -lt 1000 -or $bytes[0] -ne 0 -or $bytes[1] -ne 0 -or $bytes[2] -ne 1 -or $bytes[3] -ne 0 -or $bytes[4] -lt 4) {
+            throw 'The multi-resolution SensorDash.ico is invalid'
+          }
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/SensorDash.exe).Path)
+          if (!$icon -or $icon.Width -lt 16) { throw 'Embedded executable icon is missing' }
+          $icon.Dispose()
+          Write-Host 'Published executable includes SensorDash icon'
+          if (!(Test-Path dist/wwwroot/index.html)) { throw 'Missing dashboard' }
+          Copy-Item README.md dist/README.txt
+      - name: Build tiny advertised-shortcut icon carrier
+        run: dotnet build tools/SensorDashIconCarrier/SensorDashIconCarrier.csproj -c Release -r win-x64 -o installer-assets
+      - name: Verify branded shortcut icon resource
+        shell: pwsh
+        run: |
+          $carrier = Resolve-Path 'installer-assets/SensorDashShortcutIcon.exe'
+          if (!(Test-Path $carrier)) { throw 'Missing MSI shortcut icon carrier executable' }
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($carrier.Path)
+          if (!$icon -or $icon.Width -lt 16) { throw 'Shortcut icon carrier has no embedded icon' }
+          $icon.Dispose()
+      - name: Build Windows MSI installer
+        run: dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
+      - name: Confirm installer created
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse | Select-Object -First 1
+          if (!$msi) { throw 'WiX did not produce an MSI' }
+          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes)"
+      - name: Smoke-test local HTTP API and dashboard
+        shell: pwsh
+        run: |
+          # Prove that the executable serves its UI with NO external webroot,
+          # and with a completely unrelated working directory.
+          $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
+          New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
+          Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          # Exercise both components, including named-pipe service communication,
+          # without installing a service on the CI runner.
+          $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          Start-Sleep -Seconds 3
+          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/status' -TimeoutSec 2
+                if ($status.app -eq 'SensorDash') { $ready = $true; break }
+              } catch { }
+            }
+            if (!$ready) { throw 'SensorDash did not open its local API' }
+            $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
+            if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
+            $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
+            if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
+          $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
+          if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
+          $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+          if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
+          $outputs = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/fan-control' -TimeoutSec 8
+          if (!$outputs.persistent -or !$outputs.persistent.persistent -or
+              $outputs.persistent.profiles.Count -ne 0) {
+            throw 'Installed v0.6 must start with no active fan-control approvals'
+          }
+          if (!$outputs.status -or !$outputs.experimental -or !$outputs.requiresAdministrator) {
+            throw 'Control inventory is not available or is incorrectly configured'
+          }
+          $denied = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/fan-control/authorize' -Method Post `
+            -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
+            -SkipHttpErrorCheck
+          if ($denied.StatusCode -ne 403) {
+            throw 'Cross-origin or originless write requests must be rejected before UAC'
+          }
+            if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
+            if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
+            $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
+            if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
+            # Invoke-RestMethod deserializes the JSON array into a PowerShell
+            # array. Count that array directly; wrapping it in @() would treat
+            # the entire array as one pipeline object on some PS versions.
+            $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
+            if ($groups.Count -ne 8) { throw "Expected eight collection families, got $($groups.Count)" }
+            $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
+              throw 'Missing Network from generic hardware collection capabilities'
+            }
+
+            # Save real workspace configurations across the UI -> named pipe -> service.
+            $settings.disabledCollectionGroups = @('Network')
+            $settings.disabledCollectionDeviceIds = @()
+            $settings.dashboards = @(@{
+              id='ci-dashboard'; name='CI Workspace';
+              widgets=@(@{id='ci-widget';title='CPU history';kind='chart';sensorIds=@('/ci/temperature')})
+            })
+            $settings.coolingSystems = @(@{
+              id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
+                @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
+              )
+            })
+            $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
+            $settings.virtualSensors = @(@{id='virtual:ci-max';name='CI Max';operation='max';sensorIds=@('/ci/temperature')})
+            $settings.simulatedFanCurves = @(@{
+              id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
+              outputSensorId='';maxSampleAgeSeconds=30;
+              points=@(@{temperature=30;percent=25},@{temperature=75;percent=100})
+            })
+            $body = ConvertTo-Json $settings -Depth 30 -Compress
+            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
+              throw 'Cooling component role not persisted correctly'
+            }
+            if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
+              throw 'Generic workspace settings did not round-trip through named pipe'
+            }
+            $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
+              throw 'Generic collection family setting did not persist through service IPC'
+            }
+            if ($persisted.dashboards[0].widgets[0].kind -ne 'chart' -or $persisted.simulatedFanCurves[0].id -ne 'ci-curve') {
+              throw 'Collector did not persist workspace and simulated curve configuration'
+            }
+            Start-Sleep -Seconds 2
+            $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+            $curve = @($preview.results | Where-Object { $_.id -eq 'ci-curve' })
+            if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
+              throw 'Missing-input simulated curve must produce no hardware target'
+            }
+            Write-Host 'Verified configurable cooling systems, dashboards, tray icons, virtual sensors and simulated curves'
+
+            Write-Host 'Verified desktop + collector named pipe + browser shell'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Verify MSI installation and uninstallation on Windows
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem installer-output -Filter '*.msi' -Recurse | Select-Object -First 1).FullName
+          if (!$msi) { throw 'No MSI found' }
+          $installLog = Join-Path $env:RUNNER_TEMP 'sensordash-install.log'
+          $uninstallLog = Join-Path $env:RUNNER_TEMP 'sensordash-uninstall.log'
+          $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$msi`" /qn /norestart /L*v `"$installLog`"" -Wait -PassThru
+          Write-Host "MSI install exit code: $($install.ExitCode)"
+          if ($install.ExitCode -ne 0) {
+            if (Test-Path $installLog) { Get-Content $installLog -Tail 100 }
+            throw "MSI install failed: $($install.ExitCode)"
+          }
+          $service = Get-Service -Name 'SensorDashCollector' -ErrorAction Stop
+          if ($service.Status -ne 'Running') { throw "Installed collector did not start: $($service.Status)" }
+          $startup = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction Stop
+          if (!$startup.SensorDash) { throw 'MSI did not create tray autostart entry' }
+          if (!(Test-Path "$env:ProgramFiles\SensorDash\SensorDash.exe")) { throw 'MSI did not install executable' }
+          $commonPrograms = [Environment]::GetFolderPath('CommonPrograms')
+          $startLink = Join-Path $commonPrograms 'SensorDash.lnk'
+          if (!(Test-Path $startLink)) { throw "MSI did not create all-users Start Menu shortcut: $startLink" }
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
+          Write-Host "Installed Start Menu shortcut: $startLink"
+          Write-Host "Start Menu shortcut icon: $($shortcut.IconLocation)"
+
+          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$uninstallLog`"" -Wait -PassThru
+          Write-Host "MSI uninstall exit code: $($uninstall.ExitCode)"
+          if ($uninstall.ExitCode -ne 0) {
+            if (Test-Path $uninstallLog) { Get-Content $uninstallLog -Tail 100 }
+            throw "MSI uninstall failed: $($uninstall.ExitCode)"
+          }
+          if (Get-Service -Name 'SensorDashCollector' -ErrorAction SilentlyContinue) {
+            throw 'Uninstall left collector service registered'
+          }
+          if (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SensorDash' -ErrorAction SilentlyContinue) {
+            throw 'Uninstall left tray startup entry registered'
+          }
+          if (Test-Path $startLink) { throw 'MSI uninstall left the Start Menu shortcut behind' }
+          Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SensorDash-Setup-0.8.2-x64
+          path: installer-output/**/*.msi
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SensorDash-win-x64
+          path: dist/**
+          if-no-files-found: error
