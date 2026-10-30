@@ -343,7 +343,9 @@ jobs:
           if (!$msi) { throw 'No MSI found' }
           $installLog = Join-Path $env:RUNNER_TEMP 'sensordash-install.log'
           $uninstallLog = Join-Path $env:RUNNER_TEMP 'sensordash-uninstall.log'
-          $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$msi`" /qn /norestart /L*v `"$installLog`"" -Wait -PassThru
+          $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$msi`" /qn /norestart /L*v `"$installLog`"" -WindowStyle Hidden -PassThru
+          if (!$install.WaitForExit(180000)) { Get-Content $installLog -Tail 100; throw "MSI install timed out" }
+          $install.Refresh()
           Write-Host "MSI install exit code: $($install.ExitCode)"
           if ($install.ExitCode -ne 0) {
             if (Test-Path $installLog) { Get-Content $installLog -Tail 100 }
@@ -361,7 +363,9 @@ jobs:
           Write-Host "Installed Start Menu shortcut: $startLink"
           Write-Host "Start Menu shortcut icon: $($shortcut.IconLocation)"
 
-          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$uninstallLog`"" -Wait -PassThru
+          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$uninstallLog`"" -WindowStyle Hidden -PassThru
+          if (!$uninstall.WaitForExit(180000)) { Get-Content $uninstallLog -Tail 100; throw "MSI uninstall timed out" }
+          $uninstall.Refresh()
           Write-Host "MSI uninstall exit code: $($uninstall.ExitCode)"
           if ($uninstall.ExitCode -ne 0) {
             if (Test-Path $uninstallLog) { Get-Content $uninstallLog -Tail 100 }
@@ -380,7 +384,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-diagnostics
-          path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
+          path: |
+            ${{ runner.temp }}/sensordash-upgrade-test/*.log
+            ${{ runner.temp }}/sensordash-install.log
+            ${{ runner.temp }}/sensordash-uninstall.log
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
