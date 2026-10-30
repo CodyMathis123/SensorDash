@@ -34,3 +34,5 @@ Read the relevant source and tests for exact current behavior. This map describe
 `CoolingElectricalConfig.PowerCurve` stores per-unit speed/power points; see [power curves](power-curves.md) for source data and interpolation rules.
 
 `presets/cooling/*.json` contains bundled fan/pump specifications. `CoolingPresetCatalog.cs` serves embedded snapshots; [contribution guide](../presets/README.md), schema and `scripts/test-cooling-presets.cjs` define the data contract.
+
+`PawnIoStatus.cs` probes optional shared driver availability in the collector. `driver-status.js` presents actionable status without rebuilding active forms; see [hardware driver setup](hardware-drivers.md).

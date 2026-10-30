@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -119,6 +119,7 @@ app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; c
 app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
 app.MapGet("/history-insights.js", () => Resource("history-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-electrical.js", () => Resource("cooling-electrical.js", "text/javascript; charset=utf-8"));
+app.MapGet("/driver-status.js", () => Resource("driver-status.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/cooling-presets", () => Results.Ok(CoolingPresetCatalog.Items));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
@@ -126,6 +127,7 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
     app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
     collectorOnline = state.Latest is { Error: null },
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
+    pawnIo = state.Latest?.PawnIo,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
     process = ProcessTelemetry.Snapshot(),
     lastSample = state.Latest?.Timestamp,
@@ -283,7 +285,7 @@ public static class ProcessTelemetry
 }
 public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null, string? DeviceId = null);
 public sealed record HardwareDevice(string Id, string Name, string Type, int SensorCount);
-public sealed record SensorFrame(DateTimeOffset Timestamp, List<SensorReading> Sensors, string? Error, List<HardwareDevice>? Devices = null);
+public sealed record SensorFrame(DateTimeOffset Timestamp, List<SensorReading> Sensors, string? Error, List<HardwareDevice>? Devices = null, PawnIoStatus? PawnIo = null);
 public static class SecurityInfo {
     public static bool IsAdministrator() {
         try {
@@ -592,6 +594,7 @@ public sealed partial class HistoryStore {
 public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls, ILogger<SensorWorker> logger) : BackgroundService {
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
+    private readonly PawnIoMonitor _pawnIo = new();
     private string? _activeCollectionSignature;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
@@ -600,6 +603,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
+            var driver = _pawnIo.Read(cfg);
             try {
                 var collectionSignature = HardwareCollection.Signature(cfg);
                 if (_computer != null && _activeCollectionSignature != collectionSignature) {
@@ -626,7 +630,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                         pausedDevices);
                 var baseFrame = new SensorFrame(now, readings, null, devices);
                 readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
-                var frame = new SensorFrame(now, readings, null, devices);
+                var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
@@ -641,7 +645,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 logger.LogError(ex, "Sensor collection failed");
                 controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");
                 try { File.AppendAllText(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash", "SensorDash.log"), $"{DateTimeOffset.Now}: {ex}\n"); } catch { }
-                state.Publish(new SensorFrame(DateTimeOffset.UtcNow, [], ex.GetType().Name + ": " + ex.Message));
+                state.Publish(new SensorFrame(DateTimeOffset.UtcNow, [], ex.GetType().Name + ": " + ex.Message, PawnIo: driver));
                 try { _computer?.Close(); } catch { }
                 _computer = null;
                 try { await Task.Delay(TimeSpan.FromSeconds(8), stoppingToken); } catch (OperationCanceledException) { }

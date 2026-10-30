@@ -263,7 +263,7 @@ A successful [Windows build](https://github.com/CodyMathis123/SensorDash/actions
 
 The service's SQLite history and settings live under `%ProgramData%\SensorDash`. They are retained across MSI updates. Prior prototype-specific preferences are not maintained with compatibility shims; adjust any old custom configurations using the new editors if needed.
 
-The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens only on `http://127.0.0.1:8765/`. Hardware monitoring, fan-curve simulation, and locally approved fan profiles work without cloud access. The MSI does not install, replace or configure Fan Control or PawnIO.
+The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens only on `http://127.0.0.1:8765/`. Hardware monitoring, fan-curve simulation, and locally approved fan profiles work without cloud access. The MSI does not install, replace or configure Fan Control or the shared PawnIO driver. SensorDash checks PawnIO in the collector and shows a setup warning plus status in Settings → Hardware driver. Install/update the official signed edition from https://pawnio.eu/ when prompted, then restart SensorDash Collector or Windows. PawnIO 2.0 or newer is needed for supported low-level CPU/motherboard access in LibreHardwareMonitor 0.9.6; other supported sensors can work without it. SensorDash uninstall leaves PawnIO intact. See [hardware driver setup](docs/hardware-drivers.md).
 
 ## Build and test
 
