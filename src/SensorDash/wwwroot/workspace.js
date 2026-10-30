@@ -85,7 +85,7 @@ const SDWorkspace = (() => {
   '<select '+id+'><option value="">'+safe(empty)+'</option>'+
   S.sensors.filter(s=>(s.id===selected||!isHidden(S,s))&&predicate(s)).sort((a,b)=>a.device.localeCompare(b.device)||a.name.localeCompare(b.name))
     .map(s=>'<option value="'+attr(s.id)+'" '+(selected===s.id?'selected':'')+'>'+
-      safe(s.device+' / '+(S.settings?.aliases?.[s.id]||s.name)+' ('+s.type+')'+(isHidden(S,s)?' [Hidden]':''))+'</option>').join('')+'</select>';
+      safe((S.settings?.aliases?.[s.id]||(s.device+' / '+s.name))+' ('+s.type+')'+(isHidden(S,s)?' [Hidden]':''))+'</option>').join('')+'</select>';
  const button=(action,text,data='',secondary=true)=>
   '<button type="button" class="btn '+(secondary?'secondary':'')+'" data-work="'+action+'" '+data+'>'+safe(text)+'</button>';
  const card=(title,description,body)=>
@@ -171,7 +171,7 @@ const SDWorkspace = (() => {
    const shown=widgets.map(w=>{
      const sensors=w.sensorIds.map(id=>S.byId.get(id)).filter(Boolean);
      let body='';
-     if(w.kind==='chart')body=h.chart(sensors, sensors.length && sensors.every(s=>s.type===sensors[0].type)?unit(sensors[0].type):'');
+     if(w.kind==='chart')body=h.chart(sensors, sensors.length && sensors.every(s=>s.type===sensors[0].type)?unit(sensors[0].type):'',false,'dashboard:'+chosen.id);
      else if(w.kind==='readings')body=sensors.map(s=>'<div class="stat-row"><label>'+safe(S.settings?.aliases?.[s.id]||s.name)+'</label><strong data-live-reading="'+attr(s.id)+'" data-live-format="unit" data-live-unit="'+attr(unit(s.type))+'">'+value(s)+' '+unit(s.type)+'</strong></div>').join('');
      else body=sensors.slice(0,1).map(s=>h.metric(S.settings?.aliases?.[s.id]||s.name,s,
             '#62d5ce',s.device,unit(s.type),icon[s.type]||'◈')).join('');
@@ -677,7 +677,7 @@ const SDWorkspace = (() => {
    return card('Storage hardware','Storage sensors appear in the same catalog as every other device',
      '<p class="note">Storage polling can be slower than the control engine. Values carry timestamps so stale readings can be identified by simulations.</p>'+
      (storage.length?storage.map(s=>'<div class="stat-row"><label>'+
-       safe((S.settings?.aliases?.[s.id]||s.name)+' · '+s.device)+'</label>'+
+       safe(S.settings?.aliases?.[s.id]||(s.name+' · '+s.device))+'</label>'+
        '<strong data-live-reading="'+attr(s.id)+'" data-live-format="unit" data-live-unit="'+attr(unit(s.type))+'">'+value(s)+' '+unit(s.type)+'</strong></div>').join(''):nothing('No storage sensors discovered'))+
      '<div class="note">Collector access: '+(diag?.isAdministrator?'Elevated':'Unknown')+
      ' · '+(diag?.storagePollSeconds||'—')+' sec storage poll · '+(diag?.storageSensorCount??0)+' storage readings</div>');

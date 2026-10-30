@@ -63,6 +63,14 @@ assert.equal(modules.correlation(x.slice(0,5),y.slice(0,5)),null);
 assert.equal(modules.correlation(x,x.map(p=>({...p,v:20}))),null);
 S.history={cpuP:x,cpuT:y};
 assert.match(modules.analysis(S,sys),/r = 1.00/);
+assert.match(modules.analysis(S,sys),/GPU Heat Source[\s\S]*Waiting for at least 12 paired samples/);
+S.history.gpuP=x.map(p=>({...p,v:8}));S.history.gpuT=y.map(p=>({...p,v:30}));
+assert.match(modules.analysis(S,sys),/GPU Heat Source[\s\S]*Not enough power or temperature variation/);
+S.settings.aliases={gpuP:'GPU board power',gpuT:'GPU hot spot',pump:'Loop pump'};
+assert.match(modules.analysis(S,sys),/GPU board power ↔ GPU hot spot/);
+assert.match(modules.overview(S,sys),/Loop pump/);
+assert.doesNotMatch(modules.overview(S,sys),/Pump tach/);
+assert.equal(values.find(s=>s.id==='pump').name,'Pump tach','Presentation must not mutate discovered names');
 assert.ok(!modules.analysis(S,sys).includes('GPU Watts ↔ GPU Core</span><b>r ='));
 
 S.events=[
@@ -100,6 +108,16 @@ assert.ok(seen[0].includes(now)&&seen[1].includes(now)&&!seen[2].includes(now));
 assert.equal(timelineApi.focus('other',now-3000),true);
 assert.ok(seen[2].includes(now-3000));
 timelineApi.reset();
+const dashboardCharts=['dashboard:one','dashboard:one','dashboard:two'].map(id=>({dataset:{coolingTimeline:id}}));
+charts.push(...dashboardCharts);
+const dashboardDraws=[[],[],[]];
+dashboardCharts.forEach((canvas,i)=>timelineApi.register(canvas,{clear:()=>dashboardDraws[i].push('clear'),draw:t=>dashboardDraws[i].push(t)}));
+timelineApi.hover(dashboardCharts[0],now+123);
+assert.ok(dashboardDraws[0].includes(now+123)&&dashboardDraws[1].includes(now+123));
+assert.ok(!dashboardDraws[2].includes(now+123)&&!seen[0].includes(now+123),'Dashboard hover stays in its dashboard');
+timelineApi.leave(dashboardCharts[0]);
+assert.equal(dashboardDraws[1].at(-1),'clear');
+assert.ok(workspace.includes("false,'dashboard:'+chosen.id)"),'Dashboard charts must opt into their own timeline group');
 assert.equal(timelineApi.hover({dataset:{}},now),false);
 
 for(const role of ['coolant-probe','case-air','room-ambient'])

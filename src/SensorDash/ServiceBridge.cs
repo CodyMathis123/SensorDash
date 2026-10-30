@@ -189,6 +189,7 @@ public sealed class SensorDashTray : ApplicationContext
     // poll opened and deserialized a second redundant 2-second IPC response.
     private readonly DashboardState _display;
     private readonly NotifyIcon _icon;
+    private readonly Form _shutdownWindow;
     private readonly Icon _trayImage;
     private readonly ToolStripMenuItem _collectorStatus;
     private readonly System.Windows.Forms.Timer _statusTimer;
@@ -203,6 +204,13 @@ public sealed class SensorDashTray : ApplicationContext
     public SensorDashTray(DashboardState display,IHostApplicationLifetime lifetime)
     {
         _display=display;
+        // A tray-only ApplicationContext otherwise has no top-level window for
+        // Windows Installer's close message. Closing this hidden window stops
+        // the desktop HTTP host and disposes the tray through normal shutdown.
+        _shutdownWindow = new Form { Text = "SensorDash desktop shutdown", ShowInTaskbar = false };
+        _shutdownWindow.FormClosing += (_, _) => lifetime.StopApplication();
+        _shutdownWindow.FormClosed += (_, _) => ExitThread();
+        _ = _shutdownWindow.Handle;
         var menu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("Open SensorDash", null, (_, _) => Open())
         { Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) };
@@ -338,6 +346,7 @@ public sealed class SensorDashTray : ApplicationContext
             foreach (var icon in _readoutIcons) { icon.Visible = false; icon.Dispose(); }
             foreach (var icon in _readoutImages) icon.Dispose();
             _icon.Visible = false; _icon.Dispose(); _trayImage.Dispose();
+            _shutdownWindow.Dispose();
         }
         base.Dispose(disposing);
     }

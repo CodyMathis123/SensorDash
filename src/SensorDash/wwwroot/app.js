@@ -67,7 +67,7 @@ function explorer(){
  });
  const chosen=candidates.find(x=>x.id===S.selected)||candidates[0];
  if(chosen)S.selected=chosen.id;
- const indexText=x=>(display(x)+' '+x.id+' '+x.device+' '+x.deviceType+' '+x.type+' '+
+ const indexText=x=>(display(x)+' '+x.name+' '+x.id+' '+x.device+' '+x.deviceType+' '+x.type+' '+
    (usage.get(x.id)||[]).map(u=>u.label).join(' ')).toLowerCase();
  const counts={used:[...usage.keys()].filter(id=>S.byId.has(id)).length,hidden:S.sensors.filter(hidden).length};
  const matches=candidates.filter(x=>indexText(x).includes(S.search.toLowerCase())).length;
@@ -87,7 +87,7 @@ function explorer(){
   rows+='<tr class="'+(selected?'chosen ':'')+(hide?'sensor-hidden':'')+'" data-select="'+esc(x.id)+
    '" data-group-key="'+esc(group)+'" data-search="'+esc(searchText)+'" '+
    (searchText.includes(S.search.toLowerCase())?'':'hidden')+'>'+
-   '<td>'+esc(display(x))+(hide?' <span class="tag">Hidden</span>':'')+'<small>'+esc(x.id)+'</small></td>'+
+   '<td>'+esc(display(x))+(S.settings?.aliases?.[x.id]?'<small>Original: '+esc(x.name)+'</small>':'')+(hide?' <span class="tag">Hidden</span>':'')+'<small>'+esc(x.id)+'</small></td>'+
    '<td>'+esc(x.device)+'</td><td><span class="tag">'+esc(x.type)+'</span></td>'+
    '<td data-live-reading="'+esc(x.id)+'" data-live-format="unit" data-live-unit="'+esc(typeUnit(x.type))+'">'+latest(x)+'</td>'+
    '<td class="explorer-count">'+(references.length?'<b>'+references.length+'</b>':'—')+'</td>'+
@@ -122,7 +122,7 @@ function explorer(){
    '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+
    '" data-usage-system="'+esc(u.systemId||'')+'" data-usage-component="'+esc(u.componentId||'')+'">'+
    esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not referenced by any saved dashboard, cooling component, tray icon, virtual sensor or curve.</p>';
-  return '<div class="full">'+panel('Selected sensor · '+display(chosen),chosen.id+' · '+chosen.device,
+  return '<div class="full">'+panel('Selected sensor · '+display(chosen),'Original: '+chosen.name+' · '+chosen.id+' · '+chosen.device,
    '<div class="alias-editor">'+
     '<div class="field"><label for="sensorAlias">Display name</label><input id="sensorAlias" maxlength="120" value="'+
       esc(S.settings?.aliases?.[chosen.id]||'')+'" placeholder="'+esc(chosen.name)+'"></div>'+
@@ -224,7 +224,7 @@ function settingsView(){
  '<button class="btn secondary tiny" data-remove-threshold="'+esc(id)+'">Remove</button></div>').join('')+
  '<div class="w-add-input"><select id="newThresholdId"><option value="">Choose sensor to monitor</option>'+
  choices.filter(s=>!(s.id in (cfg.highThresholds||{}))).map(s=>
- '<option value="'+esc(s.id)+'">'+esc(s.device+' / '+s.name+' ('+s.type+')')+'</option>').join('')+
+ '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button class="btn secondary" id="addThreshold">+ Threshold</button></div>')+
  panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
  '<p class="note">These values are snapshots, not continuous profiling. Working set is physical memory currently held by the process; private bytes and managed heap are different measures, so they should not be added together.</p>'+
@@ -261,6 +261,7 @@ function heading(){
  byId('heading').innerHTML=`<div class="page-head"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1><p class="sub">${esc(desc)}</p></div><div class="small-date">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}<br>${S.sensors.length} discovered sensors</div></div>`;
 }
 function render(){
+ CoolingTimeline.reset();
  heading();
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
  const frame=S.frame;

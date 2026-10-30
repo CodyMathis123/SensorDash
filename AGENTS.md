@@ -3,6 +3,7 @@
 Read [project and source map](docs/project.md), [development workflow](docs/development.md), and the [ADR index](docs/adr/README.md) before changing code. These are the shared instructions for human and AI contributors; keep them current when architecture or workflow changes.
 
 ## Working rules
+- Configured sensor aliases are the primary display name in selectors, charts and readings. Sensor Explorer exposes and searches both alias and original name; preserve sensor IDs and raw names in stored telemetry. Installer servicing must close the desktop dashboard as well as stop the collector, with a running-desktop regression on the disposable Windows runner.
 - Work on a focused branch targeting `Production`. Preserve unrelated user changes.
 - Inspect the actual implementation before proposing a fix. Prefer small changes and existing modules over new frameworks or dependencies.
 - Add behavioral regression coverage for bugs, persistence, concurrency and control policy. Avoid tests that merely duplicate implementation text.

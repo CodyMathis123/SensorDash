@@ -90,4 +90,11 @@ assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes('CoolingElectrica
 assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes("action==='electrical-preset'"));
 assert.ok(read('src/SensorDash/Program.cs').includes('CoolingElectricalSelfTest.Run()'));
 assert.ok(read('src/SensorDash/wwwroot/index.html').includes('/cooling-electrical.js'));
-console.log('PASS: rated 43.08W, unknown running draw, calibrated/model distinction, source-limit warning and UI persistence');
+S.settings.aliases={pumpRPM:'Loop pump <tach>',radDuty:'Radiator duty',radPower:'Fan bank watts'};
+const aliasedEditor=electrical.editor(S,pump,'component:main:pump1',true);
+assert.match(aliasedEditor,/Loop pump &lt;tach&gt;/);
+assert.doesNotMatch(aliasedEditor,/Pump tach/);
+assert.match(aliasedEditor,/value="pumpRPM"/,'Aliases must not replace saved sensor IDs');
+fans.electrical.powerSensorId='radPower';
+assert.equal(electrical.running(S,fans).detail,'Fan bank watts');
+console.log('PASS: rated 43.08W, unknown running draw, calibrated/model distinction, aliases, source-limit warning and UI persistence');

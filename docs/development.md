@@ -25,6 +25,8 @@ Release identity lives in `Directory.Build.props`: increment `SensorDashVersion`
 
 The disposable Windows runner tests two legacy 0.8.2 registrations, replacement with the new version, one remaining registration, service restart, repeat installation, repair, downgrade blocking, uninstall and user-data preservation. `scripts/Test-MsiUpgrade.ps1` must never be run on a personal machine.
 
+Upgrade, maintenance and uninstall checks launch a desktop dashboard first and verify it exits. WiX application closure is scheduled after service stopping; current desktop builds support graceful close messages, with a bounded fallback for older tray-only processes. Installer logs are uploaded even on failure and each operation has a timeout.
+
 1. Inspect relevant implementation and tests; make a focused change on a branch from `Production`.
 2. Run appropriate local checks, review the diff, update documentation and add an ADR only for meaningful architectural decisions.
 3. Push and create/update a PR targeting `Production`. Its description states the problem, resulting behavior, validation and known limits.

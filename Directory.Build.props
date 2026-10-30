@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <SensorDashVersion>0.8.3</SensorDashVersion>
-    <SensorDashProductCode>87ED298F-9619-4A8D-A9E0-89325CE4D298</SensorDashProductCode>
+    <SensorDashVersion>0.8.4</SensorDashVersion>
+    <SensorDashProductCode>D59E04B4-7790-4F2A-9A21-28CFA2FCE9B9</SensorDashProductCode>
     <SensorDashUpgradeCode>6D8F4B3B-3780-4A7C-AD1D-58343B1AD2CE</SensorDashUpgradeCode>
   </PropertyGroup>
 </Project>

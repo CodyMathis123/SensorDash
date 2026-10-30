@@ -61,7 +61,7 @@ const FanCommissioning=(()=>{
    '<div class="w-actions"><label>2 · Friendly name<input id="fcLabel" maxlength="80" value="'+
    esc(map?.label||'')+'" placeholder="e.g. Right radiator fans"></label>'+
    '<label>Optional tachometer (RPM) sensor<select id="fcRpm">'+
-   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,s.device+' / '+s.name,rpm)).join('')+
+   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,S.settings?.aliases?.[s.id]||(s.device+' / '+s.name),rpm)).join('')+
    '</select></label><button class="btn secondary" data-commissioning="save">Save identification</button>'+
    (map?'<button class="btn secondary" data-commissioning="remove">Forget mapping</button>':'')+'</div>'+
    '<p class="note">Discovered channel: '+esc(output.name)+' · '+esc(output.mode)+
