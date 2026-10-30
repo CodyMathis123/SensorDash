@@ -75,8 +75,10 @@ const CoolingInsights=(()=>{
     ay=matched.reduce((a,p)=>a+p[1],0)/n;
   let sx=0,sy=0,cov=0;
   for(const [a,b] of matched){const dx=a-ax,dy=b-ay;sx+=dx*dx;sy+=dy*dy;cov+=dx*dy;}
-  if(sx/n<1 || sy/n<0.25)return null; // no meaningful load/temp variation
-  return {r:Math.max(-1,Math.min(1,cov/Math.sqrt(sx*sy))),samples:n};
+  // Pearson r is undefined for a constant series. Small but real variation
+  // still has a coefficient; flag its sensitivity rather than hiding it.
+  if(!matched.some(p=>p[0]!==matched[0][0])||!matched.some(p=>p[1]!==matched[0][1])||sx<=0||sy<=0)return null;
+  return {r:Math.max(-1,Math.min(1,cov/Math.sqrt(sx*sy))),samples:n,lowVariation:sx/n<1||sy/n<0.25};
  };
  const correlateHtml=(S,sys)=>{
   const heat=sections(S,sys).filter(p=>p.part.kind==='heat-source');
@@ -86,14 +88,15 @@ const CoolingInsights=(()=>{
    return {part:p.part.name,power,temp,
      result:power&&temp?correlation(S.history?.[power.id],S.history?.[temp.id]):null,
      reason:!power||!temp?'Assign both power and temperature sensors':samples.length<12?
-       'Waiting for at least 12 paired samples (within 15 seconds)':'Not enough power or temperature variation to calculate correlation'};
+       'Waiting for at least 12 paired samples (within 15 seconds)':'Readings are present, but one series is constant in this time range'};
   });
   if(!pairs.length)return '<p class="note">Add a heat source with temperature and power sensors to compare their histories.</p>';
   return '<div class="cooling-correlation-list">'+pairs.map(p=>
    '<div class="cooling-correlation-row"><strong>'+esc(p.part)+'</strong>'+
     '<span>'+esc(p.power?.name||'Power not assigned')+' ↔ '+esc(p.temp?.name||'Temperature not assigned')+'</span>'+
-    (p.result?'<b>r = '+p.result.r.toFixed(2)+'</b><small>'+p.result.samples+' paired samples</small>':
-      '<b>Unavailable</b><small>'+esc(p.reason)+'</small>')+'</div>'
+    (p.result?'<b>r = '+p.result.r.toFixed(2)+'</b><small>'+p.result.samples+' paired samples</small>'+
+      (p.result.lowVariation?'<small class="correlation-note">Low variation—interpret cautiously</small>':''):
+      '<b>Not calculated</b><small class="correlation-note">'+esc(p.reason)+'</small>')+'</div>'
   ).join('')+'</div>'+
   '<p class="note">Pearson r describes simultaneous co-movement, not cooling efficiency or causation. Thermal lag, workload and sensor selection can change it. Independent CPU/GPU readings are not summed.</p>';
  };
