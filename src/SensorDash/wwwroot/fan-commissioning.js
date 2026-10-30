@@ -34,7 +34,7 @@ const FanCommissioning=(()=>{
  const render=S=>{
   const outputs=channels(S);
   if(!outputs.length)return '<section class="panel fc-panel"><h2>Identify · Name · Calibrate · Verify</h2>'+
-   '<p class="note">No PWM outputs discovered. The collector must expose an actual writable control first.</p></section>';
+   '<p class="note">No controllable fan outputs found.</p></section>';
   if(!outputs.some(o=>o.id===selected))selected=outputs[0].id;
   const output=outputs.find(o=>o.id===selected),map=current(S);
   const owner=activeProfile(S,selected);
@@ -50,7 +50,7 @@ const FanCommissioning=(()=>{
    '<tr><td colspan="3">No verified RPM measurements yet</td></tr>';
   const readOnly=owner?'This channel belongs to an enabled profile. Stop the profile before a commissioning test.':'';
   return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan output commissioning</h2>'+
-   '<p>Identify → Name → Calibrate → Verify · No automatic low-duty sweeps</p></div>'+
+   '<p>Identify and test your fans</p></div>'+
    '<span class="pill '+(verified?'':'warn')+'">'+(verified?'Response verified':'Unverified')+'</span></div>'+
    '<div class="help">These are guided, time-limited observations — not automatic fan or pump detection. Never test an essential pump channel. Do not depend on SensorDash to recover from a crash or power loss.</div>'+
    '<div class="w-actions"><label>1 · Physical PWM output<select id="fcChannel">'+
@@ -68,7 +68,7 @@ const FanCommissioning=(()=>{
    ' · supported '+output.minimum+'–'+output.maximum+'% PWM. '+esc(readOnly)+
    ' Selecting an RPM sensor does not prove it belongs to this output.</p>'+
    '<div class="fc-steps"><div><h3>3 · High-duty calibration</h3>'+
-   '<p class="note">Request one 30-second elevated test at 100%, 85%, or 70% PWM. Confirm the correct physical fan bank responds. Wait until RPM settles, then record a sample while the timed test is active. The minimum stable/startup duty is not determined by this procedure.</p>'+
+   '<p class="note">Run a 30-second test. Confirm the correct fans respond, then capture RPM once the speed settles.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcExclusive"><span>I have closed other fan controllers, confirmed this is a <b>fan, not an essential pump</b>, and can observe it during the test.</span></label>'+
    '<div class="w-actions">'+dutyValues.map(percent=>'<button class="btn secondary" data-commissioning="test" data-duty="'+percent+
      '" '+(!isFan||!output.writable||owner?'disabled':'')+'>Test '+percent+'%</button>').join('')+
@@ -83,7 +83,7 @@ const FanCommissioning=(()=>{
    '<div class="table-container"><table class="w-output-table"><thead><tr><th>Command</th><th>Observed tachometer</th><th>Recorded</th></tr></thead><tbody>'+
     sampleRows+'</tbody></table></div></div>'+
    '<div><h3>4 · Verify response</h3>'+
-   '<p class="note">Confirm you saw the intended physical fan bank change speed. At least two fresh recorded measurements separated by 10% PWM must show a meaningful RPM increase. Verification is observational only and does <b>not</b> authorize unattended fan control.</p>'+
+   '<p class="note">Capture two different test speeds and confirm the intended fans respond. Enable automatic control separately.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcVisual"><span>I personally confirmed that this PWM output drives the named fan or fan bank, not a pump.</span></label>'+
    '<div class="w-actions"><button class="btn" data-commissioning="verify" '+(!isFan?'disabled':'')+
    '>Verify mapping</button><span class="note">'+(verified?'Last verified '+esc(new Date(map.verifiedAt).toLocaleString()):

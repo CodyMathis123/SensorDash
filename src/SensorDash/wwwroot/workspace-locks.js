@@ -10,6 +10,6 @@ const WorkspaceLocks=(()=>{
    safe(label)+'"'+(id?' data-id="'+safe(id)+'"':'')+'>'+
    (locked?'🔓 Unlock editing':'🔒 Lock editing')+'</button>';
  const readonly=label=>'<p class="note">🔒 '+safe(label)+
-  ' editor locked. Readings and active hardware control continue unchanged.</p>';
+  ' editing locked.</p>';
  return {cooling,fan,dashboard,action,readonly};
 })();

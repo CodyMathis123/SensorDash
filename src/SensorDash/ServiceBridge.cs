@@ -110,7 +110,10 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                             .Where(x=>x.Length is >0 and <=256).Distinct().Take(8).ToArray(),
                             double.IsFinite(req.Hours??720)?Math.Clamp(req.Hours??720,0.1,26280):720,
                             (state.Latest?.Sensors??[]).ToDictionary(s=>s.Id,s=>s.Type),
-                            state.Settings.SaveEverySeconds)
+                            state.Settings.SaveEverySeconds),
+                        accessories=db.ReadAccessoryStatistics(state.Settings,
+                            (state.Latest?.Sensors??[]).ToDictionary(s=>s.Id,s=>s.Type),
+                            double.IsFinite(req.Hours??720)?Math.Clamp(req.Hours??720,0.1,26280):720)
                     },
                     "historyStorage" => db.ReadStorage(state.Latest,state.Settings),
                     "diagnostics" => Diagnostics(),

@@ -3,12 +3,12 @@ const titles={
  overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
  dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
  cooling:['COOLING','Cooling systems','Model any number of air, liquid or custom cooling systems'],
- curves:['FAN CONTROL','Fan control','Run persistent temperature-based fan profiles across your hardware channels'],
+ curves:['FAN CONTROL','Fan control','Control fans with temperature curves'],
  virtual:['DERIVED','Virtual sensors','Define maximum, minimum, average and difference sensors'],
- tray:['NOTIFICATION AREA','Tray readouts','Configure up to six simultaneous Windows tray sensor icons'],
- storage:['HARDWARE','Storage sensors','SSD and drive telemetry in the unified sensor catalog'],
+ tray:['NOTIFICATION AREA','Tray readouts','Keep sensor readings in your Windows tray'],
+ storage:['HARDWARE','Storage sensors','Drive temperatures and activity'],
  explorer:['SENSOR LIBRARY','Sensor Explorer','Discover, rename, search and pin sensor data'],
- events:['HISTORY','Event log','Configurable threshold-crossing events'],
+ events:['HISTORY','Event log','Alerts and recoveries'],
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
@@ -121,7 +121,7 @@ function explorer(){
   const referenceList=uses.length?'<div class="sensor-use-list">'+uses.map(u=>
    '<button class="sensor-use-link" data-usage-target="'+esc(u.page)+'" data-usage-dashboard="'+esc(u.dashboardId||'')+
    '" data-usage-system="'+esc(u.systemId||'')+'" data-usage-component="'+esc(u.componentId||'')+'">'+
-   esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not referenced by any saved dashboard, cooling component, tray icon, virtual sensor or curve.</p>';
+   esc(u.label)+'</button>').join('')+'</div>':'<p class="note">Not used in a saved workspace.</p>';
   return '<div class="full">'+panel('Selected sensor · '+display(chosen),'Original: '+chosen.name+' · '+chosen.id+' · '+chosen.device,
    '<div class="alias-editor">'+
     '<div class="field"><label for="sensorAlias">Display name</label><input id="sensorAlias" maxlength="120" value="'+
@@ -133,10 +133,10 @@ function explorer(){
      '<button class="btn secondary" data-hide-sensor="'+esc(chosen.id)+'">'+(direct?'Unhide sensor':'Hide sensor')+'</button>')+
     (deviceId?'<button class="btn secondary" data-hide-device="'+esc(deviceId)+'">'+(hideDevice?'Show this hardware':'Hide this hardware')+'</button>':'')+
     '<button class="btn secondary" data-hide-type="'+esc(chosen.deviceType)+'">'+(hideType?'Show all '+chosen.deviceType:'Hide all '+chosen.deviceType)+'</button></div>'+
-   '<p class="note">Visibility changes only the interface and sensor pickers; collection, configured widgets, history and simulations continue. Hidden sensors can be managed in the Hidden filter.</p>'+
+   '<p class="note">Hidden sensors continue recording. Find them with the Hidden filter.</p>'+
    '<h3 class="sensor-used-title">Used in '+uses.length+' place'+(uses.length===1?'':'s')+'</h3>'+referenceList+
    chart([chosen],typeUnit(chosen.type))+
-   '<div class="badge-line"><span class="note">Pin keeps this reading in history even if it would otherwise be excluded.</span>'+
+   '<div class="badge-line"><span class="note">Pin to include this sensor in history.</span>'+
     '<button class="btn tiny" data-pin="'+esc(chosen.id)+'">'+
      (S.settings?.pinnedSensors?.includes(chosen.id)?'Unpin history':'Pin for history')+'</button></div>')+'</div>';
  })():'';
@@ -157,7 +157,7 @@ function events(){
  '<div class="event-list">'+(S.events.length?S.events.map(e=>'<div class="event '+esc(e.severity)+'"><div class="dot"></div><div><b>'+esc(e.message)+'</b><p>'+when(e.t)+' · '+esc(e.sensor)+(e.value!=null?' · '+fmt(e.value):'')+'</p></div></div>').join('')
   :'<div class="empty">No events yet. Add a monitoring threshold in Settings.</div>')+'</div>')+
  panel('Alert behavior','Configurable monitoring',
- '<p class="help">Threshold events are informational. The collector evaluates configured limits with a two-unit recovery hysteresis. Motherboard firmware remains essential for hardware-level cooling safety; fan profiles are managed separately.</p>')+
+ '<p class="help">Alerts do not change fan speeds. Configure automatic cooling in Fan Control.</p>')+
  '</div>';
 }
 function settingsView(){
@@ -177,16 +177,16 @@ function settingsView(){
  return '<div class="settings-grid">'+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
- ['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']]
- .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="1" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" value="'+cfg[key]+'"></div>').join('')+
- '</div><p class="note">The simulation engine evaluates curves at 1 Hz using the newest timestamped samples. Storage can poll independently. Retention can be set from 1 to 1,095 days; purged data cannot be restored by increasing retention.</p>')+
- panel('History storage footprint','Actual SQLite size and device/sensor contribution estimates',
+ ['saveEverySeconds','History save interval (sec)'],['retentionDays','History retention (days)']]
+ .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="'+(['storagePollSeconds','saveEverySeconds'].includes(key)?5:1)+'" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" title="'+(key==='retentionDays'?'1–1,095 days. Older history is deleted.':key==='fastPollSeconds'?'1–30 seconds':'5–120 seconds')+'" value="'+cfg[key]+'"></div>').join('')+
+ '</div>')+
+ panel('History storage','',
  HistoryInsights.storagePanel())+
- panel('Collection and history footprint','Decide which hardware to sample and which readings deserve archived history',
+ panel('Recorded sensors','Choose what to monitor and save',
  '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
- [['balanced','Balanced · temperatures, fans, power and useful load readings'],
-  ['in-use','Only in use · dashboards, cooling systems, tray, curves, alerts and pinned sensors'],
-  ['all','All sensor readings · largest database']].map(([val,text])=>
+ [['balanced','Balanced'],
+  ['in-use','In-use sensors only'],
+  ['all','All sensors']].map(([val,text])=>
    '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
  '</select></label>'+
  '</div>'+
@@ -196,7 +196,7 @@ function settingsView(){
       (!(cfg.disabledCollectionGroups||[]).includes(id)?'checked':'')+'>'+
    '<span><strong>'+esc(name)+'</strong><small>'+esc(description)+'</small></span></label>'
  ).join('')+'</div>'+
- '<p class="note">Disabling a family closes and reopens the hardware collector with that entire family disabled. Its sensors will stop appearing until you re-enable it.</p>'+
+ '<p class="note">Disabled hardware stops reporting readings.</p>'+
  '<h3 class="sensor-used-title">Individual discovered devices</h3>'+
  '<div class="w-collection-devices">'+
    (uniqueDevices.length?uniqueDevices.map(device=>
@@ -206,28 +206,29 @@ function settingsView(){
        ' · '+device.sensorCount+' detected sensors</small></span></label>'
    ).join(''):'<p class="note">No devices discovered. Family options remain available.</p>')+
  '</div>'+
- '<p class="note">Pausing a device skips its periodic Update call where supported, but preserves its sensor names with unavailable readings. Parent hardware may still perform shared work. Active charts, tray readouts and curves may lose their inputs.</p>'+
- '<h3 class="sensor-used-title">Skip SQLite history for hardware categories</h3>'+
+ '<p class="note">Paused devices stop updating their readings.</p>'+
+ '<h3 class="sensor-used-title">Exclude from history</h3>'+
  '<div class="w-history-types">'+types.map(t=>
   '<label class="collection-toggle"><input type="checkbox" data-history-exclude="'+esc(t)+'" '+
   ((cfg.excludedHistoryHardwareTypes||[]).includes(t)?'checked':'')+'>'+
   esc(t)+'</label>').join('')+'</div>'+
- '<p class="note">Checked categories remain visible and available to live dashboards and simulations, but new database samples are not saved. Existing history is preserved until normal retention cleanup. Explicit history exclusions take priority even over pinned sensors.</p>')+
+ '<p class="note">Excluded categories remain visible live but are not recorded.</p>')+
  panel('Sensor aliases','Rename any physical or virtual sensor',
  aliases.length?aliases.map(([id,name])=>
- '<div class="alias-row"><label title="'+esc(id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
- '<input data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Optional display alias"></div>').join(''):
+ '<div class="alias-row"><label title="'+esc((sensor(id)?.name||id)+' · '+id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
+ '<input aria-label="Alias for '+esc(sensor(id)?.name||id)+'" data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Display name">'+
+ '<button type="button" class="btn secondary row-delete" title="Remove alias" aria-label="Remove alias for '+esc(sensor(id)?.name||id)+'" data-remove-alias="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join(''):
  '<p class="note">No custom aliases. Select a sensor in Sensor Explorer to rename it.</p>')+
  panel('Monitoring thresholds','Alert when a selected sensor crosses its assigned value',
- thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
- '<input type="number" step="any" data-threshold="'+esc(id)+'" value="'+number+'">'+
- '<button class="btn secondary tiny" data-remove-threshold="'+esc(id)+'">Remove</button></div>').join('')+
+ thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(label(sensor(id)||{id,name:id})+' · '+id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
+ '<div class="threshold-value"><input aria-label="Alert threshold for '+esc(label(sensor(id)||{id,name:id}))+'" type="number" step="any" data-threshold="'+esc(id)+'" value="'+number+'"><span>'+esc(typeUnit(sensor(id)?.type))+'</span></div>'+
+ '<button type="button" class="btn secondary row-delete" title="Remove threshold" aria-label="Remove threshold for '+esc(label(sensor(id)||{id,name:id}))+'" data-remove-threshold="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join('')+
  '<div class="w-add-input"><select id="newThresholdId"><option value="">Choose sensor to monitor</option>'+
  choices.filter(s=>!(s.id in (cfg.highThresholds||{}))).map(s=>
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button class="btn secondary" id="addThreshold">+ Threshold</button></div>')+
- panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
- '<p class="note">These values are snapshots, not continuous profiling. Working set is physical memory currently held by the process; private bytes and managed heap are different measures, so they should not be added together.</p>'+
+ '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
+
  [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
   '<div class="stat-row"><label>Working set</label><strong>'+formatMb(p?.workingSetBytes)+'</strong></div>'+
@@ -243,16 +244,16 @@ function settingsView(){
  '<div class="stat-row"><label>Cache hits / misses</label><strong>'+S.historyStats.hits+' / '+S.historyStats.misses+'</strong></div>'+
  '<div class="stat-row"><label>History fetch requests</label><strong>'+S.historyStats.requests+'</strong></div>'+
  '<div class="stat-row"><label>Last history request</label><strong>'+(S.historyStats.lastFetchMs==null?'—':S.historyStats.lastFetchMs+' ms')+'</strong></div>'+
- '<p class="note">Browser chart times exclude server/database work. The browser itself is a separate process and is not included in the desktop-host memory numbers.</p>'+
- '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+
- panel('Service and storage','Local-only hardware access',
+
+ '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
+ '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
  '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
  '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
  '<div class="stat-row"><label>Discovered storage devices</label><strong>'+(S.diagnostics?.storageDevices?.length??'—')+'</strong></div>'+
- '<p class="note">The browser host is unelevated; only the named-pipe collector reads hardware. Storage telemetry is available in the unified catalog.</p>')+
- '</div><div class="badge-line"><p class="note">Changes are validated by the collector service.</p>'+
+ '')+
+ '</details></div><div class="badge-line">'+
  '<button class="btn" id="saveSettings">Save settings</button></div>';
 }
 function heading(){
@@ -542,7 +543,7 @@ function drawCanvas(canvas){
  const gapNote=canvas.parentElement?.nextElementSibling?.nextElementSibling;
  if(gapNote?.classList.contains('chart-gap-note')){
    const hasBreaks=series.some(s=>s.gaps.length);
-   const message=outages.length?'Shaded bands = collector-wide missing readings; line breaks = sensor-specific gaps':
+   const message=outages.length?'Shaded bands and line breaks show missing readings':
      'Line breaks indicate missing sensor readings';
    if(hasBreaks && gapNote.textContent!==message)gapNote.textContent=message;
    gapNote.hidden=!hasBreaks;
@@ -779,6 +780,8 @@ document.addEventListener('click',e=>{
  if(e.target.closest('[data-save-alias]')){saveAlias(false);return}
  if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
  if(e.target.closest('#addThreshold')){changeThreshold(byId('newThresholdId')?.value);return}
+ const removeAlias=e.target.closest('[data-remove-alias]');
+ if(removeAlias){removeAlias.closest('.alias-row').querySelector('[data-alias]').value='';saveSettings();return}
  const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
  if(e.target.closest('#refreshDiagnostics')){
   Promise.all([loadStatus(false),loadDiagnostics(false)]).then(()=>{if(S.view==='settings')render()});

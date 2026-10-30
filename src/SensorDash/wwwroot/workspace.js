@@ -217,11 +217,8 @@ const SDWorkspace = (() => {
    const starter='<div class="w-actions">'+button('add-system','+ Liquid system','data-kind="liquid"',false)+
      button('add-system','+ Air system','data-kind="air"')+
      button('add-system','+ Custom system','data-kind="custom"')+'</div>';
-   if(!systems.length)return card('Your cooling systems','A reusable, sensor-driven view of thermal behavior',
-       '<p class="note">Configure heat sources, fan groups, pumps, temperature probes and optional flow meters. '+
-       'Sensor assignments automatically generate meaningful readings, summaries and historical graphs. '+
-       'For liquid cooling, temperature probes can represent coolant, ambient, inlet or outlet readings. '+
-       'There is no mandatory radiator component because a radiator itself does not supply telemetry.</p>'+starter);
+   if(!systems.length)return card('Your cooling systems','Temperatures, power and fan speeds',
+       '<p class="note">Add a cooling system, then assign its sensors.</p>'+starter);
    const systemHtml=systems.map(sys=>{
      const editing=!WorkspaceLocks.cooling(S,sys.id);
      const telemetry=coolingReadings(S,sys);
@@ -250,7 +247,7 @@ const SDWorkspace = (() => {
        '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong data-cooling-value="'+attr(sys.id)+'|'+key+'">'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
      ).join('')+'</div>';
      const powerDetails=heat.length>1?
-       '<p class="note">Power is shown by sensor rather than summed because package, core and device readings may overlap.</p>':'';
+       '':'';
      const chartGroups=[
        ['Temperature','Temperature history','Temperature probes and component temperatures'],
        ['Power','Power history','Component power readings (not a measurement of heat rejected)'],
@@ -289,7 +286,7 @@ const SDWorkspace = (() => {
          '<label>Role<select data-component-kind="'+attr(scope)+'">'+componentOptions(c.kind)+'</select></label>'+
          button('remove-component','Remove','data-scope="'+attr(scope)+'"')+'</div>'+
          '<p class="note">'+safe(componentKinds.find(x=>x.id===c.kind)?.hint||'Hardware sensor association')+'</p>'+
-         (outOfKind.length?'<p class="note">Existing assignments of other types are retained; change the component role if necessary.</p>':'')+
+         (outOfKind.length?'<p class="note">Some assigned sensors do not match this role.</p>':'')+
          selectors(S,c.sensorIds,scope)+
          CoolingElectrical.editor(S,c,scope,true)+
          '<div class="w-add-input">'+select(S,'',s=>suitable(c.kind,s),
@@ -301,7 +298,7 @@ const SDWorkspace = (() => {
        CoolingElectrical.summaryCard(S,sys)+
        CoolingInsights.analysis(S,sys)+
        '<div class="cooling-timeline-intro"><strong>Synchronized thermal timeline</strong>'+
-       '<p class="note">Move across any chart to inspect the same instant in temperature, power, RPM, duty and flow. The global history range applies to every chart. Events appear underneath.</p></div>'+
+       '<p class="note">Hover a chart to compare readings at the same time.</p></div>'+
        chartsHtml+CoolingInsights.activity(S,sys)+
        '<details class="cooling-config-fold" data-cooling-config="'+attr(sys.id)+'" '+
        (S.coolingConfigOpen?.[sys.id]?'open':'')+'><summary><span>Cooling system components</span>'+
@@ -310,8 +307,7 @@ const SDWorkspace = (() => {
        '<div class="w-dashboard-toolbar">'+WorkspaceLocks.action('toggle-cooling-lock',!editing,sys.id)+
          '<span class="note">'+(editing?'Editing enabled':'Viewing mode · Configuration locked')+'</span></div>'+
        '<h3>'+(editing?'Configure components':'Assigned components')+'</h3>'+
-       (editing?'<p class="note">Component types guide sensor selection; they do not claim control of the hardware. '+
-        'An air-cooled PC can use the same model without a pump or coolant sensor.</p>'+
+       (editing?
        '<div class="w-actions"><label>System name<input data-system-name="'+attr(sys.id)+'" value="'+attr(sys.name)+'"></label>'+
        '<label>Type<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
        '<span class="note" role="status" aria-live="polite" data-cooling-save>'+safe(saveState(S).status)+'</span>'+
@@ -333,7 +329,7 @@ const SDWorkspace = (() => {
    const list=S.settings?.trayWidgets||[];
    const options=S.sensors.length?'':nothing('The collector has not reported sensors yet.');
    return card('Notification-area sensors','Choose up to six independent, live Windows tray badges',
-      '<p class="note">Each badge shows a compact number. Hover in Windows for the sensor name, value and unit; double-click to open this screen. Windows decides whether icons appear on the taskbar or in the overflow menu.</p>'+
+      '<p class="note">Choose up to six tray readouts. Double-click one to open SensorDash.</p>'+
       options+list.map((w,i)=>
         '<div class="w-tray-row"><span class="w-tray-index">'+(i+1)+'</span>'+
         '<label class="w-tray-sensor">Sensor'+
@@ -382,7 +378,7 @@ const SDWorkspace = (() => {
   '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
   '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th class="w-curve-actions-col"></th></tr></thead>'+
   '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point)).join('')+curvePointRow()+'</tbody></table></div>'+
-  '<p class="note">Click the empty row to add a point; a new row appears automatically when both values are entered. Points are sorted by temperature when saved.</p>'+
+  '<p class="note">Use the empty row to add a point.</p>'+
   '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
  const readCurvePointRows=(table)=>{
   const rows=[...table.querySelectorAll('tbody tr[data-curve-point-row]')];
@@ -453,17 +449,15 @@ const SDWorkspace = (() => {
   ).join('');
   const curveOptions=(S.settings?.simulatedFanCurves||[]).map(c=>
     '<option value="'+attr(c.id)+'">'+safe(c.name)+'</option>').join('');
-  return card('Live fan control · first tests','Select one output · 30–120-second tests · 70–100% PWM',
+  return card('Manual fan tests','Select one output · 30–120-second tests · 70–100% PWM',
     '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and approve Windows elevation. '+
-      'A channel can show Undefined, Default, or Software: these are LibreHardwareMonitor local states, '+
-      'not a reliable indication of whether another application is running. '+
       'Avoid essential pump outputs until their safe behavior is verified.</p>'+
     '<div class="w-live-status"><strong>Control state: <span data-fan-status>'+
        safe(state.state||'Loading…')+'</span></strong>'+
      '<span data-fan-message>'+safe(state.message||'Looking for writable outputs…')+'</span>'+
      '<span data-fan-expiry>'+safe(state.expires?'Expires '+new Date(state.expires).toLocaleTimeString():'')+'</span></div>'+
     '<div class="table-container"><table class="w-output-table"><thead><tr>'+
-      '<th>Hardware</th><th>Writable output</th><th>LHM mode</th><th>Duty range</th><th>Test eligibility</th>'+
+      '<th>Hardware</th><th>Writable output</th><th title="Reported hardware mode; does not indicate whether another fan-control app is running">Mode</th><th>Duty range</th><th>Test eligibility</th>'+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="w-actions">'+
       '<label>Writable channel<select id="liveFanChannel">'+
@@ -497,7 +491,7 @@ const SDWorkspace = (() => {
   const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
   const curves=S.settings?.simulatedFanCurves||[];
   const mapping=id=>FanFeedback.mapping(S,id);
-  const header=card('Live fan profiles','Continuous multi-output control · Max curve mixing · UAC-approved activation',
+  const header=card('Live fan profiles','Automatic fan control',
    '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
    'Each enabled profile resumes after a service restart. Missing temperatures command the highest available fan speed.</p>'+
    (editing?'<div class="w-actions">'+button('starter-radiators','+ CPU/GPU Max starter')+
@@ -543,7 +537,7 @@ const SDWorkspace = (() => {
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
         button('remove-profile','Delete draft','data-id="'+attr(p.id)+'"')+'</div>'+
-      '<p class="note">Enabling makes a durable collector-side copy. Changing this draft does not change live speeds until you reapprove. '+
+      '<p class="note">Reapprove to apply changes to an enabled profile. '+
       'Separate profiles cannot share the same output.</p>');
     return FanControlUx.section(S,'profile:'+p.id,p.name,
       (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
@@ -623,10 +617,10 @@ const SDWorkspace = (() => {
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
        curveTable(curve)+
-       '<p class="note">RPM feedback is inherited automatically from the PWM channel mapping in Identify → Name → Calibrate → Verify. Curves only define duty by temperature.</p>'+
+
        '<div class="w-actions"><label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
          button('save-editor','Save curve','',false)+button('remove-curve','Delete','data-id="'+attr(scope)+'"')+'</div>'+
-       '<p class="note">The graph is a preview. Saved curve edits affecting a live profile require reapproval.</p>'
+       '<p class="note">Reapprove an active profile to apply curve changes.</p>'
      );
      return FanControlUx.section(S,'curve:'+curve.id,curve.name,
        (S.fanControl?.persistent?.profiles||[]).some(p=>p.curveNames?.includes(curve.name))?
@@ -660,7 +654,7 @@ const SDWorkspace = (() => {
  const renderVirtual=(S)=>{
    const virtual=S.settings?.virtualSensors||[];
    return card('Virtual sensors','Combine real sensor readings into Max, Min, Average, or Delta',
-     '<p class="note">Virtual sensors appear in the sensor catalog and can feed simulated curves, charts and tray icons. This first version uses physical sensor inputs only, preventing circular dependencies.</p>'+
+     '<p class="note">Combine sensor readings into a calculated sensor.</p>'+
      virtual.map(v=>{
        const scope='virtual:'+v.id;
        return '<div class="w-component"><div class="w-actions"><label>Name<input data-virtual-name="'+attr(v.id)+'" value="'+attr(v.name)+'"></label>'+
@@ -675,7 +669,7 @@ const SDWorkspace = (() => {
    const storage=S.sensors.filter(s=>s.deviceType==='Storage');
    const diag=S.diagnostics;
    return card('Storage hardware','Storage sensors appear in the same catalog as every other device',
-     '<p class="note">Storage polling can be slower than the control engine. Values carry timestamps so stale readings can be identified by simulations.</p>'+
+
      (storage.length?storage.map(s=>'<div class="stat-row"><label>'+
        safe(S.settings?.aliases?.[s.id]||(s.name+' · '+s.device))+'</label>'+
        '<strong data-live-reading="'+attr(s.id)+'" data-live-format="unit" data-live-unit="'+attr(unit(s.type))+'">'+value(s)+' '+unit(s.type)+'</strong></div>').join(''):nothing('No storage sensors discovered'))+

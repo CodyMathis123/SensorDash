@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); CoolingElectricalSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -375,7 +375,7 @@ public sealed class DashboardState {
 public sealed record HistoryPoint(long T, double V);
 public sealed record HistorySeries(string Id, List<HistoryPoint> Points);
 public sealed record MonitorEvent(long T, string Severity, string Sensor, string Message, double? Value);
-public sealed class HistoryStore {
+public sealed partial class HistoryStore {
     private readonly string _connectionString;
     private readonly string _path;
     public HistoryStore(string path) {
@@ -383,6 +383,20 @@ public sealed class HistoryStore {
         _connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = true }.ToString();
         using var connection = Open();
         using var cmd = connection.CreateCommand();
+        // Enable reclamation once, before collection/control starts. Existing
+        // databases need a one-time rebuild to add SQLite's pointer map.
+        cmd.CommandText = "PRAGMA auto_vacuum";
+        var vacuumMode = Convert.ToInt32(cmd.ExecuteScalar());
+        if (vacuumMode != 1) {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table'";
+            var existing = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            cmd.CommandText = "PRAGMA auto_vacuum=FULL";
+            cmd.ExecuteNonQuery();
+            if (existing && vacuumMode == 0) {
+                cmd.CommandText = "VACUUM";
+                cmd.ExecuteNonQuery();
+            }
+        }
         cmd.CommandText = """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS samples(sensor TEXT NOT NULL, ts INTEGER NOT NULL, value REAL NOT NULL, PRIMARY KEY(sensor, ts));
@@ -507,8 +521,7 @@ public sealed class HistoryStore {
                 sensors=g.Count()}).OrderByDescending(g=>g.samples).ToArray();
         using var pages=c.CreateCommand();
         pages.CommandText="PRAGMA page_size; PRAGMA page_count; PRAGMA freelist_count;";
-        // Free pages are reusable after retention cleanup; deleting old
-        // records does not immediately shrink the SQLite file.
+        // Keep low-level storage counters available for diagnostics.
         long ReadPragma(string name)
         {
             using var pragma=c.CreateCommand();
@@ -555,7 +568,24 @@ public sealed class HistoryStore {
         var before = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeMilliseconds();
         using var conn = Open(); using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before";
-        cmd.Parameters.AddWithValue("$before", before); cmd.ExecuteNonQuery();
+        cmd.Parameters.AddWithValue("$before", before);
+        using (var transaction = conn.BeginTransaction()) {
+            cmd.Transaction = transaction;
+            cmd.ExecuteNonQuery();
+            transaction.Commit();
+        }
+        // Auto-vacuum reclaims deleted pages at commit. Do not wait on live
+        // readers to truncate WAL; a later cleanup can finish that checkpoint.
+        using var checkpoint = conn.CreateCommand();
+        checkpoint.CommandText = "PRAGMA busy_timeout";
+        var busyTimeout = Convert.ToInt32(checkpoint.ExecuteScalar());
+        try {
+            checkpoint.CommandText = "PRAGMA busy_timeout=0; PRAGMA wal_checkpoint(TRUNCATE)";
+            checkpoint.ExecuteNonQuery();
+        } finally {
+            checkpoint.CommandText = $"PRAGMA busy_timeout={busyTimeout}";
+            checkpoint.ExecuteNonQuery();
+        }
     }
 }
 public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls, ILogger<SensorWorker> logger) : BackgroundService {
@@ -565,6 +595,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
+    private int _lastRetentionDays;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
@@ -602,8 +633,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     CheckEvents(frame, cfg);
                     _lastSaved = now;
                 }
-                if ((now - _lastCleanup).TotalHours >= 1) {
-                    db.Cleanup(cfg.RetentionDays); _lastCleanup = now;
+                if ((now - _lastCleanup).TotalHours >= 1 || cfg.RetentionDays != _lastRetentionDays) {
+                    db.Cleanup(cfg.RetentionDays); _lastCleanup = now; _lastRetentionDays = cfg.RetentionDays;
                 }
             } catch (Exception ex) {
                 logger.LogError(ex, "Sensor collection failed");

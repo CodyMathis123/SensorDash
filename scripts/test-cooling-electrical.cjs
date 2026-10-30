@@ -35,7 +35,7 @@ assert.equal(electrical.running(S,pump),null,
 const budget=electrical.summaryCard(S,sys);
 assert.match(budget,/43.08 W/);
 assert.match(budget,/Running draw unknown/);
-assert.match(budget,/nameplate/i);
+assert.match(budget,/Rated power/i);
 assert.doesNotMatch(budget,/4.31 W/,'10% is not 10% nameplate watts');
 fans.electrical.sourceMaxAmps=1;
 assert.equal(electrical.summarize(S,sys).entries[0].overLimit,true);

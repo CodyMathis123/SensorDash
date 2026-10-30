@@ -56,7 +56,7 @@ async function click(action,duty){
 }
 (async()=>{
  let html=controller.render(S);
- assert.match(html,/Identify → Name → Calibrate → Verify/);
+ assert.match(html,/Identify and test your fans/);
  assert.match(html,/Pump — never test here/);
  assert.match(html,/Test 100%/);
  assert.match(html,/disabled/,'Pump mapping must disable hardware testing');
@@ -64,7 +64,7 @@ async function click(action,duty){
  assert.equal(requests.length,0,'Pump mapping must never send a PWM command');
  S.settings.fanChannelMappings[0].kind='fan';
  html=controller.render(S);
- assert.match(html,/30-second elevated test/);
+ assert.match(html,/30-second test/);
  await click('test',100);
  assert.equal(requests.length,0,'A new test requires explicit ownership acknowledgment');
  nodes.get('fcExclusive').checked=true;

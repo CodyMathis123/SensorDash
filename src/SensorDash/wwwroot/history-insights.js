@@ -51,14 +51,14 @@ const HistoryInsights=(()=>{
   return '<div class="history-insights" data-history-insights>'+
    '<div class="history-insights-toolbar"><label>Summary period <select id="insightRange">'+
    options.map(([key,name])=>'<option value="'+key+'" '+(String(range)===key?'selected':'')+'>'+esc(name)+'</option>').join('')+
-   '</select></label><span class="note">Recorded history, not lifetime hardware maxima</span></div>'+
+   '</select></label><span class="note">Recorded history</span></div>'+
    '<div id="insightSummary" aria-live="polite">'+
-   (selected.length?'<p class="note">Calculating recorded peaks and power usage…</p>':
+   (selected.length||(S.settings?.coolingSystems||[]).some(s=>(s.components||[]).some(c=>['pump','fan-group'].includes(c.kind)))?'<p class="note">Calculating recorded peaks and power usage…</p>':
     '<p class="note">No compatible CPU, GPU or storage sensors detected.</p>')+'</div></div>';
  };
- const statsHtml=(S,series)=>{
+ const statsHtml=(S,series,accessories=[])=>{
   const selected=selectIds(S);
-  if(!selected.length)return '<p class="note">No supported sensors available.</p>';
+  if(!selected.length&&!accessories.length)return '<p class="note">No supported sensors available.</p>';
   const lookup=new Map((series||[]).map(x=>[x.id,x]));
   const temp=selected.filter(x=>x.type==='Temperature'),power=selected.filter(x=>x.type==='Power');
   const title=s=>S.settings?.aliases?.[s.id]||s.name;
@@ -69,7 +69,7 @@ const HistoryInsights=(()=>{
     '<td>'+(x?.count?esc(time(x.peakAt)):'—')+'</td>'+
     '<td>'+(x?.count?num(x.average)+' °C':'—')+'</td></tr>';
   }).join('');
-  const powRows=power.map(s=>{
+  const measuredRows=power.map(s=>{
    const x=lookup.get(s.id);
    return '<tr><td>'+esc(title(s))+'<small>'+esc(s.device)+'</small></td>'+
     '<td>'+(x?.count?num(x.max)+' W':'—')+'</td>'+
@@ -78,17 +78,34 @@ const HistoryInsights=(()=>{
     '<td>'+ (x?.count?num(x.coveredHours,2)+'h ('+num(x.coveragePercent,0)+'%)':'—')+
     '</td></tr>';
   }).join('');
+  const accessoryRows=accessories.map((a,index)=>{
+   const x=a.stats||{},has=x.count>0;
+   const details={Measured:'Recorded power sensor readings.',
+    'Calibrated estimate':'Estimated from recorded PWM and your measured group power settings.',
+    'Rated estimate':'Configured rated power during recorded running time. Actual use may be lower.',
+    'Mixed estimate':'Uses measured power when available, then calibration or rated power during recorded running time.',
+    'Rating only':'Configured power rating. No recorded running time is available to estimate energy.'};
+   const help=(details[a.source]||'No power data configured.')+' Estimates use current component settings; gaps are excluded.';
+   const info='<button type="button" class="info-tip" popovertarget="power-info-'+index+'" aria-label="Power information for '+esc(a.name)+'">ⓘ</button>'+
+    '<div popover id="power-info-'+index+'" class="info-tip-text">'+esc(help)+'</div>';
+   return '<tr><td>'+esc(a.name)+' '+info+'<small>'+esc(a.system)+' · '+esc(a.source)+'</small></td>'+
+    '<td>'+(has?num(x.max)+' W':'—')+'</td>'+
+    '<td>'+(has?num(x.average)+' W':Number.isFinite(a.ratedWatts)?num(a.ratedWatts)+' W rated':'—')+'</td>'+
+    '<td>'+(Number.isFinite(x.energyWh)?num(x.energyWh)+' Wh':'—')+'</td>'+
+    '<td>'+(has?num(x.coveredHours,2)+'h ('+num(x.coveragePercent,0)+'%)':'—')+'</td></tr>';
+  }).join('');
+  const powRows=measuredRows+accessoryRows;
   return (tempRows?'<h3>Recorded temperature peaks</h3><div class="table-container history-insights-table">'+
     '<table><thead><tr><th>Sensor</th><th>Max</th><th>Occurred</th><th>Sample average</th></tr></thead>'+
     '<tbody>'+tempRows+'</tbody></table></div>':'')+
-   (powRows?'<h3>Measured component power</h3><div class="table-container history-insights-table">'+
-    '<table><thead><tr><th>Sensor</th><th>Peak</th><th>Average</th><th>Est. energy</th><th>Observed span</th></tr></thead>'+
+   (powRows?'<h3>Component power</h3><div class="table-container history-insights-table">'+
+    '<table><thead><tr><th>Sensor</th><th>Peak</th><th>Average</th><th title="Estimated from recorded power; gaps are excluded">Est. energy</th><th>Observed span</th></tr></thead>'+
     '<tbody>'+powRows+'</tbody></table></div>':'')+
-   '<p class="note">Maxima are from raw recorded measurements, not chart averages. Power is component-reported, not total PC wall draw. Watt-hours are estimated only between nearby recorded samples; unobserved periods are excluded. The percentage is observed time within the selected period, not a full energy bill. No CPU/GPU values are added together because reported power domains can overlap.</p>';
+   '<p class="note">Component power, not total PC wall draw. Energy estimates exclude gaps in recorded data.</p>';
  };
  const storagePanel=()=>'<div class="history-storage-view">'+
   '<div class="w-actions"><button class="btn secondary" id="refreshStorageFootprint">Refresh storage usage</button></div>'+
-  '<div id="historyStorageSummary" aria-live="polite"><p class="note">Reading current SQLite storage footprint…</p></div></div>';
+  '<div id="historyStorageSummary" aria-live="polite"><p class="note">Loading storage usage…</p></div></div>';
  const storageHtml=(d,S={})=>{
   if(!d||!Number.isFinite(d.dbBytes))return '<p class="note">Storage information unavailable.</p>';
   const total=d.dbBytes+d.walBytes+d.shmBytes,
@@ -104,37 +121,32 @@ const HistoryInsights=(()=>{
   const observed=d.oldest&&d.newest?(d.newest-d.oldest)/86400000:null;
   const dailyRate=observed>1?d.dbBytes/observed:null;
   return '<div class="history-storage-metrics">'+
-    '<div><small>Actual allocated files</small><strong>'+bytes(total)+'</strong></div>'+
-    '<div><small>Main SQLite database</small><strong>'+bytes(d.dbBytes)+'</strong></div>'+
-    '<div><small>Write-ahead log / shared state</small><strong>'+bytes(d.walBytes+d.shmBytes)+'</strong></div>'+
-    '<div><small>Saved measurements</small><strong>'+num(count,0)+'</strong></div>'+
-    '<div><small>Recorded sensors</small><strong>'+num(d.sensorCount||0,0)+'</strong></div>'+
-    '<div><small>Reusable SQLite pages</small><strong>'+bytes(d.freePageBytes)+'</strong></div>'+
+    '<div><small>Storage used</small><strong>'+bytes(total)+'</strong></div>'+
+    '<div title="Database size divided by recorded days; a rough estimate, not a forecast"><small>Estimated growth</small><strong>'+(dailyRate?'~'+bytes(dailyRate)+'/day':'—')+'</strong></div>'+
+    '<div><small>Saved readings</small><strong>'+num(count,0)+'</strong></div>'+
+    '<div><small>Sensors recorded</small><strong>'+num(d.sensorCount||0,0)+'</strong></div>'+
    '</div>'+
-   '<p class="note">Retention: '+num(d.retentionDays,0)+' days · '+esc(d.mode)+' mode · saved every '+
-     num(d.saveEverySeconds,0)+'s. Recorded span: '+esc(time(d.oldest))+' to '+esc(time(d.newest))+'.'+
-     (dailyRate?' Current database size / observed span: ~'+bytes(dailyRate)+'/day (rough estimate; not a forecast).':'')+
-     ' Shrinking retention deletes old rows but does not immediately shrink the database file; freed SQLite pages are reused.</p>'+
+   '<p class="note">'+esc(time(d.oldest))+' – '+esc(time(d.newest))+'</p>'+
    '<h3>By hardware device</h3><div class="table-container history-storage-table"><table><thead>'+
-    '<tr><th>Device</th><th>Sensors</th><th>Rows</th><th>Share</th><th>Est. DB portion</th></tr>'+
+    '<tr><th>Device</th><th>Sensors</th><th>Rows</th><th>Share</th><th title="Approximate share of storage, based on the number of readings">Est. size</th></tr>'+
     '</thead><tbody>'+rows+'</tbody></table></div>'+
    '<details class="history-storage-sensors"><summary>Show individual sensor breakdown ('+
      num((d.sensors||[]).length,0)+')</summary>'+
     '<div class="table-container history-storage-table"><table><thead><tr>'+
-    '<th>Sensor</th><th>Rows</th><th>Share</th><th>Est. DB portion</th></tr></thead><tbody>'+
+    '<th>Sensor</th><th>Rows</th><th>Share</th><th title="Approximate share of storage, based on the number of readings">Est. size</th></tr></thead><tbody>'+
     sensors+'</tbody></table></div></details>'+
-   '<p class="note">The device/sensor size estimates allocate the main database file proportionally to sample-row counts. SQLite stores indexes, events and shared pages; these are <strong>estimates, not separately measured file sizes</strong>. The top-line database + WAL + SHM sizes are actual on-disk file sizes. Retention controls both samples and monitoring events.</p>';
+   '';
  };
  const afterRender=S=>{
   if(S.view==='overview'){
    const el=document.getElementById('insightSummary');
    if(!el)return;
    const ids=selectIds(S).map(s=>s.id);
-   if(!ids.length)return;
-   const hours=span(S),key=hours+'|'+ids.join(',');
+   if(!ids.length&&!(S.settings?.coolingSystems||[]).length)return;
+   const hours=span(S),key=hours+'|'+ids.join(',')+'|'+JSON.stringify(S.settings?.coolingSystems||[]);
    const old=statsCache.get(key);
    if(old){
-    el.innerHTML=statsHtml(S,old.series);
+    el.innerHTML=statsHtml(S,old.series,old.accessories);
     if(Date.now()-old.time<120000)return;
    }
    if(statsReq?.key===key)return;
@@ -143,9 +155,9 @@ const HistoryInsights=(()=>{
      {cache:'no-store'}).then(async response=>{
       if(!response.ok)throw Error('History summaries unavailable');
       const data=await response.json();
-      statsCache.set(key,{time:Date.now(),series:data.series||[]});
+      statsCache.set(key,{time:Date.now(),series:data.series||[],accessories:data.accessories||[]});
       if(token===requestNumber && S.view==='overview' && document.getElementById('insightSummary'))
-       document.getElementById('insightSummary').innerHTML=statsHtml(S,data.series||[]);
+       document.getElementById('insightSummary').innerHTML=statsHtml(S,data.series||[],data.accessories||[]);
    }).catch(error=>{
     if(token===requestNumber&&document.getElementById('insightSummary')&&!old)
      document.getElementById('insightSummary').textContent=error.message;

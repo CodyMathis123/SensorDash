@@ -22,7 +22,7 @@ const FanControlUx=(()=>{
   const changed=pending(S);
   if(!changed.length)return '';
   return '<aside class="w-fan-review" role="status"><strong>Saved changes not yet applied to live fans</strong>'+
-   '<p>The collector is still using its last administrator-approved settings. Reapprove to apply saved edits.</p>'+
+   '<p>Reapprove to apply your saved changes.</p>'+
    changed.map(p=>'<div class="w-fan-review-row"><span>'+safe(p.name)+
       ' · '+safe((p.reviewReasons||[]).join('; '))+'</span>'+
       (WorkspaceLocks.fan(S)?'<span class="note">Unlock Fan Control to reapprove</span>':button(p))+'</div>').join('')+
@@ -45,7 +45,7 @@ const FanControlUx=(()=>{
     (dependents.length>1?'s':'')+':</strong> '+
     dependents.map(({draft,live})=>'<span>'+safe(draft.name)+
     (live.needsReapproval?' · SAVED CHANGES PENDING':' · approved version active')+'</span>').join(' · ')+
-   '<p>Editing or saving this curve does not change currently running fan speeds until the affected profile is reapproved.</p>'+
+   '<p>Reapprove the profile to apply curve changes.</p>'+
    (WorkspaceLocks.fan(S)?'<p class="note">Unlock Fan Control to reapprove.</p>':
      dependents.filter(x=>x.live.needsReapproval).map(x=>button(x.draft)).join(''))+
    '</div>';

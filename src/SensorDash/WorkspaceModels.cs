@@ -134,7 +134,10 @@ public static class WorkspaceLogic
         foreach(var dashboard in cfg.Dashboards ?? [])
             foreach(var widget in dashboard.Widgets ?? [])Include(widget.SensorIds);
         foreach(var system in cfg.CoolingSystems ?? [])
-            foreach(var part in system.Components ?? [])Include(part.SensorIds);
+            foreach(var part in system.Components ?? []) {
+                Include(part.SensorIds);
+                if(part.Electrical is { } e) Include([e.RpmSensorId,e.ControlSensorId,e.PowerSensorId]);
+            }
         foreach(var tray in cfg.TrayWidgets ?? [])Include([tray.SensorId]);
         foreach(var derived in cfg.VirtualSensors ?? [])
         {

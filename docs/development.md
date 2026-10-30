@@ -28,9 +28,13 @@ Routine servicing validation downloads the MSI artifact from the latest successf
 1. Inspect relevant implementation and tests; make a focused change on a branch from `Production`.
 2. Run appropriate local checks, review the diff, update documentation and add an ADR only for meaningful architectural decisions.
 3. Push and create/update a PR targeting `Production`. Its description states the problem, resulting behavior, validation and known limits.
-4. The **Windows MSI and portable build** workflow runs automatically on PR creation and updates. Manual fallback: Actions → that workflow → Run workflow → select the PR branch.
-5. Wait for completion and inspect every job, failing step/log and expected MSI/portable artifacts. Confirm the run corresponds to the current PR head (or GitHub's merge ref for that head). Fix failures and repeat; a run for an older revision is insufficient.
+4. The **Windows MSI build** workflow runs automatically on PR creation and updates. Manual fallback: Actions → that workflow → Run workflow → select the PR branch.
+5. Wait for completion and inspect every job, failing step/log and expected MSI and installer-diagnostic artifacts. Confirm the run corresponds to the current PR head (or GitHub's merge ref for that head). Fix failures and repeat; a run for an older revision is insufficient.
 6. When tests and the full pipeline succeed, review the final diff, resolve required reviews, mark ready if needed, and merge using an expected-head check. The owner has authorized this step without repeated confirmation. Never bypass branch protection.
 7. Verify the PR merged and monitor the ensuing `Production` pipeline. Report the PR, validation result and any production-build failure. Investigate failures without representing the delivery as fully validated.
 
 The workflow uploads build artifacts; merging is not authorization to install on the owner's machine or perform physical fan commissioning. Live hardware validation is separate from hardware-free CI.
+
+The single MSI lifecycle test validates previous Production installation, upgrade, repeat install, repair, downgrade rejection, shortcut/autostart entries and uninstall with desktop closure. Do not add a redundant install/uninstall cycle for the same assertions.
+
+Publish only the raw MSI (upload-artifact v7, archive false) and installer diagnostics. download-artifact v8 handles both new raw MSI artifacts and older zipped baselines; no explicit extraction step is needed. The published application folder is build input, not a separate portable download.

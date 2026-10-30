@@ -39,7 +39,7 @@ const CoolingInsights=(()=>{
    'Assign a compatible sensor')).join('');
   return '<section class="cooling-insights" aria-label="System-aware cooling overview">'+
    '<div class="cooling-insights-head"><div><h3>System-aware overview</h3>'+
-   '<p>Grouped from your assigned physical components; no inferred coolant or ambient values.</p></div>'+
+   '<p></p></div>'+
    '<span class="cooling-insights-label">Read-only</span></div>'+
    '<div class="cooling-insight-grid">'+
      makeComponents(heats)+makeComponents(fans)+makeComponents(pumps)+
@@ -50,7 +50,7 @@ const CoolingInsights=(()=>{
      tile('Room ambient',byRole('room-ambient').flatMap(p=>p.temperatures),
       'Optional room sensor; case air is not ambient')+
    '</div>'+
-   '<p class="note">Heat-source power readings are shown separately; package, core and device power readings can overlap. Fan-bank tachometers may represent only one fan on a splitter.</p>'+
+
    '</section>';
  };
  // Match timestamped samples within a bounded interval. Do not interpolate
@@ -98,11 +98,11 @@ const CoolingInsights=(()=>{
       (p.result.lowVariation?'<small class="correlation-note">Low variation—interpret cautiously</small>':''):
       '<b>Not calculated</b><small class="correlation-note">'+esc(p.reason)+'</small>')+'</div>'
   ).join('')+'</div>'+
-  '<p class="note">Pearson r describes simultaneous co-movement, not cooling efficiency or causation. Thermal lag, workload and sensor selection can change it. Independent CPU/GPU readings are not summed.</p>';
+  '<p class="note">Correlation shows how readings move together; it does not measure cooling efficiency.</p>';
  };
  const analysis=(S,sys)=>'<section class="cooling-analysis" data-cooling-analysis="'+esc(sys.id)+'">'+
   '<div class="cooling-insights-head"><div><h3>Power ↔ temperature relationship</h3>'+
-  '<p>Exploratory comparison using the same cached history as the charts.</p></div></div>'+
+  '<p></p></div></div>'+
   '<div data-cooling-correlations="'+esc(sys.id)+'">'+correlateHtml(S,sys)+'</div></section>';
  const eventIds=(S,sys)=>{
   const sensors=new Set((sys.components||[]).flatMap(c=>c.sensorIds||[]));

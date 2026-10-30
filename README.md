@@ -1,5 +1,7 @@
 # SensorDash — versioned CI builds
 
+Current CI downloads: a raw versioned MSI and installer diagnostics. Portable ZIP downloads are no longer published.
+
 Download the MSI from a successful Production workflow run. Each new run receives a higher MSI version (`major.minor.run_number`), displayed by the application and used in the installer artifact name. PR builds and Production builds have different versions. See [CI version policy](docs/adr/0003-ci-msi-versions.md).
 
 # SensorDash 0.8.4 — Sensor aliases and desktop servicing
