@@ -785,6 +785,11 @@ const SDWorkspace = (() => {
      if(!component.electrical && !val && key!=='quantity')continue;
      if(!component.electrical && key==='quantity'&&val==='1')continue;
      component.electrical=component.electrical||{quantity:1};
+     if(key==='powerCurve'){
+       const point=component.electrical.powerCurve?.[Number(e.dataset.curveIndex)];
+       if(point&&['dutyPercent','rpm','watts'].includes(e.dataset.curveKey))point[e.dataset.curveKey]=val===''?null:Number(val);
+       continue;
+     }
      component.electrical[key]=numeric?(val===''?null:Number(val)):val;
    }
  }
@@ -956,6 +961,20 @@ const SDWorkspace = (() => {
      }
      // Preserve unsaved editor inputs when pressing Add/Remove.
      syncInputs(S);
+     if(action==='add-power-point'||action==='remove-power-point'){
+       const [,sysId,componentId]=(el.dataset.electricalScope||'').split(':');
+       if(WorkspaceLocks.cooling(S,sysId))return true;
+       const c=cfg.coolingSystems?.find(s=>s.id===sysId)?.components.find(c=>c.id===componentId);
+       if(!c||!['fan-group','pump'].includes(c.kind))return true;
+       c.electrical=c.electrical||{quantity:1};
+       const points=c.electrical.powerCurve=c.electrical.powerCurve||[];
+       if(action==='add-power-point'&&points.length<128)points.push({dutyPercent:null,rpm:null,watts:null});
+       if(action==='remove-power-point'){
+         const i=Number(el.dataset.pointIndex);
+         if(Number.isInteger(i)&&i>=0&&i<points.length)points.splice(i,1);
+       }
+       await persist(S,h);return true;
+     }
      if(action==='electrical-preset'){
        const scope=el.dataset.electricalScope;
        const [,sysId]=scope?.split(':')||[];

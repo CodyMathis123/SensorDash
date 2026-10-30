@@ -5,6 +5,31 @@ internal sealed record AccessoryPowerHistory(string Name, string System, string 
 
 internal static class AccessoryPowerModel
 {
+    // Match the browser's per-unit curve interpolation. Incomplete rows are drafts.
+    internal static double? Curve(CoolingElectricalConfig e, double? duty, double? rpm)
+    {
+        double? At(double? value, bool byRpm)
+        {
+            if (value is not double x || !double.IsFinite(x) || x < 0 || x > (byRpm ? 100000 : 100)) return null;
+            var points = (e.PowerCurve ?? []).Where(p=>p is not null)
+                .Select(p=>(X: byRpm ? p.Rpm : p.DutyPercent, W: p.Watts))
+                .Where(p=>p.X is >= 0 && p.X <= (byRpm ? 100000 : 100) && p.W is >= 0 and <= 1000)
+                .OrderBy(p=>p.X).ToArray();
+            if (points.Length < 2 || points.Select(p=>p.X).Distinct().Count()!=points.Length) return null;
+            // Clamp outside the measured range; never extrapolate negative power.
+            if (x <= points[0].X) return points[0].W;
+            for (int i=1;i<points.Length;i++)
+                if (x <= points[i].X)
+                {
+                    var a=points[i-1]; var b=points[i];
+                    return a.W + (b.W-a.W)*(x-a.X)/(b.X-a.X);
+                }
+            return points[^1].W;
+        }
+        if (e.Quantity is < 1 or > 100) return null;
+        return (At(rpm,true) ?? At(duty,false)) * e.Quantity;
+    }
+
     internal static double? Rating(CoolingElectricalConfig e) => e.WattsPerUnit is double w
         ? w * e.Quantity : e.Volts is double v && e.AmpsPerUnit is double a ? v * a * e.Quantity : null;
 
@@ -19,6 +44,7 @@ internal static class AccessoryPowerModel
                 * Math.Clamp((duty.Value - lo) / (hi - lo), 0, 1);
             return (watts, "Calibrated estimate");
         }
+        if (Curve(e,duty,rpm) is double curve) return (curve, "Power curve estimate");
         // RPM establishes observed runtime; it is not a power scaling factor.
         // Zero PWM cannot establish that a fan stopped (many retain a minimum).
         if (rpm is >= 0 && Rating(e) is double rated) return (rpm > 0 ? rated : 0, "Rated estimate");

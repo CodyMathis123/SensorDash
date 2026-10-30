@@ -81,6 +81,7 @@ const HistoryInsights=(()=>{
   const accessoryRows=accessories.map((a,index)=>{
    const x=a.stats||{},has=x.count>0;
    const details={Measured:'Recorded power sensor readings.',
+    'Power curve estimate':'Estimated from recorded RPM or PWM and the per-unit power curve, multiplied by quantity. Excludes hub losses.',
     'Calibrated estimate':'Estimated from recorded PWM and your measured group power settings.',
     'Rated estimate':'Configured rated power during recorded running time. Actual use may be lower.',
     'Mixed estimate':'Uses measured power when available, then calibration or rated power during recorded running time.',

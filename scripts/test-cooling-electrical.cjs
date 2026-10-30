@@ -98,3 +98,34 @@ assert.match(aliasedEditor,/value="pumpRPM"/,'Aliases must not replace saved sen
 fans.electrical.powerSensorId='radPower';
 assert.equal(electrical.running(S,fans).detail,'Fan bank watts');
 console.log('PASS: rated 43.08W, unknown running draw, calibrated/model distinction, aliases, source-limit warning and UI persistence');
+
+// Per-unit curves are estimates, not PWM fractions of the nameplate rating.
+const curveConfig={quantity:19,powerCurve:[{dutyPercent:0,rpm:0,watts:0},{dutyPercent:50,rpm:1000,watts:.4},{dutyPercent:100,rpm:2000,watts:1}]};
+const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);
+near(electrical.curve(curveConfig,25,null),3.8);
+near(electrical.curve(curveConfig,25,1500),13.3);
+assert.equal(electrical.curve(curveConfig,null,null),null);
+assert.equal(electrical.curve(curveConfig,100,0),0);
+assert.equal(electrical.curve(curveConfig,null,2500),19);
+curveConfig.powerCurve.push({rpm:1000,watts:.6});
+assert.equal(electrical.curve(curveConfig,null,1000),null);
+near(electrical.curve(curveConfig,25,1000),3.8);
+const preset=electrical.presets['p12-pro-pst-ln'];
+near(electrical.curve(preset,50,null),.384*19);
+near(electrical.curve(preset,null,1998),.97119*19);
+assert.equal(electrical.curve(preset,5,null),0);
+assert.equal(electrical.applyPreset(S,'component:main:fan1','p12-pro-pst-ln'),true);
+assert.equal(fans.electrical.powerSensorId,'radPower');
+assert.equal(fans.electrical.measuredLowWatts,3);
+assert.equal(electrical.running(S,fans).source,'measured');
+fans.electrical.powerSensorId='';
+assert.equal(electrical.running(S,fans).source,'calibrated');
+fans.electrical.lowDutyPercent=null;
+assert.equal(electrical.running(S,fans).source,'curve');
+readings[0].observedAt='2009-01-01T00:00:00Z';
+readings[1].observedAt='2009-01-01T00:00:00Z';
+assert.equal(electrical.running(S,fans),null);
+fans.electrical.powerCurve[0].watts=99;
+assert.equal(preset.powerCurve[0].watts,0,'Preset and other components must not share mutable points');
+assert.equal(auto.electrical.powerCurve[0].watts,0);
+console.log('PASS: power curve interpolation, priority, stale readings, preset isolation and quantity');

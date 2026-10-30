@@ -66,6 +66,16 @@ async function succeed(index){
  assert.deepEqual(Array.from(part().sensorIds),['tach4']);assert.equal(add.value,'');
  const quantity=field('[data-electrical-field]',{electricalField:'quantity',electricalScope:'component:loop:pump'},'-1');
  quantity.validity.valid=false;edit(quantity,'input');await tick();assert.equal(requests.length,8);
+ part().electrical.powerCurve=[{rpm:500,watts:.1},{rpm:2000,watts:1}];
+ const point=field('[data-electrical-field]',{electricalField:'powerCurve',electricalScope:'component:loop:pump',curveIndex:'0',curveKey:'watts'},'.12');
+ edit(point);await tick();
+ assert.equal(requests[8].body.coolingSystems[0].components[0].electrical.powerCurve[0].watts,.12);
+ point.value='.15';edit(point,'input');await succeed(8);
+ assert.equal(part().electrical.powerCurve[0].watts,.15,'Late response retains newer curve edit');
+ const curveSave=workspace.flushCooling(S);await tick();await succeed(9);await curveSave;
+ assert.equal(server.coolingSystems[0].components[0].electrical.powerCurve[0].watts,.15);
+ point.value='';edit(point);await tick();await succeed(10);
+ assert.equal(part().electrical.powerCurve[0].watts,null,'Blank cells remain incomplete instead of zero');
  assert.match(read('app.js'),/beforeunload/);
  assert.match(read('app.js'),/handleCoolingInput\(e,S/);
  console.log('PASS: cooling autosave, debounce, navigation, serialized writes, stale responses, failures/retry, locks and sensor selection');
