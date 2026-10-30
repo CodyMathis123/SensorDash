@@ -13,6 +13,7 @@ const fanDebug=source('src/SensorDash/wwwroot/fan-control-debug.js');
 const fanFeedback=source('src/SensorDash/wwwroot/fan-feedback.js');
 const coolingInsights=source('src/SensorDash/wwwroot/cooling-insights.js');
 const historyInsights=source('src/SensorDash/wwwroot/history-insights.js');
+const coolingElectrical=source('src/SensorDash/wwwroot/cooling-electrical.js');
 const locks=source('src/SensorDash/wwwroot/workspace-locks.js');
 const app=source('src/SensorDash/wwwroot/app.js');
 const css=source('src/SensorDash/wwwroot/style.css');
@@ -28,7 +29,7 @@ const context={
  fetch:async(_url,opts)=>({ok:true,json:async()=>JSON.parse(opts.body)}),
  console
 };
-const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanDebug+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+historyInsights+'\n'+script+'\nSDWorkspace;',context);
+const workspace=vm.runInNewContext(locks+'\n'+fanUx+'\n'+fanDebug+'\n'+fanFeedback+'\n'+coolingInsights+'\n'+historyInsights+'\n'+coolingElectrical+'\n'+script+'\nSDWorkspace;',context);
 function sensor(id,name,type,value,device='Generic hardware',deviceType='Controller'){
  return {id,name,type,value,device,deviceType,deviceId:'device-'+deviceType};
 }

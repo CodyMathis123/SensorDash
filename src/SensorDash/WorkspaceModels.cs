@@ -17,6 +17,29 @@ public sealed class CoolingComponentConfig
     public string Name { get; set; } = "Component";
     public string Kind { get; set; } = "other"; // heat-source, fan-group, pump, temperature-probe, flow-meter, other
     public List<string> SensorIds { get; set; } = [];
+    public CoolingElectricalConfig? Electrical { get; set; }
+}
+// Optional descriptive electricity model. No control channel IDs are stored
+// here: the existing fan mappings remain the sole authority for PWM outputs.
+public sealed class CoolingElectricalConfig
+{
+    public string Model { get; set; } = "";
+    public int Quantity { get; set; } = 1;
+    public double? Volts { get; set; }
+    public double? AmpsPerUnit { get; set; }
+    public double? WattsPerUnit { get; set; }
+    public string PowerSource { get; set; } = "";
+    public double? SourceMaxAmps { get; set; }
+    public string RpmSensorId { get; set; } = "";
+    public string ControlSensorId { get; set; } = "";
+    public string PowerSensorId { get; set; } = "";
+    // User-measured *whole-group* watts at two reported PWM duties.
+    // The UI may interpolate between these points but never treats nameplate
+    // power x PWM as an observation.
+    public double? LowDutyPercent { get; set; }
+    public double? HighDutyPercent { get; set; }
+    public double? MeasuredLowWatts { get; set; }
+    public double? MeasuredHighWatts { get; set; }
 }
 public sealed class WorkspaceDashboardConfig
 {
@@ -155,6 +178,31 @@ public static class WorkspaceLogic
                     "temperature-probe" or "coolant-probe" or "case-air" or
                     "room-ambient" or "flow-meter" or "other" ? component.Kind : "other";
                 component.SensorIds = Ids(component.SensorIds);
+                if(component.Electrical is { } e)
+                {
+                    e.Model=Short(e.Model,100);
+                    e.PowerSource=Short(e.PowerSource,100);
+                    e.Quantity=Math.Clamp(e.Quantity,1,100);
+                    static double? Limited(double? x,double max) =>
+                        x is double v && double.IsFinite(v) && v>=0 && v<=max ? v : null;
+                    e.Volts=Limited(e.Volts,100);
+                    e.AmpsPerUnit=Limited(e.AmpsPerUnit,30);
+                    e.WattsPerUnit=Limited(e.WattsPerUnit,1000);
+                    e.SourceMaxAmps=Limited(e.SourceMaxAmps,300);
+                    e.LowDutyPercent=Limited(e.LowDutyPercent,100);
+                    e.HighDutyPercent=Limited(e.HighDutyPercent,100);
+                    e.MeasuredLowWatts=Limited(e.MeasuredLowWatts,5000);
+                    e.MeasuredHighWatts=Limited(e.MeasuredHighWatts,5000);
+                    if(e.LowDutyPercent>=e.HighDutyPercent ||
+                       e.MeasuredLowWatts>e.MeasuredHighWatts)
+                    {
+                        e.LowDutyPercent=null;e.HighDutyPercent=null;
+                        e.MeasuredLowWatts=null;e.MeasuredHighWatts=null;
+                    }
+                    e.RpmSensorId=Short(e.RpmSensorId,256);
+                    e.ControlSensorId=Short(e.ControlSensorId,256);
+                    e.PowerSensorId=Short(e.PowerSensorId,256);
+                }
                 return component;
             }).ToList();
             return system;

@@ -140,6 +140,8 @@ const SDWorkspace = (() => {
    return (metricBody?'<div class="metrics">'+metricBody+'</div>':'')+
       card('Recorded peaks and component power','Raw-sample maxima, power averages and observed energy intervals',
         HistoryInsights.markup(S))+
+      card('Cooling electrical budget','Nameplate fan and pump ratings, with optional calibrated or directly measured load',
+        CoolingElectrical.overview(S))+
       '<div class="two-col">'+h.panel('Temperature history','Detected physical temperature sensors',trends)+
       h.panel('Hardware catalog','Discovered from the elevated collector',
       ['Temperature','Fan','Control','Power','Flow','Load'].map(t=>
@@ -278,7 +280,8 @@ const SDWorkspace = (() => {
          '<strong>'+safe(c.name)+'</strong><p class="note">'+safe(componentLabel(c.kind))+'</p>'+
          '<div class="w-chips">'+(current.map(r=>'<span class="w-chip">'+
            safe(S.settings?.aliases?.[r.id]||r.name)+'</span>').join('')||
-           '<span class="note">No assigned sensors</span>')+'</div></div>';
+           '<span class="note">No assigned sensors</span>')+'</div>'+
+         CoolingElectrical.editor(S,c,scope,false)+'</div>';
        return '<div class="w-component'+(focused?' w-referenced-component':'')+
          '" data-cooling-system-id="'+attr(sys.id)+'" data-cooling-component-id="'+attr(c.id)+'">'+
          '<div class="w-actions w-compact">'+
@@ -288,6 +291,7 @@ const SDWorkspace = (() => {
          '<p class="note">'+safe(componentKinds.find(x=>x.id===c.kind)?.hint||'Hardware sensor association')+'</p>'+
          (outOfKind.length?'<p class="note">Existing assignments of other types are retained; change the component role if necessary.</p>':'')+
          selectors(S,c.sensorIds,scope)+
+         CoolingElectrical.editor(S,c,scope,true)+
          '<div class="w-add-input">'+select(S,'',s=>suitable(c.kind,s),
            'Add compatible sensor','data-add-to="'+attr(scope)+'"')+
          button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div></div>';
@@ -295,6 +299,7 @@ const SDWorkspace = (() => {
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
        CoolingInsights.overview(S,sys)+summary+powerDetails+
+       CoolingElectrical.summaryCard(S,sys)+
        CoolingInsights.analysis(S,sys)+
        '<div class="cooling-timeline-intro"><strong>Synchronized thermal timeline</strong>'+
        '<p class="note">Move across any chart to inspect the same instant in temperature, power, RPM, duty and flow. The global history range applies to every chart. Events appear underneath.</p></div>'+
@@ -705,6 +710,20 @@ const SDWorkspace = (() => {
      const o=d.coolingSystems.find(c=>c.id===id)?.components.find(c=>c.id===child);
      if(o)o[e.dataset.componentName?'name':'kind']=e.value;
    }
+   for(const e of document.querySelectorAll('[data-electrical-field]')){
+     const [,systemId,componentId]=(e.dataset.electricalScope||'').split(':');
+     const component=d.coolingSystems.find(x=>x.id===systemId)?.components.find(x=>x.id===componentId);
+     if(!component||!['fan-group','pump'].includes(component.kind))continue;
+     const key=e.dataset.electricalField;
+     const val=e.value.trim(),numeric=['quantity','volts','ampsPerUnit','wattsPerUnit',
+       'sourceMaxAmps','lowDutyPercent','highDutyPercent','measuredLowWatts',
+       'measuredHighWatts'].includes(key);
+     // Empty editor sections should not create unnecessary specs.
+     if(!component.electrical && !val && key!=='quantity')continue;
+     if(!component.electrical && key==='quantity'&&val==='1')continue;
+     component.electrical=component.electrical||{quantity:1};
+     component.electrical[key]=numeric?(val===''?null:Number(val)):val;
+   }
    for(const e of document.querySelectorAll('[data-field="dashboard-name"]')){
      const o=d.dashboards.find(c=>c.id===e.dataset.object);if(o)o.name=e.value;
    }
@@ -865,6 +884,18 @@ const SDWorkspace = (() => {
      }
      // Preserve unsaved editor inputs when pressing Add/Remove.
      syncInputs(S);
+     if(action==='electrical-preset'){
+       const scope=el.dataset.electricalScope;
+       const [,sysId]=scope?.split(':')||[];
+       const parent=cfg.coolingSystems?.find(s=>s.id===sysId);
+       if(!scope||!parent||WorkspaceLocks.cooling(S,sysId)){
+         h.toast('Unlock the cooling system before editing electrical specifications.');return true;
+       }
+       if(!CoolingElectrical.applyPreset(S,scope,el.dataset.electricalPreset)){
+         h.toast('Preset is not compatible with this component.');return true;
+       }
+       await persist(S,h);return true;
+     }
      const cfg=S.settings;
      if(action==='switch-dashboard'){S.workspaceDashboardId=id;h.render();return true;}
      if(action==='toggle-dashboard-lock'){

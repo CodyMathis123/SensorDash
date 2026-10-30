@@ -361,3 +361,41 @@
 @media(max-width:800px){.history-storage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:510px){.history-storage-metrics{grid-template-columns:1fr}
  .history-insights-table,.history-storage-table{overflow-x:auto}}
+
+/* Cooling Systems electrical inventory is metadata, never PWM authorization. */
+.electrical-budget{border:1px solid #33515b;border-radius:12px;background:#12252f;
+ padding:16px;margin:16px 0}
+.electrical-budget h3{color:#dceef5;margin:0 0 5px;font-size:14px}
+.electrical-totals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.electrical-totals>div{display:flex;flex-direction:column;gap:6px;border:1px solid #315260;
+ border-radius:9px;background:#1a303f;padding:13px}
+.electrical-totals small{color:#adc5d1;font-size:11px}
+.electrical-totals strong{font-size:22px;color:#e2f2f8;font-variant-numeric:tabular-nums}
+.electrical-totals span{font-size:11px;line-height:1.4;color:#a5bcc9}
+.electrical-rows{display:grid;gap:7px}
+.electrical-row{display:flex;gap:16px;justify-content:space-between;align-items:center;
+ padding:10px;border:1px solid #2b4552;border-radius:9px;background:#192e3a}
+.electrical-row>div{display:grid;gap:4px;min-width:0}
+.electrical-row>div:last-child{text-align:right;white-space:nowrap}
+.electrical-row strong{font-size:12px;color:#e1f0f5}
+.electrical-row small{font-size:11px;color:#9cb6c4;overflow-wrap:anywhere;white-space:normal}
+.electrical-warning{color:#f2bf7b;font-size:11px;border-left:3px solid #d6933c;
+ margin:6px 0 12px;padding:7px 10px;background:#322a21}
+.electrical-budget>.note{margin:13px 0 0;line-height:1.6}
+.electrical-system-overview>h3{margin:12px 0 0;font-size:13px}
+.electrical-system-overview .electrical-budget{margin:8px 0 16px}
+.electrical-editor{margin:12px 0;border:1px solid #365362;border-radius:9px;background:#132633}
+.electrical-editor>summary{font-size:12px;font-weight:650;color:#8de4dc;cursor:pointer;padding:12px}
+.electrical-editor>p,.electrical-editor>.w-actions,.electrical-editor-grid,.electrical-calibration{margin:9px 12px}
+.electrical-editor-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.electrical-editor-grid label{font-size:11px;display:flex;flex-direction:column;gap:5px;color:#a9c3cf;min-width:0}
+.electrical-editor-grid input,.electrical-editor-grid select{width:100%;min-width:0}
+.electrical-calibration{padding:12px;border:1px solid #2c4755;border-radius:8px}
+.electrical-calibration>summary{cursor:pointer;font-size:11px;color:#9fded5}
+.electrical-calibration>.note{margin:10px 0}
+.electrical-calibration>.electrical-editor-grid{margin:8px 0 0;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:850px){.electrical-editor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.electrical-editor-grid,.electrical-calibration>.electrical-editor-grid,
+ .electrical-totals{grid-template-columns:1fr}
+ .electrical-row{align-items:start;flex-direction:column;gap:6px}
+ .electrical-row>div:last-child{text-align:left;white-space:normal}}
