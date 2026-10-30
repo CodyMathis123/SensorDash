@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="SensorDash"
-           Manufacturer="CodyMathis" Version="0.8.2" Scope="perMachine"
-           UpgradeCode="6D8F4B3B-3780-4A7C-AD1D-58343B1AD2CE">
+           Manufacturer="CodyMathis" Version="$(var.SensorDashVersion)" ProductCode="$(var.SensorDashProductCode)" Scope="perMachine"
+           UpgradeCode="$(var.SensorDashUpgradeCode)">
     <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of SensorDash is already installed." />
+    <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version of SensorDash is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <!-- Advertised EXE shortcuts require icon data in PE format with an .exe Icon ID.
          The tiny build-only carrier contains the same icon as SensorDash.exe. -->

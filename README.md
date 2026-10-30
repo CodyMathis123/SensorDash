@@ -1,3 +1,7 @@
+# SensorDash 0.8.3 — MSI upgrade and release identity fix
+
+The 0.8.3 installer replaces earlier related installations, including duplicate 0.8.2 registrations. Release identity and upgrade requirements are documented in [the installer ADR](docs/adr/0002-msi-release-identity.md).
+
 # SensorDash 0.8.2 — Cooling electrical preset click fix and Production consolidation
 
 Contributors: start with [AGENTS.md](AGENTS.md), the [project/source map](docs/project.md), [development and delivery workflow](docs/development.md), and [architecture decisions](docs/adr/README.md).
