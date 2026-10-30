@@ -1,4 +1,4 @@
-name: Windows MSI and portable build
+name: Windows MSI build
 # Validate PRs before merging, then verify Production after merge.
 on:
   pull_request:
@@ -46,6 +46,8 @@ jobs:
           node --check src/SensorDash/wwwroot/chart-time-axis.js
           node --check src/SensorDash/wwwroot/history-insights.js
           node --check src/SensorDash/wwwroot/cooling-electrical.js
+      - name: Test previous MSI artifact selection
+        run: node scripts/test-msi-baseline.cjs
       - name: Test configurable cooling systems and sensor usage
         run: node scripts/test-workspace.cjs
       - name: Test cooling autosave and concurrent settings writes
@@ -167,7 +169,7 @@ jobs:
           if ($js -notmatch 'scheduleChartPaint\(\)') { throw 'Missing chart paint scheduling' }
           if ($js -notmatch 'if\(document.hidden\|\|chartInUse\(\)\)') { throw 'Missing hover redraw guard' }
           if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
-      - name: Publish portable Windows build
+      - name: Publish Windows application
         run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
       - name: Validate generic models and simulation engine
         shell: pwsh
@@ -324,32 +326,35 @@ jobs:
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
           }
-      - name: Download previous successful Production installer
+      - name: Select previous successful Production installer
+        id: baseline
         uses: actions/github-script@v7
         with:
           script: |
-            const download = require('./scripts/download-msi-baseline.cjs');
-            await download({github, context});
-      - name: Extract previous installer
-        shell: pwsh
-        run: Expand-Archive -LiteralPath "$env:RUNNER_TEMP/sensordash-baseline.zip" -DestinationPath "$env:RUNNER_TEMP/sensordash-baseline"
+            const select = require('./scripts/select-msi-baseline.cjs');
+            const baseline = await select({github, context});
+            core.setOutput('run-id', baseline.runId);
+            core.setOutput('artifact-id', baseline.artifactId);
+      - name: Download previous Production MSI
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.baseline.outputs.artifact-id }}
+          run-id: ${{ steps.baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/sensordash-baseline
       - name: Verify MSI upgrade, repair, downgrade rejection and uninstall
         shell: pwsh
         run: ./scripts/Test-MsiUpgrade.ps1
       - name: Upload installer diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-diagnostics
           path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - name: Upload MSI
+        uses: actions/upload-artifact@v7
         with:
-          name: SensorDash-Setup-${{ env.SENSORDASH_VERSION }}-x64
           path: installer-output/**/*.msi
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SensorDash-win-x64
-          path: dist/**
+          archive: false
           if-no-files-found: error
