@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -362,6 +363,13 @@ jobs:
           }
           if (Test-Path $startLink) { throw 'MSI uninstall left the Start Menu shortcut behind' }
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
+      - name: Upload installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-diagnostics
+          path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: SensorDash-Setup-${{ env.SENSORDASH_VERSION }}-x64

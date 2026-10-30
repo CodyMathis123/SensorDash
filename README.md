@@ -1,4 +1,9 @@
-# SensorDash 0.8.3 — MSI upgrade and release identity fix
+# SensorDash 0.8.4 — Sensor aliases and desktop servicing
+
+Configured aliases are used in cooling/electrical selectors and readings; Sensor Explorer also exposes the original name. Correlation panels retain idle or insufficiently sampled heat sources with an explanation. MSI servicing closes the desktop dashboard, with running-desktop regression coverage.
+Dashboard charts now synchronize hover inspection within each dashboard, using the same timestamp across their individual units and scales.
+
+## SensorDash 0.8.3 — MSI upgrade and release identity fix
 
 The 0.8.3 installer replaces earlier related installations, including duplicate 0.8.2 registrations. Release identity and upgrade requirements are documented in [the installer ADR](docs/adr/0002-msi-release-identity.md).
 

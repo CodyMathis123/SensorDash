@@ -46,7 +46,7 @@ const CoolingElectrical=(()=>{
   const e=spec(c);
   if(!e)return null;
   const measured=fresh(S,e.powerSensorId,'Power');
-  if(measured&&measured.value>=0)return {watts:measured.value,source:'measured',detail:measured.name};
+  if(measured&&measured.value>=0)return {watts:measured.value,source:'measured',detail:S.settings?.aliases?.[measured.id]||measured.name};
   const low=number(e.measuredLowWatts),high=number(e.measuredHighWatts),
         lower=number(e.lowDutyPercent),upper=number(e.highDutyPercent),percent=duty(S,c);
   if(low===null||high===null||lower===null||upper===null||percent===null||
@@ -120,7 +120,7 @@ const CoolingElectrical=(()=>{
    field==='controlSensorId'?'PWM duty sensor (optional)':'Tachometer sensor')+
    '<select data-electrical-field="'+field+'" data-electrical-scope="'+esc(scope)+'">'+
    '<option value="">No sensor</option>'+options.map(s=>
-    '<option value="'+esc(s.id)+'" '+(s.id===chosen?'selected':'')+'>'+esc(s.device+' / '+s.name)+'</option>')
+    '<option value="'+esc(s.id)+'" '+(s.id===chosen?'selected':'')+'>'+esc(S.settings?.aliases?.[s.id]||(s.device+' / '+s.name))+'</option>')
     .join('')+'</select></label>';
  };
  const editor=(S,c,scope,editing)=>{

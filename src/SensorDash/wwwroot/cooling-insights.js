@@ -13,7 +13,8 @@ const CoolingInsights=(()=>{
   maximumFractionDigits:s.type==='Fan'?0:1})+' '+(unit[s.type]||''):'—';
  const sensor=(S,id)=>S.byId?.get(id);
  const assigned=(S,part,type)=>[...new Set(part.sensorIds||[])].map(id=>sensor(S,id))
-  .filter(s=>s && (!type||s.type===type));
+  .filter(s=>s && (!type||s.type===type))
+  .map(s=>({...s,name:S.settings?.aliases?.[s.id]||s.name}));
  const sections=(S,sys)=> (sys.components||[]).map(part=>({
   part, temperatures:assigned(S,part,'Temperature'),powers:assigned(S,part,'Power'),
   fans:assigned(S,part,'Fan'),controls:assigned(S,part,'Control'),
@@ -81,16 +82,18 @@ const CoolingInsights=(()=>{
   const heat=sections(S,sys).filter(p=>p.part.kind==='heat-source');
   const pairs=heat.map(p=>{
    const power=p.powers[0],temp=p.temperatures[0];
-   return power&&temp?{part:p.part.name,power,temp,
-     result:correlation(S.history?.[power.id],S.history?.[temp.id])}:null;
-  }).filter(Boolean);
-  const usable=pairs.filter(p=>p.result);
-  if(!pairs.length)return '<p class="note">Assign a temperature and power reading to a heat source to compare their histories.</p>';
-  if(!usable.length)return '<p class="note">Waiting for at least 12 paired, varying history samples (within 15 seconds). Correlations never change hardware control.</p>';
-  return '<div class="cooling-correlation-list">'+usable.map(p=>
+   const samples=power&&temp?pair(S.history?.[power.id],S.history?.[temp.id]):[];
+   return {part:p.part.name,power,temp,
+     result:power&&temp?correlation(S.history?.[power.id],S.history?.[temp.id]):null,
+     reason:!power||!temp?'Assign both power and temperature sensors':samples.length<12?
+       'Waiting for at least 12 paired samples (within 15 seconds)':'Not enough power or temperature variation to calculate correlation'};
+  });
+  if(!pairs.length)return '<p class="note">Add a heat source with temperature and power sensors to compare their histories.</p>';
+  return '<div class="cooling-correlation-list">'+pairs.map(p=>
    '<div class="cooling-correlation-row"><strong>'+esc(p.part)+'</strong>'+
-    '<span>'+esc(p.power.name)+' ↔ '+esc(p.temp.name)+'</span>'+
-    '<b>r = '+p.result.r.toFixed(2)+'</b><small>'+p.result.samples+' paired samples</small></div>'
+    '<span>'+esc(p.power?.name||'Power not assigned')+' ↔ '+esc(p.temp?.name||'Temperature not assigned')+'</span>'+
+    (p.result?'<b>r = '+p.result.r.toFixed(2)+'</b><small>'+p.result.samples+' paired samples</small>':
+      '<b>Unavailable</b><small>'+esc(p.reason)+'</small>')+'</div>'
   ).join('')+'</div>'+
   '<p class="note">Pearson r describes simultaneous co-movement, not cooling efficiency or causation. Thermal lag, workload and sensor selection can change it. Independent CPU/GPU readings are not summed.</p>';
  };

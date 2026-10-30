@@ -89,7 +89,7 @@ const HistoryInsights=(()=>{
  const storagePanel=()=>'<div class="history-storage-view">'+
   '<div class="w-actions"><button class="btn secondary" id="refreshStorageFootprint">Refresh storage usage</button></div>'+
   '<div id="historyStorageSummary" aria-live="polite"><p class="note">Reading current SQLite storage footprint…</p></div></div>';
- const storageHtml=d=>{
+ const storageHtml=(d,S={})=>{
   if(!d||!Number.isFinite(d.dbBytes))return '<p class="note">Storage information unavailable.</p>';
   const total=d.dbBytes+d.walBytes+d.shmBytes,
     count=Math.max(0,d.sampleCount||0);
@@ -98,7 +98,7 @@ const HistoryInsights=(()=>{
   const rows=(d.devices||[]).map(x=>'<tr><td>'+esc(x.device)+'</td><td>'+num(x.sensors,0)+
    '</td><td>'+num(x.samples,0)+'</td><td>'+num(share(x.samples),1)+'%</td>'+
    '<td>'+estimate(x.samples)+'</td></tr>').join('');
-  const sensors=(d.sensors||[]).map(x=>'<tr><td>'+esc(x.name)+
+  const sensors=(d.sensors||[]).map(x=>'<tr><td>'+esc(S.settings?.aliases?.[x.id]||x.name)+
    '<small>'+esc(x.device)+'</small></td><td>'+num(x.count,0)+'</td>'+
    '<td>'+num(share(x.count),1)+'%</td><td>'+estimate(x.count)+'</td></tr>').join('');
   const observed=d.oldest&&d.newest?(d.newest-d.oldest)/86400000:null;
@@ -156,7 +156,7 @@ const HistoryInsights=(()=>{
    const el=document.getElementById('historyStorageSummary');
    if(!el)return;
    if(storage){
-    el.innerHTML=storageHtml(storage.value);
+    el.innerHTML=storageHtml(storage.value,S);
     if(Date.now()-storage.time<120000)return;
    }
    if(storageReq)return;
@@ -164,7 +164,7 @@ const HistoryInsights=(()=>{
     if(!r.ok)throw Error('Storage statistics unavailable');
     const value=await r.json();storage={value,time:Date.now()};
     if(S.view==='settings'&&document.getElementById('historyStorageSummary'))
-     document.getElementById('historyStorageSummary').innerHTML=storageHtml(value);
+     document.getElementById('historyStorageSummary').innerHTML=storageHtml(value,S);
    }).catch(err=>{
     if(!storage&&document.getElementById('historyStorageSummary'))
      document.getElementById('historyStorageSummary').textContent=err.message;

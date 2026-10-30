@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="SensorDash"
            Manufacturer="CodyMathis" Version="$(var.SensorDashVersion)" ProductCode="$(var.SensorDashProductCode)" Scope="perMachine"
            UpgradeCode="$(var.SensorDashUpgradeCode)">
     <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
     <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version of SensorDash is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <!-- StopServices executes before deferred application closure, preserving
+         the collector's normal output-release path. Also covers tray-only hosts. -->
+    <util:CloseApplication Id="CloseSensorDash" Target="SensorDash.exe"
+                           ElevatedCloseMessage="yes" ElevatedEndSessionMessage="yes"
+                           Timeout="10" RebootPrompt="no" TerminateProcess="0" />
+    <InstallExecuteSequence>
+      <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" After="StopServices" />
+    </InstallExecuteSequence>
     <!-- Advertised EXE shortcuts require icon data in PE format with an .exe Icon ID.
          The tiny build-only carrier contains the same icon as SensorDash.exe. -->
     <Icon Id="SensorDashShortcutIcon.exe" SourceFile="$(var.PublishDir)\..\installer-assets\SensorDashShortcutIcon.exe" />

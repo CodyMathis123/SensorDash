@@ -6,4 +6,7 @@
     <DefineConstants>SensorDashVersion=$(SensorDashVersion);SensorDashProductCode=$(SensorDashProductCode);SensorDashUpgradeCode=$(SensorDashUpgradeCode);PublishDir=$(MSBuildThisFileDirectory)..\dist</DefineConstants>
     <OutputPath>$(MSBuildThisFileDirectory)..\installer-output\</OutputPath>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
 </Project>

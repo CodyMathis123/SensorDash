@@ -1,6 +1,7 @@
 'use strict';
 // Synchronized hover inspection for existing canvas charts. Does not fetch
-// data, create timers, or affect unrelated dashboard charts.
+// data or create timers. Cooling systems and dashboards each own a group;
+// dashboard IDs use a dashboard: prefix to isolate their cursor state.
 const CoolingTimeline=(()=>{
  const contexts=new WeakMap();
  let group='',timestamp=null;
