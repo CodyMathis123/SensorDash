@@ -138,6 +138,8 @@ const SDWorkspace = (() => {
    const charts=featured.filter(s=>s.type==='Temperature');
    const trends=charts.length ? h.chart(charts,'°C') : nothing('Temperature sensors will appear when discovered.');
    return (metricBody?'<div class="metrics">'+metricBody+'</div>':'')+
+      card('Recorded peaks and component power','Raw-sample maxima, power averages and observed energy intervals',
+        HistoryInsights.markup(S))+
       '<div class="two-col">'+h.panel('Temperature history','Detected physical temperature sensors',trends)+
       h.panel('Hardware catalog','Discovered from the elevated collector',
       ['Temperature','Fan','Control','Power','Flow','Load'].map(t=>

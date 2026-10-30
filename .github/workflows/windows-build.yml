@@ -3,7 +3,7 @@ name: Windows MSI and portable build
 # or through an explicit Actions -> Run workflow request.
 on:
   push:
-    branches: [Production]
+    branches: [Production, 'validation/overview-stats-20261029']
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,12 +30,15 @@ jobs:
           node --check src/SensorDash/wwwroot/cooling-timeline.js
           node --check src/SensorDash/wwwroot/chart-gaps.js
           node --check src/SensorDash/wwwroot/chart-time-axis.js
+          node --check src/SensorDash/wwwroot/history-insights.js
       - name: Test configurable cooling systems and sensor usage
         run: node scripts/test-workspace.cjs
       - name: Test gap-aware charts and hover behavior
         run: node scripts/test-chart-gaps.cjs
       - name: Test multi-day calendar axes and date tooltips
         run: node scripts/test-chart-time-axis.cjs
+      - name: Test overview peaks and storage insights
+        run: node scripts/test-history-insights.cjs
       - name: Test fan commissioning frontend contracts
         run: node scripts/test-fan-commissioning.cjs
       - name: Test sleep resume fan diagnostics
@@ -343,7 +346,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.7.3-x64
+          name: SensorDash-Setup-0.8.0-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

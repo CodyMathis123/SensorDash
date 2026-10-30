@@ -339,3 +339,25 @@
    are present. The base canvas owns shading; the overlay owns hover labels. */
 .chart-gap-note{margin:8px 0 0;font-size:11px;color:#97afc0;line-height:1.4}
 .chart-gap-note[hidden]{display:none}
+
+/* Recorded heat/power maxima and archived storage footprint. Only loaded for
+   Overview or Settings, rather than repeatedly measuring every live poll. */
+.history-insights-toolbar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}
+.history-insights-toolbar label{font-size:12px;color:#9db5c5;display:flex;align-items:center;gap:9px}
+.history-insights-toolbar select{max-width:210px}
+.history-insights h3,.history-storage-view h3{margin:17px 0 9px;font-size:13px}
+.history-insights-table,.history-storage-table{max-height:none}
+.history-insights-table table,.history-storage-table table{font-size:12px}
+.history-insights-table td:first-child,.history-storage-table td:first-child{max-width:250px;word-break:break-word}
+.history-insights-table th,.history-storage-table th{white-space:normal}
+.history-insights>.note,.history-storage-view>.note{margin:13px 0 0}
+.history-storage-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.history-storage-metrics>div{display:grid;gap:5px;background:#1a2e3c;border:1px solid #314858;border-radius:9px;padding:13px}
+.history-storage-metrics small{color:#9bb4c3;font-size:11px}
+.history-storage-metrics strong{color:#e5f4fc;font-size:18px;font-variant-numeric:tabular-nums}
+.history-storage-sensors{margin:15px 0}
+.history-storage-sensors>summary{cursor:pointer;color:#8ce6dd;font-size:12px;padding:9px}
+.history-storage-sensors[open]>summary{margin-bottom:8px}
+@media(max-width:800px){.history-storage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:510px){.history-storage-metrics{grid-template-columns:1fr}
+ .history-insights-table,.history-storage-table{overflow-x:auto}}
