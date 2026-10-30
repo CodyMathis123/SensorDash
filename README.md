@@ -1,4 +1,4 @@
-# SensorDash 0.7.3 — Readable calendar dates on multi-day charts
+# SensorDash 0.8.0 — Overview historical peaks, power energy and history footprint
 
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
@@ -21,6 +21,20 @@ The old **Curve Sandbox** screen is now **Fan Control**, with continuous service
 **NVMe cooler:** Create separate curve (35°C/30%, 40/30, 45/40, 50/55, 55/75, 60/100) with its own output assignment. Storage-sensor age and staleness are enforced, and the output goes to full available speed if the temperature stops updating.
 
 Starter profiles are **opt-in** and hardware-neutral. Installations do not automatically create or activate these profiles.
+
+## Raw historical maxima, power usage, and storage diagnostics (0.8.0)
+
+The **Overview** now has an on-demand read-only panel for recorded CPU/GPU/NVMe temperature peaks and selected CPU/GPU package/board power sensors. Lookbacks: last 24 hours, 7 days, 30 days, 90 days, or the currently retained history. Individual sensor names come from the current discovered catalog and saved aliases, with no physical device IDs hardcoded.
+
+- Recorded **max temperature** and occurrence date/time, with sample average, are computed from **raw SQLite measurements**, not the 500-point chart averages. Missing history is displayed as missing, not silently replaced by a current live value.
+- Power shows **recorded peak W, average sampled W, approximate Wh and actual observed/covered hours**. Watt-hours integrate trapezoids only between successive power measurements separated by a reasonable recording interval (max 90 s for the standard 10-second logging cadence, at most 6 minutes). Unobserved gaps, sleep and shutdown are explicitly **excluded**; this is not estimated whole-PC wall power, electricity billing, or precise physical energy measurement. Sensor domains may overlap; they are deliberately **not summed**.
+- SQLite work is read-only and performed only on Overview requests. Separate APIs aggregate raw history server-side using a streaming O(1)-memory accumulator; at most eight sensor IDs per request. The UI caches summaries for 120 s so the usual 1–2 s collector polling does not trigger history scans.
+
+**Settings → History storage footprint** provides the actual file sizes of the SQLite database, WAL and shared memory, total sample rows, earliest/latest samples, and reusable SQLite pages. Hardware-device and individual-sensor tables show **row counts, percentages and approximate proportional shares of main DB size**, explicitly distinguished from exact per-sensor physical file sizes (SQLite pages, indexes, events and freed space are shared). Data is fetched only when Settings opens or Refresh is clicked, with a brief cache interval.
+
+**Retention** remains explicitly adjustable in Settings, now **1–1,095 days (up to three years)**; new installations still default to 30 days. The normal hourly cleanup removes both samples and events older than retention, but increasing retention cannot restore previously purged measurements. Deletions make SQLite pages reusable without automatically truncating the DB file. The database records at the configured save interval and may grow considerably depending on sensor count and recording mode; use real footprint measurements before choosing very long retention.
+
+Tests cover exact raw peaks, bounded gap-aware energy integration, missing-energy cases, overview sensor prioritization, storage allocation labels, and retention controls; Windows CI validates the installer.
 
 ## Calendar-aware history time axis (0.7.3)
 
@@ -48,7 +62,7 @@ Starter profiles are **opt-in** and hardware-neutral. Installations do not autom
 - Version 0.6.1 spreads chart rendering across animation frames and adds on-demand desktop/collector memory plus browser chart/cache diagnostics in Settings.
 - Version 0.6.2 separates the approved-profile lifecycle from the temperature planner, shared interpolation, PWM hardware adapter and write/recovery policy. Hardware-free self-tests exercise actual profile execution with simulated PWM channels, absent/stale/invalid readings, readjustment, write failures, limited duty ranges and shutdown behavior.
 
-**Upgrade:** Close the tray application; install the v0.7.3 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
+**Upgrade:** Close the tray application; install the v0.8.0 MSI. Existing SQLite history, aliases, workspaces, tray readouts, and saved temperature curve drafts remain in place. Quit the separate Fan Control application before enabling the corresponding SensorDash output(s).
 
 ---
 
@@ -101,7 +115,7 @@ Upgrade from v0.4.0 by exiting the tray first and running the v0.5.0 MSI. Histor
 
 A local-first Windows hardware telemetry dashboard with configurable cooling systems, dashboards, sensor discovery, tray readouts and **previewable, administrator-approved fan profiles**. The collector is an elevated Windows Service; the browser dashboard and notification-area application run as a standard user. Built with .NET 10, LibreHardwareMonitorLib, SQLite and a lightweight embedded web UI.
 
-**Development version: 0.7.3.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
+**Development version: 0.8.0.** The feature branch may be ahead of the most recently validated installer. The standard MSI pipeline runs on `Production` pushes or manual dispatch. Temporary validation branches may deliberately enable a one-off build; routine feature commits do not trigger it.
 
 ## Sleep/resume hardware recovery and diagnostic trace (0.7.1)
 

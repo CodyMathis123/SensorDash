@@ -178,8 +178,10 @@ function settingsView(){
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
  ['saveEverySeconds','SQLite save interval (sec)'],['retentionDays','History retention (days)']]
- .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="1" max="365" value="'+cfg[key]+'"></div>').join('')+
- '</div><p class="note">The simulation engine evaluates curves at 1 Hz using the newest timestamped samples. Storage can poll independently.</p>')+
+ .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="1" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" value="'+cfg[key]+'"></div>').join('')+
+ '</div><p class="note">The simulation engine evaluates curves at 1 Hz using the newest timestamped samples. Storage can poll independently. Retention can be set from 1 to 1,095 days; purged data cannot be restored by increasing retention.</p>')+
+ panel('History storage footprint','Actual SQLite size and device/sensor contribution estimates',
+ HistoryInsights.storagePanel())+
  panel('Collection and history footprint','Decide which hardware to sample and which readings deserve archived history',
  '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
  [['balanced','Balanced · temperatures, fans, power and useful load readings'],
@@ -270,6 +272,7 @@ function render(){
  byId('content').innerHTML=error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
+ HistoryInsights.afterRender(S);
 }
 // Collecting data and painting the UI run independently. Incoming 2-second sensor
 // frames must never force a costly canvas redraw in the middle of a graph hover.
@@ -705,6 +708,9 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
+ if(e.target.id==='refreshStorageFootprint'){
+  HistoryInsights.handle(e,S);return;
+ }
  const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
@@ -796,6 +802,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(HistoryInsights.handle(e,S))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}

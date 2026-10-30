@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -117,6 +117,7 @@ app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/j
 app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
 app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
 app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
+app.MapGet("/history-insights.js", () => Resource("history-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
@@ -154,6 +155,17 @@ app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken 
         .Distinct().Take(12).ToArray();
     return await ProxyAsync(new PipeCommand("history", sensors, hours), ct);
 });
+// Separate from chart buckets: preserve real recorded spikes and observed power
+// intervals. Restricted to explicit sensor IDs, with no additional polling.
+app.MapGet("/api/history/stats", async (string? ids, double? hours, CancellationToken ct) =>
+{
+    var selected=(ids??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries)
+        .Where(id=>id.Length is >0 and <=256).Distinct().Take(8).ToArray();
+    var span=double.IsFinite(hours??720)?Math.Clamp(hours??720,0.1,26280):720;
+    return await ProxyAsync(new PipeCommand("historyStats",selected,span),ct);
+});
+app.MapGet("/api/history/storage", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("historyStorage"),ct));
 app.MapGet("/api/events", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("events"), ct));
 app.MapGet("/api/simulation", async (CancellationToken ct) =>
@@ -282,7 +294,7 @@ public sealed class DashboardSettings {
     public int FastPollSeconds { get; set; } = 2;
     public int StoragePollSeconds { get; set; } = 10;
     public int SaveEverySeconds { get; set; } = 10;
-    public int RetentionDays { get; set; } = 30;
+    public int RetentionDays { get; set; } = 30; // configurable through 3 years
     public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
     public List<WorkspaceDashboardConfig> Dashboards { get; set; } = [
         new() { Id = "system", Name = "System dashboard" }
@@ -332,7 +344,7 @@ public sealed class DashboardState {
         requested.FastPollSeconds = Math.Clamp(requested.FastPollSeconds, 1, 30);
         requested.StoragePollSeconds = Math.Clamp(requested.StoragePollSeconds, 5, 120);
         requested.SaveEverySeconds = Math.Clamp(requested.SaveEverySeconds, 5, 120);
-        requested.RetentionDays = Math.Clamp(requested.RetentionDays, 1, 365);
+        requested.RetentionDays = Math.Clamp(requested.RetentionDays, 1, 1095);
         requested.Aliases ??= new();
         requested.PinnedSensors ??= [];
         requested.HighThresholds ??= new();
@@ -364,7 +376,9 @@ public sealed record HistorySeries(string Id, List<HistoryPoint> Points);
 public sealed record MonitorEvent(long T, string Severity, string Sensor, string Message, double? Value);
 public sealed class HistoryStore {
     private readonly string _connectionString;
+    private readonly string _path;
     public HistoryStore(string path) {
+        _path=path;
         _connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = true }.ToString();
         using var connection = Open();
         using var cmd = connection.CreateCommand();
@@ -432,6 +446,92 @@ public sealed class HistoryStore {
         }
         return result;
     }
+    internal static long StatsGapMs(int saveEverySeconds) =>
+        Math.Clamp((long)saveEverySeconds*3000,90000,360000);
+
+    // Bounded number of requested sensors. Stream ordered raw values through
+    // one accumulator per sensor; never materialize long history arrays or
+    // treat gaps as continuously consumed energy.
+    internal List<HistoricalSensorStats> ReadStatistics(string[] ids,double hours,
+        IReadOnlyDictionary<string,string> sensorTypes,int cadenceSeconds)
+    {
+        var now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var from=now-(long)(Math.Clamp(hours,0.1,26280)*3600000);
+        var result=new List<HistoricalSensorStats>(Math.Min(ids.Length,8));
+        using var connection=Open();
+        using var command=connection.CreateCommand();
+        command.CommandText="SELECT ts,value FROM samples WHERE sensor=$id AND ts >= $from AND ts <= $to ORDER BY ts";
+        var id=command.Parameters.Add("$id",SqliteType.Text);
+        command.Parameters.AddWithValue("$from",from);
+        command.Parameters.AddWithValue("$to",now);
+        foreach(var sensorId in ids.Where(x=>x.Length is >0 and <=256).Distinct().Take(8))
+        {
+            var type=sensorTypes.GetValueOrDefault(sensorId) ?? "Unknown";
+            var stats=new HistoryStatsAccumulator(sensorId,type,from,now,StatsGapMs(cadenceSeconds));
+            id.Value=sensorId;
+            using(var reader=command.ExecuteReader())
+                while(reader.Read())stats.Add(reader.GetInt64(0),reader.GetDouble(1));
+            result.Add(stats.Finish());
+        }
+        return result;
+    }
+
+    // Actual filesystem allocation, including SQLite WAL/SHM. Per-sensor
+    // disk allocation cannot be assigned exactly: SQLite pages are shared.
+    // Report sample row counts and proportional shares instead.
+    public object ReadStorage(SensorFrame? latest,DashboardSettings settings)
+    {
+        long Size(string file)
+        {
+            try{return File.Exists(file)?new FileInfo(file).Length:0;}
+            catch{return 0;}
+        }
+        using var c=Open();
+        using var cmd=c.CreateCommand();
+        cmd.CommandText="SELECT sensor,COUNT(*),MIN(ts),MAX(ts) FROM samples GROUP BY sensor ORDER BY COUNT(*) DESC";
+        var types=(latest?.Sensors??[]).ToDictionary(x=>x.Id,x=>x);
+        var grouped=new List<(string Sensor,long Count,long Oldest,long Newest,string Device,string SensorName)>();
+        using(var reader=cmd.ExecuteReader())
+            while(reader.Read())
+            {
+                var key=reader.GetString(0);
+                var match=types.GetValueOrDefault(key);
+                grouped.Add((key,reader.GetInt64(1),reader.GetInt64(2),reader.GetInt64(3),
+                    match?.Device ?? "Previously detected / unknown",
+                    settings.Aliases.GetValueOrDefault(key)??match?.Name??key));
+            }
+        var sensorCount=grouped.Sum(x=>x.Count);
+        var devices=grouped.GroupBy(x=>x.Device,StringComparer.Ordinal)
+            .Select(g=>new{device=g.Key,samples=g.Sum(x=>x.Count),
+                sensors=g.Count()}).OrderByDescending(g=>g.samples).ToArray();
+        using var pages=c.CreateCommand();
+        pages.CommandText="PRAGMA page_size; PRAGMA page_count; PRAGMA freelist_count;";
+        // Free pages are reusable after retention cleanup; deleting old
+        // records does not immediately shrink the SQLite file.
+        long ReadPragma(string name)
+        {
+            using var pragma=c.CreateCommand();
+            pragma.CommandText="PRAGMA "+name;
+            return Convert.ToInt64(pragma.ExecuteScalar());
+        }
+        var pageSize=ReadPragma("page_size");
+        var free=ReadPragma("freelist_count");
+        var pageCount=ReadPragma("page_count");
+        long? oldest=grouped.Count==0?null:grouped.Min(x=>x.Oldest);
+        long? newest=grouped.Count==0?null:grouped.Max(x=>x.Newest);
+        return new {
+            retentionDays=settings.RetentionDays,saveEverySeconds=settings.SaveEverySeconds,
+            mode=settings.HistoryMode,dbBytes=Size(_path),walBytes=Size(_path+"-wal"),
+            shmBytes=Size(_path+"-shm"),freePageBytes=free*pageSize,
+            allocatedPageBytes=pageCount*pageSize,sampleCount=sensorCount,
+            sensorCount=grouped.Count,oldest,newest,
+            devices, sensors=grouped.Select(x=>new {
+                id=x.Sensor,name=x.SensorName,device=x.Device,count=x.Count,
+                oldest=x.Oldest,newest=x.Newest
+            }).ToArray()
+        };
+    }
+
     public void Event(string severity, string sensor, string message, double? value) {
         using var c = Open(); using var cmd = c.CreateCommand();
         cmd.CommandText = "INSERT INTO events(ts,severity,sensor,message,value) VALUES($ts,$severity,$sensor,$message,$value)";

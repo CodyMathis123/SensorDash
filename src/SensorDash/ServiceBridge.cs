@@ -18,7 +18,8 @@ public static class CollectorClient
     public static async Task<JsonElement> AskAsync(PipeCommand request, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(6));
+        timeout.CancelAfter(TimeSpan.FromSeconds(
+            request.Op is "historyStats" or "historyStorage" ? 35 : 6));
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.Name, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(timeout.Token);
         using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
@@ -82,7 +83,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
             try
             {
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                deadline.CancelAfter(TimeSpan.FromSeconds(12));
+                deadline.CancelAfter(TimeSpan.FromSeconds(50));
                 using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, leaveOpen: true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
                 var line = await reader.ReadLineAsync(deadline.Token);
@@ -104,6 +105,14 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                         series = db.ReadHistory((req.Ids ?? []).Where(s => s.Length <= 256).Distinct().Take(12).ToArray(),
                             Math.Clamp(req.Hours ?? 1, 0.1, 24 * 30))
                     },
+                    "historyStats" => new {
+                        series=db.ReadStatistics((req.Ids??[])
+                            .Where(x=>x.Length is >0 and <=256).Distinct().Take(8).ToArray(),
+                            double.IsFinite(req.Hours??720)?Math.Clamp(req.Hours??720,0.1,26280):720,
+                            (state.Latest?.Sensors??[]).ToDictionary(s=>s.Id,s=>s.Type),
+                            state.Settings.SaveEverySeconds)
+                    },
+                    "historyStorage" => db.ReadStorage(state.Latest,state.Settings),
                     "diagnostics" => Diagnostics(),
                     "status" => new
                     {
