@@ -8,7 +8,13 @@ const CoolingElectrical=(()=>{
  const fixed=(n,d=1)=>Number.isFinite(n)?Number(n).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d}):'—';
  const presets={
   'p12-pro-pst-ln':{model:'ARCTIC P12 Pro PST LN',quantity:19,volts:12,ampsPerUnit:0.11,
-    powerSource:'Powered PWM hub'},
+    powerSource:'Powered PWM hub',
+    powerCurveSource:'ARCTIC P12 Pro LN · 12 V · 2025-09-29',
+    // Representative 12 V measurements; source and sampling policy in docs/power-curves.md.
+    powerCurve:[[0,0,0],[5,null,0],[6,483,.108],[10,495,.096],[20,660,.204],
+      [30,834,.264],[40,999,.300],[50,1167,.384],[60,1335,.468],
+      [70,1503,.552],[80,1668,.672],[90,1836,.81532],[100,1998,.97119]]
+      .map(([dutyPercent,rpm,watts])=>({dutyPercent,rpm,watts}))},
   'mcp355':{model:'Swiftech MCP355 / Laing DDC 3.2',quantity:1,volts:12,
     wattsPerUnit:18,powerSource:'Molex (PSU)'}
  };
@@ -42,6 +48,28 @@ const CoolingElectrical=(()=>{
   const e=spec(c),direct=fresh(S,e?.controlSensorId,'Control');
   return direct&&direct.value>=0&&direct.value<=100?direct.value:null;
  };
+ const curve=(e,percent,rpm)=>{
+  if(!Number.isInteger(e?.quantity)||e.quantity<1||e.quantity>100)return null;
+  const at=(value,key,max)=>{
+   if(!Number.isFinite(value)||value<0||value>max)return null;
+   const points=(e.powerCurve||[]).filter(p=>p&&Number.isFinite(p[key])&&p[key]>=0&&p[key]<=max&&
+    Number.isFinite(p.watts)&&p.watts>=0&&p.watts<=1000).slice().sort((a,b)=>a[key]-b[key]);
+   if(points.length<2||new Set(points.map(p=>p[key])).size!==points.length)return null;
+   if(value<=points[0][key])return points[0].watts;
+   for(let i=1;i<points.length;i++)if(value<=points[i][key]){
+    const a=points[i-1],b=points[i];return a.watts+(b.watts-a.watts)*(value-a[key])/(b[key]-a[key]);
+   }
+   return points.at(-1).watts;
+  };
+  const watts=at(rpm,'rpm',100000)??at(percent,'dutyPercent',100);
+  return watts===null?null:watts*e.quantity;
+ };
+ const curveRunning=(S,c)=>{
+  const e=spec(c),rpm=fresh(S,e?.rpmSensorId,'Fan')||
+   (!e?.rpmSensorId?(c.sensorIds||[]).map(id=>fresh(S,id,'Fan')).find(Boolean):null);
+  const watts=curve(e,duty(S,c),rpm?.value);
+  return watts===null?null:{watts,source:'curve',detail:'Per-unit power curve × quantity; uses RPM, or PWM when RPM is unavailable.'};
+ };
  const running=(S,c)=>{
   const e=spec(c);
   if(!e)return null;
@@ -50,7 +78,7 @@ const CoolingElectrical=(()=>{
   const low=number(e.measuredLowWatts),high=number(e.measuredHighWatts),
         lower=number(e.lowDutyPercent),upper=number(e.highDutyPercent),percent=duty(S,c);
   if(low===null||high===null||lower===null||upper===null||percent===null||
-     low<0||high<0||high<low||lower<0||upper>100||upper<=lower)return null;
+     low<0||high<0||high<low||lower<0||upper>100||upper<=lower)return curveRunning(S,c);
   // Endpoint measurements describe the ENTIRE fan group, so we don't
   // multiply the calibrated group wattage by fan count again.
   const ratio=Math.max(0,Math.min(1,(percent-lower)/(upper-lower)));
@@ -87,7 +115,7 @@ const CoolingElectrical=(()=>{
    (rpm?' · '+fixed(rpm.value,0)+' RPM':'')+
    (duty!==null?' · '+fixed(duty,0)+'% reported PWM':'')+'</small></div>'+
    '<div><strong>'+(rated!==null?fixed(rated,2)+' W rated':'No rating')+'</strong>'+
-   '<small>'+(actual?fixed(actual.watts,2)+' W '+(actual.source==='measured'?'measured':'calibrated estimate'):
+   '<small>'+(actual?fixed(actual.watts,2)+' W '+(actual.source==='measured'?'measured':actual.source==='curve'?'power curve estimate':'calibrated estimate'):
     'Running draw unknown')+'</small></div></div>'+
    (overLimit?'<p class="electrical-warning">Configured current '+fixed(amps,2)+
     ' A exceeds entered source limit '+fixed(limit,2)+' A. Check wiring and power source.</p>':'')
@@ -146,6 +174,7 @@ const CoolingElectrical=(()=>{
    sensorSelect(S,scope,'controlSensorId','Control',e.controlSensorId)+
    sensorSelect(S,scope,'powerSensorId','Power',e.powerSensorId)+
    '</div>'+
+   curveEditor(e,scope)+
    '<details class="electrical-calibration"><summary>Power calibration (optional)</summary>'+
    '<p class="note">Enter measured power for the whole group at each speed.</p>'+
    '<div class="electrical-editor-grid">'+
@@ -154,6 +183,18 @@ const CoolingElectrical=(()=>{
    numeric(scope,'highDutyPercent',e.highDutyPercent,'High PWM measurement (%)')+
    numeric(scope,'measuredHighWatts',e.measuredHighWatts,'Whole-group watts at high PWM')+
    '</div></details></details>';
+ };
+ const curveEditor=(e,scope)=>{
+  const rows=e.powerCurve||[];
+  const input=(p,i,key,label,max)=>'<input type="number" min="0" max="'+max+'" step="any" aria-label="'+label+' point '+(i+1)+'" title="0–'+max+'" data-electrical-field="powerCurve" data-electrical-scope="'+esc(scope)+'" data-curve-index="'+i+'" data-curve-key="'+key+'" value="'+esc(p[key]??'')+'">';
+  return '<details class="electrical-calibration"><summary>Power curve · '+rows.length+' points</summary>'+
+   '<p class="note">Watts per fan or pump <span tabindex="0" role="img" aria-label="Power curve information" title="Estimates use RPM, or PWM if RPM is unavailable, multiplied by quantity. Measurements and your group calibration take priority. Hub losses are excluded.">ⓘ</span></p>'+
+   textInput(scope,'powerCurveSource',e.powerCurveSource,'Curve source (optional)')+
+   '<div class="power-curve-table"><div class="power-curve-row"><span>PWM %</span><span>RPM</span><span>Watts / unit</span><span></span></div>'+
+   rows.map((p,i)=>'<div class="power-curve-row">'+input(p,i,'dutyPercent','PWM percent',100)+input(p,i,'rpm','RPM',100000)+input(p,i,'watts','Watts per unit',1000)+
+    '<button type="button" class="btn secondary" data-work="remove-power-point" data-electrical-scope="'+esc(scope)+'" data-point-index="'+i+'" aria-label="Delete power point '+(i+1)+'" title="Delete point">'+
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg></button></div>').join('')+'</div>'+
+   '<button type="button" class="btn secondary" data-work="add-power-point" data-electrical-scope="'+esc(scope)+'" '+(rows.length>=128?'disabled':'')+'>+ Point</button></details>';
  };
  let lastPaint=0;
  const paint=S=>{
@@ -171,8 +212,8 @@ const CoolingElectrical=(()=>{
   const c=S.settings?.coolingSystems?.find(s=>s.id===sysId)?.components?.find(c=>c.id===componentId);
   if(!c||c.kind!==(preset==='mcp355'?'pump':'fan-group')||!presets[preset])return false;
   // Keep existing power and feedback mappings and user calibration.
-  c.electrical={...(c.electrical||{}),...presets[preset]};
+  c.electrical={...(c.electrical||{}),...JSON.parse(JSON.stringify(presets[preset]))};
   return true;
  };
- return {presets,rate,ratedAmps,running,duty,summarize,summaryCard,overview,editor,applyPreset,paint};
+ return {presets,curve,rate,ratedAmps,running,duty,summarize,summaryCard,overview,editor,applyPreset,paint};
 })();

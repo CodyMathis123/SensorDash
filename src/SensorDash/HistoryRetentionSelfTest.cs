@@ -100,6 +100,12 @@ internal static class HistoryRetentionSelfTest
             "A rating alone must not imply continuous operation");
         Check(AccessoryPowerModel.Estimate(new() { WattsPerUnit = 18 }, null, 0, null) == null,
             "PWM alone does not establish runtime or zero draw");
+        var curveModel=settings.CoolingSystems[0].Components[1].Electrical!;
+        curveModel.PowerCurve=[new() { Rpm=0,Watts=0 },new() { Rpm=5000,Watts=10 }];
+        curveModel.Quantity=2;
+        var curveHistory=store.ReadAccessoryStatistics(settings,new Dictionary<string,string> { ["rpm"]="Fan" },1)[1];
+        Check(curveHistory.Source=="Power curve estimate" && curveHistory.Stats.EnergyWh>0,
+            "Power curves feed accessory energy from recorded tachometer samples");
         Check(WorkspaceLogic.ReferencedSensorIds(settings).Contains("watts"), "Electrical sensors must be recorded in in-use mode");
     }
     private static void Check(bool condition, string message)

@@ -21,8 +21,16 @@ public sealed class CoolingComponentConfig
 }
 // Optional descriptive electricity model. No control channel IDs are stored
 // here: the existing fan mappings remain the sole authority for PWM outputs.
+public sealed class ElectricalPowerPoint
+{
+    public double? DutyPercent { get; set; }
+    public double? Rpm { get; set; }
+    public double? Watts { get; set; }
+}
 public sealed class CoolingElectricalConfig
 {
+    public List<ElectricalPowerPoint> PowerCurve { get; set; } = [];
+    public string PowerCurveSource { get; set; } = "";
     public string Model { get; set; } = "";
     public int Quantity { get; set; } = 1;
     public double? Volts { get; set; }
@@ -188,6 +196,14 @@ public static class WorkspaceLogic
                     e.Quantity=Math.Clamp(e.Quantity,1,100);
                     static double? Limited(double? x,double max) =>
                         x is double v && double.IsFinite(v) && v>=0 && v<=max ? v : null;
+                    e.PowerCurveSource=Short(e.PowerCurveSource,300);
+                    e.PowerCurve=(e.PowerCurve ?? []).Where(p=>p is not null).Take(128).Select(p=>
+                    {
+                        p.DutyPercent=Limited(p.DutyPercent,100);
+                        p.Rpm=Limited(p.Rpm,100000);
+                        p.Watts=Limited(p.Watts,1000);
+                        return p;
+                    }).ToList();
                     e.Volts=Limited(e.Volts,100);
                     e.AmpsPerUnit=Limited(e.AmpsPerUnit,30);
                     e.WattsPerUnit=Limited(e.WattsPerUnit,1000);

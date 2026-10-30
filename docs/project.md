@@ -31,3 +31,4 @@ The browser edits configuration drafts. Approved fan profiles are separate colle
 Read the relevant source and tests for exact current behavior. This map describes responsibilities, not an exhaustive generated file inventory. Product history and installation guidance remain in the root README.
 
 `AccessoryPowerHistory.cs` computes gap-aware fan/pump energy from recorded measurements and configuration. [UI guidance](ui-guidelines.md) defines concise copy and accessible controls.
+`CoolingElectricalConfig.PowerCurve` stores per-unit speed/power points; see [power curves](power-curves.md) for source data and interpolation rules.
