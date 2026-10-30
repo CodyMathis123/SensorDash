@@ -1,3 +1,7 @@
+# SensorDash — versioned CI builds
+
+Download the MSI from a successful Production workflow run. Each new run receives a higher MSI version (`major.minor.run_number`), displayed by the application and used in the installer artifact name. PR builds and Production builds have different versions. See [CI version policy](docs/adr/0003-ci-msi-versions.md).
+
 # SensorDash 0.8.4 — Sensor aliases and desktop servicing
 
 Configured aliases are used in cooling/electrical selectors and readings; Sensor Explorer also exposes the original name. Correlation panels retain idle or insufficiently sampled heat sources with an explanation. MSI servicing closes the desktop dashboard, with running-desktop regression coverage.

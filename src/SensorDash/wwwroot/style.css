@@ -304,6 +304,7 @@
 .cooling-correlation-row>span{color:#adc3cf}
 .cooling-correlation-row>b{text-align:right;color:#8ae8dd;font-variant-numeric:tabular-nums}
 .cooling-correlation-row>small{text-align:right;color:#9bafbc}
+.cooling-correlation-row>small.correlation-note{grid-column:1/-1;text-align:left}
 .cooling-activity-list{display:grid;gap:6px}
 .cooling-activity-row{border:1px solid #2c4351;background:#172c3b;color:#cce2ec;text-align:left;
  border-radius:8px;padding:10px 12px;display:flex;align-items:start;gap:15px;width:100%;cursor:pointer;font:inherit}
