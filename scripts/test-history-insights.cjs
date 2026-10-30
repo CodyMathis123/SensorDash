@@ -47,9 +47,10 @@ const storage=ui.storageHtml({dbBytes:10485760,walBytes:1048576,shmBytes:32768,
  devices:[{device:'AMD Ryzen 9',samples:600,sensors:1},{device:'Radeon GPU',samples:400,sensors:1}],
  sensors:[{id:'cpuT',name:'CPU Core',device:'AMD Ryzen 9',count:600},
  {id:'gpuCore',name:'GPU Core',device:'Radeon GPU',count:400}]});
-for(const token of ['11.0 MiB','10.0 MiB','1.0 MiB','60.0%','40.0%','CPU Core','Radeon GPU',
- 'Reusable SQLite pages','estimates, not separately measured file sizes'])
+for(const token of ['11.0 MiB','~1.0 MiB/day','60.0%','40.0%','CPU Core','Radeon GPU',
+ 'Storage used','Estimated growth','Saved readings'])
  assert.ok(storage.includes(token),'Missing storage token: '+token);
+assert.ok(!storage.includes('SQLite pages'));
 assert.ok(src.includes('requested.RetentionDays = Math.Clamp(requested.RetentionDays, 1, 1095)'));
 assert.ok(src.includes('ReadStorage(SensorFrame? latest,DashboardSettings settings)'));
 assert.ok(src.includes('ReadStatistics(string[] ids,double hours'));
@@ -62,3 +63,8 @@ assert.ok(read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.afterR
 assert.ok(read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.storagePanel()'));
 assert.ok(read('src/SensorDash/wwwroot/index.html').includes('/history-insights.js'));
 console.log('PASS: month/retention peak summaries, power coverage, actual disk files, device/sensor shares and adjustable retention');
+
+const accessories=ui.statsHtml({sensors:[],settings:{}},[],[{name:'Pump',system:'Loop',source:'Rated estimate',ratedWatts:18,stats:{count:12,max:18,average:18,energyWh:.1,coveredHours:1/180,coveragePercent:.5}}]);
+for(const text of ['Component power','Pump','18.0 W','0.1 Wh','Rated estimate','info-tip','Actual use may be lower'])assert.ok(accessories.includes(text));
+const unknown=ui.statsHtml({sensors:[],settings:{}},[],[{name:'Fan',system:'Loop',source:'Rating only',ratedWatts:25,stats:{count:0}}]);
+assert.ok(unknown.includes('25.0 W rated'));assert.ok(!unknown.includes('0.0 Wh'));

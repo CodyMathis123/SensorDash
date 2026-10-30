@@ -94,15 +94,15 @@ const CoolingElectrical=(()=>{
   ).join('');
   return '<section class="electrical-budget" data-electrical-budget="'+esc(sys.id)+'" aria-label="Cooling electrical budget">'+
     '<div class="cooling-insights-head"><div><h3>Cooling electrical budget</h3>'+
-    '<p>Electrical component ratings and optional measurement-based estimates; no PWM control changes.</p></div></div>'+
-    '<div class="electrical-totals"><div><small>Known nameplate rating</small><strong>'+
+    '<p>Rated and measured power</p></div></div>'+
+    '<div class="electrical-totals"><div><small>Rated power</small><strong>'+
     (x.known?fixed(x.rated,2)+' W':'—')+'</strong><span>'+x.known+'/'+x.entries.length+
-    ' components rated</span></div><div><small>Observed / calibrated running load</small><strong>'+
+    ' components rated</span></div><div><small>Running power</small><strong>'+
     (x.runningKnown?fixed(x.runningWatts,2)+' W':'—')+'</strong><span>'+
     (x.runningKnown?x.runningKnown+'/'+x.entries.length+' components (partial unless all present)':
-       'Unavailable until power measurement or calibrated PWM endpoints')+'</span></div></div>'+
+       'Add a power sensor or calibration')+'</span></div></div>'+
     '<div class="electrical-rows">'+rows+'</div>'+
-    '<p class="note">Nameplate values are specifications, not current electricity use or an upper bound guaranteed in every transient. Running totals combine only explicitly measured or calibrated values; unknowns are not treated as zero. A single tachometer on a PWM splitter does not measure every fan. Ratings are not added to CPU/GPU package power because power domains may overlap.</p>'+
+    '<p class="note">Rated power is not actual consumption.</p>'+
     '</section>';
  };
  const overview=(S)=>(S.settings?.coolingSystems||[]).map(sys=>
@@ -113,7 +113,7 @@ const CoolingElectrical=(()=>{
   '<label>'+esc(placeholder)+'<input data-electrical-field="'+esc(key)+'" data-electrical-scope="'+esc(scope)+
   '" '+extra+' value="'+esc(value??'')+'"></label>';
  const numeric=(scope,key,value,title,step='any')=>
-  textInput(scope,key,value,title,'type="number" min="0" step="'+step+'"');
+  textInput(scope,key,value,title,'type="number" min="0" step="'+step+'"'+(key==='wattsPerUnit'?' title="Used instead of volts × amps when provided"':''));
  const sensorSelect=(S,scope,field,type,chosen)=>{
   const options=(S.sensors||[]).filter(s=>s.type===type);
   return '<label>'+esc(field==='powerSensorId'?'Measured power sensor':
@@ -130,7 +130,7 @@ const CoolingElectrical=(()=>{
    (rate(e)!==null?' · '+fixed(rate(e),2)+' W nameplate':'')+'</p>';
   return '<details class="electrical-editor" data-electrical-editor="'+esc(scope)+'">'+
    '<summary>Electrical specifications · '+esc(e.model||'Optional')+'</summary>'+
-   '<p class="note">Optional inventory fields. Changing these does not change PWM authorization or fan operation.</p>'+
+
    '<div class="w-actions">'+
    (c.kind==='fan-group'?'<button type="button" class="btn secondary" data-work="electrical-preset" data-electrical-preset="p12-pro-pst-ln" data-electrical-scope="'+esc(scope)+'">Use ARCTIC P12 Pro PST LN ×19</button>':
    '<button type="button" class="btn secondary" data-work="electrical-preset" data-electrical-preset="mcp355" data-electrical-scope="'+esc(scope)+'">Use MCP355 / DDC 3.2 (18 W)</button>')+
@@ -145,9 +145,9 @@ const CoolingElectrical=(()=>{
    sensorSelect(S,scope,'rpmSensorId','Fan',e.rpmSensorId)+
    sensorSelect(S,scope,'controlSensorId','Control',e.controlSensorId)+
    sensorSelect(S,scope,'powerSensorId','Power',e.powerSensorId)+
-   '</div><p class="note">If both watts and amps are entered, watts take precedence for the power rating. Current checks use amps where supplied.</p>'+
-   '<details class="electrical-calibration"><summary>Optional measured group wattage at two PWM settings</summary>'+
-   '<p class="note">Enter actual measured watts for the ENTIRE fan group at each duty, then select a live Control sensor. Values between measurements use a rough linear interpolation—not a physics-based PWM power model.</p>'+
+   '</div>'+
+   '<details class="electrical-calibration"><summary>Power calibration (optional)</summary>'+
+   '<p class="note">Enter measured power for the whole group at each speed.</p>'+
    '<div class="electrical-editor-grid">'+
    numeric(scope,'lowDutyPercent',e.lowDutyPercent,'Low PWM measurement (%)')+
    numeric(scope,'measuredLowWatts',e.measuredLowWatts,'Whole-group watts at low PWM')+

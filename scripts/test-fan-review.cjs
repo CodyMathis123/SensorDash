@@ -49,7 +49,7 @@ assert.equal(api.WorkspaceLocks.fan(S),true);
 assert.doesNotMatch(api.FanControlUx.banner(S),/data-work="start-profile"/);
 assert.match(api.FanControlUx.banner(S),/Unlock Fan Control/);
 assert.match(api.WorkspaceLocks.action('toggle-fan-lock',true),/Unlock editing/);
-assert.match(api.WorkspaceLocks.readonly('Cooling System'),/editor locked/);
+assert.match(api.WorkspaceLocks.readonly('Cooling System'),/editing locked/);
 const workspace=read('src/SensorDash/wwwroot/workspace.js');
 const app=read('src/SensorDash/wwwroot/app.js');
 const html=read('src/SensorDash/wwwroot/index.html');

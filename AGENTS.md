@@ -20,3 +20,6 @@ CI allocates each new workflow run a three-part MSI version using major.minor fr
 The owner authorizes the normal delivery loop: implement, test, push a PR, run the Windows pipeline, inspect the complete result, and merge when all required tests and the pipeline pass. No additional merge confirmation is needed for that loop.
 
 Follow [the full workflow](docs/development.md). Never merge on a pending, failed, cancelled or skipped validation run. Validate the latest PR revision; new commits require a new run. Respect branch protection and review requirements. Report concrete blockers rather than treating local environment failures as successful validation. After merging, monitor the Production run and report its result.
+
+## UI changes
+Follow [UI guidance](docs/ui-guidelines.md): concise user-facing copy, field limits in tooltips, compact editable rows and accessible information icons. Keep implementation notes in documentation or collapsed diagnostics. Preserve meaningful hardware consent and distinguish measurements from estimates.

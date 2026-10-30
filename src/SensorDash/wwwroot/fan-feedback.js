@@ -27,7 +27,7 @@ const FanFeedback=(()=>{
       '<small>'+esc(help)+'</small></span><strong data-mapped-rpm="'+esc(id)+'">'+
       esc(r.text)+'</strong></div>';
    }).join('')+
-   '<p class="note">Tachometer values come from saved channel mappings. One splitter/hub may expose only one tachometer for an entire fan bank. RPM is monitoring only; no stall detection is currently enforced.</p></div>';
+   '<p class="note">A shared fan hub may report only one fan’s RPM.</p></div>';
  };
  const paint=S=>{
   document.querySelectorAll('[data-mapped-rpm]').forEach(node=>{

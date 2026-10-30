@@ -29,3 +29,5 @@ SensorDash is a Windows hardware telemetry application with a tray UI, browser d
 The browser edits configuration drafts. Approved fan profiles are separate collector-owned snapshots, persisted under `%ProgramData%\SensorDash`; changing a draft does not authorize a live output. Layout locks are editing conveniences, not security controls. Preserve saved user settings and history across upgrades.
 
 Read the relevant source and tests for exact current behavior. This map describes responsibilities, not an exhaustive generated file inventory. Product history and installation guidance remain in the root README.
+
+`AccessoryPowerHistory.cs` computes gap-aware fan/pump energy from recorded measurements and configuration. [UI guidance](ui-guidelines.md) defines concise copy and accessible controls.

@@ -34,3 +34,5 @@ Routine servicing validation downloads the MSI artifact from the latest successf
 7. Verify the PR merged and monitor the ensuing `Production` pipeline. Report the PR, validation result and any production-build failure. Investigate failures without representing the delivery as fully validated.
 
 The workflow uploads build artifacts; merging is not authorization to install on the owner's machine or perform physical fan commissioning. Live hardware validation is separate from hardware-free CI.
+
+The single MSI lifecycle test validates previous Production installation, upgrade, repeat install, repair, downgrade rejection, shortcut/autostart entries and uninstall with desktop closure. Do not add a redundant install/uninstall cycle for the same assertions.

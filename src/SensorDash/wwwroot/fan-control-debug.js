@@ -9,10 +9,10 @@ const FanControlDebug=(()=>{
   path=d.logPath||'C:\\ProgramData\\SensorDash\\logs\\fan-control.log';
   return '<div class="panel fan-trace-panel">'+
    '<h3>Sleep / fan-control diagnostics</h3>'+
-   '<p class="note">The collector records startup, resume-like polling gaps, approved control actions, PWM state changes, errors, and one RPM/command sample per channel per minute. No per-second log spam. This is a bounded, rotating plain-text file.</p>'+
+   '<p class="note">Recent fan-control activity and errors.</p>'+
    '<div class="w-live-status">Detected resume/rearm gaps since collector start: <b>'+
       esc(d.resumeRearms??'—')+'</b></div>'+
-   '<p class="note">Collector log: <code>'+esc(path)+'</code> (up to 2 MB plus one rotated copy)</p>'+
+   '<p class="note">Collector log: <code>'+esc(path)+'</code></p>'+
    '<div class="w-actions"><button class="btn secondary" data-fan-debug="read">Show recent log</button>'+
    '<button class="btn secondary" data-fan-debug="copy">Copy recent log</button>'+
    '<button class="btn secondary" data-fan-debug="download">Save recent log</button></div>'+
