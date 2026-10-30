@@ -29,13 +29,17 @@ assert.equal(Math.round(electrical.rate(fans.electrical)*100)/100,25.08);
 assert.equal(electrical.rate(pump.electrical),18);
 assert.equal(Math.round(electrical.summarize(S,sys).rated*100)/100,43.08);
 assert.equal(electrical.ratedAmps(fans.electrical),2.09);
-assert.equal(electrical.running(S,fans),null,
- 'PWM percentage alone is not a wattage measurement');
-assert.equal(electrical.running(S,pump),null,
- '18W pump nameplate is not measured live consumption');
+assert.equal(electrical.running(S,fans).source,'rated');
+assert.equal(electrical.running(S,fans).watts,electrical.rate(fans.electrical),
+ 'PWM percentage must not scale the rating');
+assert.equal(electrical.running(S,pump).watts,18);
+assert.equal(electrical.running(S,pump).source,'rated','Rating is an estimate, not measured consumption');
 const budget=electrical.summaryCard(S,sys);
 assert.match(budget,/43.08 W/);
-assert.match(budget,/Running draw unknown/);
+assert.match(budget,/Estimated running power/);
+assert.match(budget,/Fan and pump power/);
+assert.match(budget,/All fan banks and pumps included/);
+assert.match(budget,/18.00 W rated estimate/);
 assert.match(budget,/Rated power/i);
 assert.doesNotMatch(budget,/4.31 W/,'10% is not 10% nameplate watts');
 fans.electrical.sourceMaxAmps=1;
@@ -56,13 +60,29 @@ assert.equal(electrical.running(S,fans).watts,13);
 assert.equal(electrical.running(S,fans).source,'calibrated');
 readings[1].value=10;
 fans.electrical.controlSensorId='';
-assert.equal(electrical.running(S,fans),null,'No interpolation without duty measurement');
+assert.equal(electrical.running(S,fans).source,'rated','No interpolation without duty measurement');
 fans.electrical.controlSensorId='radDuty';
 readings[1].observedAt='2009-01-01T00:00:00Z';
-assert.equal(electrical.running(S,fans),null,'Stale duty cannot appear current');
+assert.equal(electrical.running(S,fans).source,'rated','Stale duty cannot drive calibration');
 readings[1].observedAt=now;
-assert.equal(electrical.summarize(S,sys).allRunning,false,
- 'The fixed-speed pump is still unknown running watts');
+assert.equal(electrical.summarize(S,sys).allRunning,true,
+ 'The fixed-speed pump contributes a labelled rated estimate');
+readings[3].value=0;
+assert.equal(electrical.running(S,pump).watts,0);
+readings[3].value=-1;
+assert.equal(electrical.running(S,pump),null);
+readings[3].value=4412;
+readings[3].observedAt='2009-01-01T00:00:00Z';
+assert.equal(electrical.running(S,pump),null,'Stale RPM must not imply running');
+assert.equal(electrical.summarize(S,sys).allRunning,false);
+assert.match(electrical.summaryCard(S,sys),/Missing: MCP355 Pump/);
+readings[3].observedAt=now;
+pump.electrical.rpmSensorId='missing';
+assert.equal(electrical.running(S,pump),null,'Explicit unavailable RPM must not fall back to another sensor');
+assert.equal(electrical.summarize(S,sys).entries[1].rpm,null);
+delete pump.electrical.rpmSensorId;
+const noTach={...fans,sensorIds:[],electrical:{...fans.electrical,rpmSensorId:'missing',lowDutyPercent:null}};
+assert.equal(electrical.running(S,noTach),null,'PWM alone cannot establish rated runtime');
 const missing={id:'x',kind:'fan-group',name:'Unspecified fan bank',sensorIds:[]};
 assert.equal(electrical.rate(null),null);
 assert.equal(electrical.summarize(S,{components:[missing]}).rated,0);
@@ -98,7 +118,7 @@ assert.doesNotMatch(aliasedEditor,/Pump tach/);
 assert.match(aliasedEditor,/value="pumpRPM"/,'Aliases must not replace saved sensor IDs');
 fans.electrical.powerSensorId='radPower';
 assert.equal(electrical.running(S,fans).detail,'Fan bank watts');
-console.log('PASS: rated 43.08W, unknown running draw, calibrated/model distinction, aliases, source-limit warning and UI persistence');
+console.log('PASS: rated runtime estimates, missing/stale RPM, source priority, aliases and source-limit warning');
 
 // Per-unit curves are estimates, not PWM fractions of the nameplate rating.
 const curveConfig={quantity:19,powerCurve:[{dutyPercent:0,rpm:0,watts:0},{dutyPercent:50,rpm:1000,watts:.4},{dutyPercent:100,rpm:2000,watts:1}]};

@@ -547,7 +547,7 @@ const SDWorkspace = (() => {
     (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
   return FanControlUx.banner(S)+
     FanControlUx.section(S,'profiles','Live fan profiles',
-      active.length+' enabled · '+all.length+' draft(s)',content,true);
+      FanControlUx.profileSummary(S),content,true);
  };
  const starterProfiles=async(action,S,h)=>{
    const cfg=S.settings;

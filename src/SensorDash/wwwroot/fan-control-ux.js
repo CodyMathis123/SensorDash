@@ -6,6 +6,13 @@ const FanControlUx=(()=>{
  const active=S=>S.fanControl?.persistent?.profiles||[];
  const review=(S,id)=>active(S).find(p=>p.id===id);
  const pending=S=>active(S).filter(p=>p.needsReapproval);
+ const profileSummary=S=>{
+  const live=active(S),ids=new Set(live.map(p=>p.id));
+  const drafts=(S.settings?.fanProfiles||[]).filter(p=>!ids.has(p.id)).length;
+  const changed=pending(S).length;
+  return live.length+' enabled'+(drafts?' · '+drafts+' not enabled':'')+
+   (changed?' · '+changed+' awaiting reapproval':'');
+ };
  const expanded=(S,id,defaultOpen=false)=>{
   const prefs=S.fanExpanded||{};
   return Object.prototype.hasOwnProperty.call(prefs,id)?prefs[id]:defaultOpen;
@@ -56,5 +63,5 @@ const FanControlUx=(()=>{
   const indicator=editor.querySelector('[data-fan-unsaved]');
   if(indicator){indicator.hidden=false;indicator.textContent='Unsaved curve edits — save the curve, then reapprove any affected live profiles.';}
  };
- return {section,banner,profile,curve,remindUnsaved};
+ return {section,banner,profile,curve,remindUnsaved,profileSummary};
 })();

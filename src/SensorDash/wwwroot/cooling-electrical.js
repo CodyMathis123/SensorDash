@@ -76,11 +76,18 @@ const CoolingElectrical=(()=>{
   const watts=at(rpm,'rpm',100000)??at(percent,'dutyPercent',100);
   return watts===null?null:watts*e.quantity;
  };
+ const tachometer=(S,c)=>{
+  const e=spec(c);
+  return e?.rpmSensorId?fresh(S,e.rpmSensorId,'Fan'):
+   (c.sensorIds||[]).map(id=>fresh(S,id,'Fan')).find(Boolean)||null;
+ };
  const curveRunning=(S,c)=>{
-  const e=spec(c),rpm=fresh(S,e?.rpmSensorId,'Fan')||
-   (!e?.rpmSensorId?(c.sensorIds||[]).map(id=>fresh(S,id,'Fan')).find(Boolean):null);
+  const e=spec(c),rpm=tachometer(S,c);
   const watts=curve(e,duty(S,c),rpm?.value);
-  return watts===null?null:{watts,source:'curve',detail:'Per-unit power curve × quantity; uses RPM, or PWM when RPM is unavailable.'};
+  if(watts!==null)return {watts,source:'curve',detail:'Per-unit power curve × quantity; uses RPM, or PWM when RPM is unavailable.'};
+  const rated=rate(e);
+  return rated!==null&&rpm&&rpm.value>=0?
+   {watts:rpm.value>0?rated:0,source:'rated',detail:'Rating used while RPM indicates running; not a measurement. Variable-speed hardware needs a power curve for a closer estimate.'}:null;
  };
  const running=(S,c)=>{
   const e=spec(c);
@@ -103,10 +110,7 @@ const CoolingElectrical=(()=>{
     const e=spec(c),rated=rate(e),actual=running(S,c),amps=ratedAmps(e),
       limit=number(e?.sourceMaxAmps),
       overLimit=limit!==null&&amps!==null&&amps>limit+1e-7;
-    const rpmCandidates=(c.sensorIds||[]).map(id=>S.byId?.get(id))
-      .filter(s=>s?.type==='Fan');
-    const selectedRpm=fresh(S,e?.rpmSensorId,'Fan')||
-      rpmCandidates.map(s=>fresh(S,s.id,'Fan')).find(Boolean)||null;
+    const selectedRpm=tachometer(S,c);
     return {c,e,rated,actual,amps,limit,overLimit,rpm:selectedRpm,duty:duty(S,c)};
    });
   const rated=entries.reduce((sum,e)=>sum+(e.rated??0),0);
@@ -127,20 +131,25 @@ const CoolingElectrical=(()=>{
    (rpm?' · '+fixed(rpm.value,0)+' RPM':'')+
    (duty!==null?' · '+fixed(duty,0)+'% reported PWM':'')+'</small></div>'+
    '<div><strong>'+(rated!==null?fixed(rated,2)+' W rated':'No rating')+'</strong>'+
-   '<small>'+(actual?fixed(actual.watts,2)+' W '+(actual.source==='measured'?'measured':actual.source==='curve'?'power curve estimate':'calibrated estimate'):
+   '<small>'+(actual?fixed(actual.watts,2)+' W '+(actual.source==='measured'?'measured':actual.source==='curve'?'power curve estimate':actual.source==='rated'?'rated estimate':'calibrated estimate'):
     'Running draw unknown')+'</small></div></div>'+
    (overLimit?'<p class="electrical-warning">Configured current '+fixed(amps,2)+
     ' A exceeds entered source limit '+fixed(limit,2)+' A. Check wiring and power source.</p>':'')
   ).join('');
-  return '<section class="electrical-budget" data-electrical-budget="'+esc(sys.id)+'" aria-label="Cooling electrical budget">'+
-    '<div class="cooling-insights-head"><div><h3>Cooling electrical budget</h3>'+
-    '<p>Rated and measured power</p></div></div>'+
+  const missing=x.entries.filter(e=>!e.actual).map(e=>e.c.name);
+  const estimated=x.entries.some(e=>e.actual&&e.actual.source!=='measured');
+  const infoId='cooling-power-info-'+sys.id;
+  return '<section class="electrical-budget" data-electrical-budget="'+esc(sys.id)+'" aria-label="Fan and pump power">'+
+    '<div class="cooling-insights-head"><div><h3>Fan and pump power '+
+    '<button type="button" class="info-tip" popovertarget="'+esc(infoId)+'" aria-label="About fan and pump power">ⓘ</button></h3>'+
+    '<div popover id="'+esc(infoId)+'" class="info-tip-text">Fans and pumps only; CPU/GPU power is shown separately. Running power uses measurements, calibration or a power curve when available. Otherwise, the rating estimates power while RPM confirms running. Ratings are not measurements, especially at reduced speed.</div>'+
+    '<p>Cooling hardware · CPU/GPU shown separately</p></div></div>'+
     '<div class="electrical-totals"><div><small>Rated power</small><strong>'+
-    (x.known?fixed(x.rated,2)+' W':'—')+'</strong><span>'+x.known+'/'+x.entries.length+
-    ' components rated</span></div><div><small>Running power</small><strong>'+
+    (x.known?fixed(x.rated,2)+' W':'—')+'</strong><span>'+
+    (x.allRated?'All fan banks and pumps rated':x.known+' of '+x.entries.length+' fan banks/pumps rated')+
+    '</span></div><div><small>'+(estimated?'Estimated running power':'Measured running power')+'</small><strong>'+
     (x.runningKnown?fixed(x.runningWatts,2)+' W':'—')+'</strong><span>'+
-    (x.runningKnown?x.runningKnown+'/'+x.entries.length+' components (partial unless all present)':
-       'Add a power sensor or calibration')+'</span></div></div>'+
+    (missing.length?'Missing: '+esc(missing.join(', ')):'All fan banks and pumps included')+'</span></div></div>'+
     '<div class="electrical-rows">'+rows+'</div>'+
     '<p class="note">Rated power is not actual consumption.</p>'+
     '</section>';
