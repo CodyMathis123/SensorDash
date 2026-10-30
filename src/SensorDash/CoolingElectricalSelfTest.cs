@@ -24,7 +24,7 @@ internal static class CoolingElectricalSelfTest
                             Electrical=new CoolingElectricalConfig
                             {
                                 Model="ARCTIC P12 Pro PST LN",
-                                Quantity=19,Volts=12,AmpsPerUnit=0.11,
+                                Quantity=19,Volts=12,AmpsPerUnit=0.11,PresetId="p12-pro-pst-ln",PresetRevision=1,
                                 PowerSource="Powered PWM hub",
                                 RpmSensorId="fan-rpm",ControlSensorId="fan-pwm",
                                 MeasuredLowWatts=2.5,MeasuredHighWatts=24,
@@ -74,6 +74,7 @@ internal static class CoolingElectricalSelfTest
         Check(AccessoryPowerModel.Curve(curve,null,2500)==19,"Out-of-range clamps to endpoint");
         curve.PowerCurve.Add(new() { Rpm=1000,Watts=.6 });
         Check(AccessoryPowerModel.Curve(curve,null,1000)==null,"Ambiguous duplicate RPM is rejected");
+        Check(curve.PresetId=="p12-pro-pst-ln" && curve.PresetRevision==1,"Preset provenance round-trips with snapshot");
         var invalid=loaded.CoolingSystems[0].Components[0].Electrical!;
         invalid.Quantity=999;
         invalid.AmpsPerUnit=double.PositiveInfinity;

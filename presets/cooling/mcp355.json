@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "mcp355",
+  "revision": 1,
+  "kind": "pump",
+  "manufacturer": "Swiftech",
+  "model": "MCP355",
+  "sources": [
+    {
+      "title": "MCP355 installation guide and specifications",
+      "url": "https://www.swiftech.org/Installation_guides/mcp355-installationguide.pdf"
+    }
+  ],
+  "notes": "Nominal 18 W at 12 V; no measured power curve is supplied. Do not interpret the rating as measured consumption.",
+  "electrical": {
+    "volts": 12,
+    "wattsPerUnit": 18
+  }
+}

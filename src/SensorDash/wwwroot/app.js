@@ -844,7 +844,7 @@ async function bootstrap(){
  try{
    const [cfg,frame,groups,status]=await Promise.all([
      fetchJSON('/api/settings'),fetchJSON('/api/live'),
-     fetchJSON('/api/collection-groups'),fetchJSON('/api/status')
+     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),CoolingElectrical.loadCatalog()
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;

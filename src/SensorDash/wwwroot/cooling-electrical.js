@@ -6,17 +6,29 @@ const CoolingElectrical=(()=>{
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
  const number=v=>v===null||v===''||v===undefined?null:Number.isFinite(Number(v))?Number(v):null;
  const fixed=(n,d=1)=>Number.isFinite(n)?Number(n).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d}):'—';
- const presets={
-  'p12-pro-pst-ln':{model:'ARCTIC P12 Pro PST LN',quantity:19,volts:12,ampsPerUnit:0.11,
-    powerSource:'Powered PWM hub',
-    powerCurveSource:'ARCTIC P12 Pro LN · 12 V · 2025-09-29',
-    // Representative 12 V measurements; source and sampling policy in docs/power-curves.md.
-    powerCurve:[[0,0,0],[5,null,0],[6,483,.108],[10,495,.096],[20,660,.204],
-      [30,834,.264],[40,999,.300],[50,1167,.384],[60,1335,.468],
-      [70,1503,.552],[80,1668,.672],[90,1836,.81532],[100,1998,.97119]]
-      .map(([dutyPercent,rpm,watts])=>({dutyPercent,rpm,watts}))},
-  'mcp355':{model:'Swiftech MCP355 / Laing DDC 3.2',quantity:1,volts:12,
-    wattsPerUnit:18,powerSource:'Molex (PSU)'}
+ let presets=Object.create(null),catalogReady=false;
+ const setCatalog=items=>{
+  const next=Object.create(null);
+  for(const p of items){
+   if(p.schemaVersion!==1||!p.id||next[p.id]||!['fan-group','pump'].includes(p.kind)||!p.electrical)throw Error('Invalid preset catalog');
+   next[p.id]=JSON.parse(JSON.stringify(p));
+  }
+  presets=next;catalogReady=true;
+ };
+ const loadCatalog=async()=>{
+  try{
+   const response=await fetch('/api/cooling-presets');
+   if(!response.ok)throw Error('Preset catalog unavailable');
+   setCatalog(await response.json());
+  }catch(error){catalogReady=false;console.warn('Cooling presets unavailable',error);}
+ };
+ const presetPicker=(c,scope)=>{
+  if(!catalogReady)return '<p class="note">Presets unavailable · Refresh to retry. You can enter specifications below.</p>';
+  const items=Object.values(presets).filter(p=>p.kind===c.kind).sort((a,b)=>(a.manufacturer+' '+a.model).localeCompare(b.manufacturer+' '+b.model));
+  if(!items.length)return '<p class="note">No presets for this component yet.</p>';
+  return '<div class="w-actions electrical-presets"><label>Preset<select data-electrical-preset-picker aria-label="Component preset">'+
+   '<option value="">Choose a '+(c.kind==='pump'?'pump':'fan')+'…</option>'+items.map(p=>'<option value="'+esc(p.id)+'" '+(p.id===c.electrical?.presetId?'selected':'')+'>'+esc(p.manufacturer+' '+p.model)+'</option>').join('')+
+   '</select></label><button type="button" class="btn secondary" data-work="electrical-preset" data-electrical-scope="'+esc(scope)+'" title="Replace model specifications and curve; keep quantity, sensors and measured calibration">Apply preset</button></div>';
  };
  const fresh=(S,id,type)=>{
   const item=id&&S.byId?.get(id);
@@ -159,10 +171,7 @@ const CoolingElectrical=(()=>{
   return '<details class="electrical-editor" data-electrical-editor="'+esc(scope)+'">'+
    '<summary>Electrical specifications · '+esc(e.model||'Optional')+'</summary>'+
 
-   '<div class="w-actions">'+
-   (c.kind==='fan-group'?'<button type="button" class="btn secondary" data-work="electrical-preset" data-electrical-preset="p12-pro-pst-ln" data-electrical-scope="'+esc(scope)+'">Use ARCTIC P12 Pro PST LN ×19</button>':
-   '<button type="button" class="btn secondary" data-work="electrical-preset" data-electrical-preset="mcp355" data-electrical-scope="'+esc(scope)+'">Use MCP355 / DDC 3.2 (18 W)</button>')+
-   '</div><div class="electrical-editor-grid">'+
+   presetPicker(c,scope)+'<div class="electrical-editor-grid">'+
    textInput(scope,'model',e.model,'Model / part number')+
    numeric(scope,'quantity',e.quantity??1,c.kind==='pump'?'Pump count':'Fan count','1')+
    numeric(scope,'volts',e.volts,'Rated voltage (V)')+
@@ -210,10 +219,16 @@ const CoolingElectrical=(()=>{
  const applyPreset=(S,scope,preset)=>{
   const [,sysId,componentId]=scope.split(':');
   const c=S.settings?.coolingSystems?.find(s=>s.id===sysId)?.components?.find(c=>c.id===componentId);
-  if(!c||c.kind!==(preset==='mcp355'?'pump':'fan-group')||!presets[preset])return false;
+  const entry=presets[preset];
+  if(!c||!entry||c.kind!==entry.kind)return false;
   // Keep existing power and feedback mappings and user calibration.
-  c.electrical={...(c.electrical||{}),...JSON.parse(JSON.stringify(presets[preset]))};
+  const e=entry.electrical;
+  // Whitelist per-unit data; no catalog field can set wiring, quantities or sensor IDs.
+  c.electrical={quantity:1,...(c.electrical||{}),model:entry.manufacturer+' '+entry.model,
+   presetId:entry.id,presetRevision:entry.revision,volts:e.volts??null,
+   ampsPerUnit:e.ampsPerUnit??null,wattsPerUnit:e.wattsPerUnit??null,
+   powerCurveSource:e.powerCurveSource||'',powerCurve:JSON.parse(JSON.stringify(e.powerCurve||[]))};
   return true;
  };
- return {presets,curve,rate,ratedAmps,running,duty,summarize,summaryCard,overview,editor,applyPreset,paint};
+ return {get presets(){return presets;},setCatalog,loadCatalog,presetPicker,curve,rate,ratedAmps,running,duty,summarize,summaryCard,overview,editor,applyPreset,paint};
 })();

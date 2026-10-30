@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "p12-pro-pst-ln",
+  "revision": 1,
+  "kind": "fan-group",
+  "manufacturer": "ARCTIC",
+  "model": "P12 Pro PST LN",
+  "sources": [
+    {
+      "title": "ARCTIC P12 Pro PST LN specifications",
+      "url": "https://support.arctic.de/p12-pro-pst-ln"
+    },
+    {
+      "title": "P12 Pro LN PWM curve, 12 V, 2025-09-29",
+      "url": "https://support.arctic.de/products/p12-pro-pst-ln/techdocs/P12%20Pro%20LN%20Series%20PWM%20Curve.pdf"
+    }
+  ],
+  "notes": "Representative 12 V measurements: stopped, 5% stop boundary, 6% startup, then every 10%. The 5% row omits duplicate zero RPM. Sampling avoids low-duty measurement noise; no guaranteed error bound. Excludes hub losses.",
+  "electrical": {
+    "volts": 12,
+    "ampsPerUnit": 0.11,
+    "powerCurveSource": "ARCTIC P12 Pro LN · 12 V · 2025-09-29",
+    "powerCurve": [
+      {
+        "dutyPercent": 0,
+        "rpm": 0,
+        "watts": 0
+      },
+      {
+        "dutyPercent": 5,
+        "rpm": null,
+        "watts": 0
+      },
+      {
+        "dutyPercent": 6,
+        "rpm": 483,
+        "watts": 0.108
+      },
+      {
+        "dutyPercent": 10,
+        "rpm": 495,
+        "watts": 0.096
+      },
+      {
+        "dutyPercent": 20,
+        "rpm": 660,
+        "watts": 0.204
+      },
+      {
+        "dutyPercent": 30,
+        "rpm": 834,
+        "watts": 0.264
+      },
+      {
+        "dutyPercent": 40,
+        "rpm": 999,
+        "watts": 0.3
+      },
+      {
+        "dutyPercent": 50,
+        "rpm": 1167,
+        "watts": 0.384
+      },
+      {
+        "dutyPercent": 60,
+        "rpm": 1335,
+        "watts": 0.468
+      },
+      {
+        "dutyPercent": 70,
+        "rpm": 1503,
+        "watts": 0.552
+      },
+      {
+        "dutyPercent": 80,
+        "rpm": 1668,
+        "watts": 0.672
+      },
+      {
+        "dutyPercent": 90,
+        "rpm": 1836,
+        "watts": 0.81532
+      },
+      {
+        "dutyPercent": 100,
+        "rpm": 1998,
+        "watts": 0.97119
+      }
+    ]
+  }
+}

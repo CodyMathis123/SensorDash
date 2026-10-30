@@ -2,7 +2,7 @@
 
 Cooling Systems → component → Electrical specifications → Power curve accepts PWM %, RPM and watts **per unit**. Either speed column can be used; at least two distinct values on an axis with valid watts are needed. Blank rows survive autosave as drafts. Quantity scales curve watts, but never whole-group calibration watts.
 
-The ARCTIC P12 Pro PST LN button adds a 12 V curve along with its existing rating and default quantity of 19. Sensor bindings and measured group calibration remain intact. Reapplying the preset replaces the curve; adjust quantity for other banks. Each component owns an independent copy.
+Select ARCTIC P12 Pro PST LN in the Preset dropdown and apply it to copy its 12 V curve and rating. Quantity, sensor bindings, power source and measured group calibration remain intact; a new component defaults to one unit. Reapplying replaces the curve. Each component owns an independent snapshot. See the [catalog contribution guide](../presets/README.md) for adding or correcting presets.
 
 Source: [ARCTIC P12 Pro PST LN support downloads](https://support.arctic.de/p12-pro-pst-ln/docs), [P12 Pro LN series PWM curve](https://support.arctic.de/products/p12-pro-pst-ln/techdocs/P12%20Pro%20LN%20Series%20PWM%20Curve.pdf), test 20250929-164752, 2025-09-29, pages 2–3, 12 V measurements. We use the stopped point, 5% stop boundary, 6% startup point and every 10% through 100%. The 5% point omits RPM to avoid duplicate zero-speed coordinates. Representative sampling avoids copying low-duty measurement noise (including a rotating zero-watt reading at 7%) into the model; no guaranteed error bound is claimed. This is the Pro LN series, not the older P12 PWM PST.
 

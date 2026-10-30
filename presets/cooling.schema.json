@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SensorDash cooling component preset v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "kind",
+    "manufacturer",
+    "model",
+    "sources",
+    "electrical"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "kind": {
+      "enum": [
+        "fan-group",
+        "pump"
+      ]
+    },
+    "manufacturer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 59
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "url"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "^https://[^\\s]+$"
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "electrical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "volts": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "ampsPerUnit": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "wattsPerUnit": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "powerCurveSource": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "powerCurve": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "watts"
+            ],
+            "properties": {
+              "dutyPercent": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100
+              },
+              "rpm": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "watts": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1000
+              }
+            }
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "wattsPerUnit"
+          ]
+        },
+        {
+          "required": [
+            "volts",
+            "ampsPerUnit"
+          ]
+        },
+        {
+          "required": [
+            "powerCurve",
+            "powerCurveSource"
+          ]
+        }
+      ]
+    }
+  }
+}
