@@ -1,7 +1,8 @@
 name: Windows MSI and portable build
-# Full Windows/MSI validation runs only after changes land in Production
-# or through an explicit Actions -> Run workflow request.
+# Validate PRs before merging, then verify Production after merge.
 on:
+  pull_request:
+    branches: [Production]
   push:
     branches: [Production]
   workflow_dispatch:
