@@ -175,6 +175,7 @@ function settingsView(){
  const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
    .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
+ panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
  ['saveEverySeconds','History save interval (sec)'],['retentionDays','History retention (days)']]
@@ -271,7 +272,7 @@ function render(){
   ? SDWorkspace.render(S,S.view,{metric,panel,chart})
   : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
- byId('content').innerHTML=error+content;
+ byId('content').innerHTML='<div id="driverWarning">'+DriverStatus.warning(frame?.pawnIo)+'</div>'+error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
  HistoryInsights.afterRender(S);
@@ -358,6 +359,7 @@ async function saveAlias(clear=false){
 }
 function updateFrame(frame){
  S.frame=frame;S.sensors=frame.sensors||[];
+ DriverStatus.paint(frame.pawnIo);
  S.byId=new Map(S.sensors.map(s=>[s.id,s]));
  const t=Date.parse(frame.timestamp);
  S.sensors.forEach(s=>{

@@ -24,6 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
     <EmbeddedResource Include="../../presets/cooling/*.json" LogicalName="SensorDash.CoolingPresets.%(Filename)%(Extension)" />
     <EmbeddedResource Include="wwwroot/index.html" LogicalName="SensorDash.Web.index.html" />
+    <EmbeddedResource Include="wwwroot/driver-status.js" LogicalName="SensorDash.Web.driver-status.js" />
     <EmbeddedResource Include="wwwroot/app.js" LogicalName="SensorDash.Web.app.js" />
     <EmbeddedResource Include="wwwroot/workspace.js" LogicalName="SensorDash.Web.workspace.js" />
     <EmbeddedResource Include="wwwroot/fan-commissioning.js" LogicalName="SensorDash.Web.fan-commissioning.js" />

@@ -409,3 +409,5 @@
 .electrical-calibration>label{display:flex;flex-direction:column;gap:6px;max-width:620px;font-size:12px;color:var(--muted)}.electrical-calibration>label input{width:100%}
 
 .electrical-presets{align-items:flex-end}.electrical-presets label{display:flex;flex-direction:column;gap:6px;flex:1;max-width:460px;min-width:160px;font-size:12px;color:var(--muted)}.electrical-presets select{width:100%}
+
+.driver-warning{display:flex;gap:8px 16px;align-items:center;flex-wrap:wrap;border-left:3px solid #f4be68}.driver-warning span{flex:1;min-width:220px}.driver-warning a{white-space:nowrap}

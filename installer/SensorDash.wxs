@@ -6,6 +6,9 @@
     <SummaryInformation Description="SensorDash local hardware-monitoring dashboard and Windows collector service" />
     <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version of SensorDash is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <!-- PawnIO is a shared, separately serviced driver. The collector reports
+         missing/outdated/inaccessible support in the UI; never remove it here. -->
+    <Property Id="ARPCOMMENTS" Value="Local hardware telemetry. Some CPU and motherboard sensors need the separately installed PawnIO driver; check Hardware driver in SensorDash Settings." />
     <!-- StopServices executes before deferred application closure, preserving
          the collector's normal output-release path. Also covers tray-only hosts. -->
     <util:CloseApplication Id="CloseSensorDash" Target="SensorDash.exe"

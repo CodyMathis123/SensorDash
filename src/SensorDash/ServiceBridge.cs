@@ -147,6 +147,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
         var readings = snapshot?.Sensors.Where(s => s.DeviceType == "Storage").ToArray() ?? [];
         return new
         {
+            pawnIo = snapshot?.PawnIo,
             isAdministrator = SecurityInfo.IsAdministrator(),
             storageEnabled = true,
             storagePollSeconds = state.Settings.StoragePollSeconds,

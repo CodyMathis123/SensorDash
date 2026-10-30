@@ -33,6 +33,7 @@ jobs:
         run: dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
       - name: Check dashboard JavaScript syntax
         run: |
+          node --check src/SensorDash/wwwroot/driver-status.js
           node --check src/SensorDash/wwwroot/app.js
           node --check src/SensorDash/wwwroot/workspace.js
           node --check src/SensorDash/wwwroot/fan-commissioning.js
@@ -46,6 +47,8 @@ jobs:
           node --check src/SensorDash/wwwroot/chart-time-axis.js
           node --check src/SensorDash/wwwroot/history-insights.js
           node --check src/SensorDash/wwwroot/cooling-electrical.js
+      - name: Test hardware driver status UI
+        run: node scripts/test-driver-status.cjs
       - name: Test previous MSI artifact selection
         run: node scripts/test-msi-baseline.cjs
       - name: Test configurable cooling systems and sensor usage
@@ -252,6 +255,15 @@ jobs:
               $actualPreset = $presets | Where-Object id -eq $expectedPreset.id
               if (!$actualPreset -or $actualPreset.revision -ne $expectedPreset.revision) { throw 'Packaged preset missing or outdated' }
             }
+            $liveDriver = $null
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+              $liveDriver = (Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/live' -TimeoutSec 5).pawnIo
+              if ($liveDriver) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (!$liveDriver -or $liveDriver.state -notin @('available','missing','outdated','unavailable','unknown','restart-required')) { throw 'Collector did not report hardware driver status' }
+            $driverScript = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/driver-status.js' -UseBasicParsing
+            if ($driverScript.Content -notmatch 'DriverStatus') { throw 'Driver status UI was not embedded' }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
             if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
