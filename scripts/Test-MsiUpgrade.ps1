@@ -66,6 +66,13 @@ if ((Get-Service SensorDashCollector).Status -ne 'Running') { throw 'Maintenance
 if ((Products).Count -ne 1) { throw 'Maintenance created a duplicate registration.' }
 Install-Msi $previous[0].FullName '/i' 'blocked-downgrade' $true
 if ((Products).Count -ne 1) { throw 'Downgrade changed product registration.' }
+$startupKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+$startup = Get-ItemProperty -Path $startupKey -Name 'SensorDash' -ErrorAction Stop
+if (!$startup.SensorDash) { throw 'Missing tray autostart entry.' }
+$startLink = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'SensorDash.lnk'
+if (!(Test-Path $startLink)) { throw 'Missing all-users Start Menu shortcut.' }
+$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
+Write-Host "Installed shortcut icon: $($shortcut.IconLocation)"
 $desktop = Start-Desktop $exe
 Install-Msi $current '/x' 'remove-upgraded-product'
 Assert-Closed $desktop
