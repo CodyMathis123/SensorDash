@@ -47,6 +47,8 @@ jobs:
           node --check src/SensorDash/wwwroot/chart-time-axis.js
           node --check src/SensorDash/wwwroot/history-insights.js
           node --check src/SensorDash/wwwroot/cooling-electrical.js
+      - name: Test Settings alias and threshold pickers
+        run: node scripts/test-settings-pickers.cjs
       - name: Test hardware driver status UI
         run: node scripts/test-driver-status.cjs
       - name: Test previous MSI artifact selection

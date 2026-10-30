@@ -160,11 +160,16 @@ function events(){
  '<p class="help">Alerts do not change fan speeds. Configure automatic cooling in Fan Control.</p>')+
  '</div>';
 }
+function settingsCandidates(field){
+ return S.sensors.filter(s=>!Object.hasOwn(S.settings?.[field]||{},s.id)&&
+  (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type)))
+  .sort((a,b)=>label(a).localeCompare(label(b)));
+}
 function settingsView(){
  const cfg=S.settings;if(!cfg)return '<div class="loading">Waiting for collector settings…</div>';
  const aliases=Object.entries(cfg.aliases||{}).sort((a,b)=>a[0].localeCompare(b[0]));
  const thresholds=Object.entries(cfg.highThresholds||{});
- const choices=S.sensors.filter(s=>['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type));
+ const aliasChoices=settingsCandidates('aliases'),thresholdChoices=settingsCandidates('highThresholds');
  const types=[...new Set([...S.sensors.map(s=>s.deviceType).filter(Boolean),
     ...(cfg.excludedHistoryHardwareTypes||[])])].sort((a,b)=>a.localeCompare(b));
  // These switches correspond to the LHM Computer's eight hardware families.
@@ -185,9 +190,9 @@ function settingsView(){
  HistoryInsights.storagePanel())+
  panel('Recorded sensors','Choose what to monitor and save',
  '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
- [['balanced','Balanced'],
-  ['in-use','In-use sensors only'],
-  ['all','All sensors']].map(([val,text])=>
+ [['balanced','Balanced · key temperatures, fans, power and activity'],
+  ['in-use','In use · dashboards, cooling, tray, curves, alerts and pins'],
+  ['all','All sensors · largest history database']].map(([val,text])=>
    '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
  '</select></label>'+
  '</div>'+
@@ -215,19 +220,22 @@ function settingsView(){
   esc(t)+'</label>').join('')+'</div>'+
  '<p class="note">Excluded categories remain visible live but are not recorded.</p>')+
  panel('Sensor aliases','Rename any physical or virtual sensor',
- aliases.length?aliases.map(([id,name])=>
+ (aliases.length?aliases.map(([id,name])=>
  '<div class="alias-row"><label title="'+esc((sensor(id)?.name||id)+' · '+id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
  '<input aria-label="Alias for '+esc(sensor(id)?.name||id)+'" data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Display name">'+
  '<button type="button" class="btn secondary row-delete" title="Remove alias" aria-label="Remove alias for '+esc(sensor(id)?.name||id)+'" data-remove-alias="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join(''):
- '<p class="note">No custom aliases. Select a sensor in Sensor Explorer to rename it.</p>')+
+ '<p class="note">No custom aliases.</p>')+
+ '<div class="w-add-input"><select id="newAliasId" aria-label="Sensor to alias" '+(!aliasChoices.length?'disabled':'')+'><option value="">'+(aliasChoices.length?'Choose sensor to rename':'All available sensors have aliases')+'</option>'+
+ aliasChoices.map(s=>'<option value="'+esc(s.id)+'">'+esc([s.name,s.device].filter(Boolean).join(' · ')+' ('+s.type+')')+'</option>').join('')+
+ '</select><button type="button" class="btn secondary" id="addAlias" '+(!aliasChoices.length?'disabled':'')+'>+ Alias</button></div>')+
  panel('Monitoring thresholds','Alert when a selected sensor crosses its assigned value',
  thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(label(sensor(id)||{id,name:id})+' · '+id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
  '<div class="threshold-value"><input aria-label="Alert threshold for '+esc(label(sensor(id)||{id,name:id}))+'" type="number" step="any" data-threshold="'+esc(id)+'" value="'+number+'"><span>'+esc(typeUnit(sensor(id)?.type))+'</span></div>'+
  '<button type="button" class="btn secondary row-delete" title="Remove threshold" aria-label="Remove threshold for '+esc(label(sensor(id)||{id,name:id}))+'" data-remove-threshold="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join('')+
- '<div class="w-add-input"><select id="newThresholdId"><option value="">Choose sensor to monitor</option>'+
- choices.filter(s=>!(s.id in (cfg.highThresholds||{}))).map(s=>
+ '<div class="w-add-input"><select id="newThresholdId" aria-label="Sensor to monitor" '+(!thresholdChoices.length?'disabled':'')+'><option value="">'+(thresholdChoices.length?'Choose sensor to monitor':'All compatible sensors are monitored')+'</option>'+
+ thresholdChoices.map(s=>
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
- '</select><button class="btn secondary" id="addThreshold">+ Threshold</button></div>')+
+ '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
 
  [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
@@ -666,21 +674,32 @@ async function changeVisibility(field,value){
   render();toast((has?'Showing':'Hiding')+' '+value);
  }catch(e){toast('Cannot update visibility: '+e.message)}
 }
+async function addAlias(id){
+ const reading=settingsCandidates('aliases').find(s=>s.id===id);
+ if(!reading)return;
+ const saved=await saveSettings(cfg=>{
+  if(Object.hasOwn(cfg.aliases,id))return false;
+  cfg.aliases[id]=reading.name||id;
+ },'Alias added');
+ if(saved&&S.view==='settings'){
+  const field=[...document.querySelectorAll('[data-alias]')].find(el=>el.dataset.alias===id);
+  field?.focus();field?.select();
+ }
+}
 async function changeThreshold(id,remove=false){
  if(!id)return;
- const cfg=structuredClone(S.settings);cfg.highThresholds=cfg.highThresholds||{};
- if(remove)delete cfg.highThresholds[id];
- else {
-  const reading=sensor(id);
-  cfg.highThresholds[id]=Math.round((reading?.value??40)+10);
- }
- try{
-  await SDWorkspace.saveSettings(S,cfg);
-  render();toast(remove?'Threshold removed':'Threshold added');
- }catch(e){toast('Could not update threshold: '+e.message)}
+ if(!remove&&!settingsCandidates('highThresholds').some(s=>s.id===id))return;
+ await saveSettings(cfg=>{
+  if(remove)delete cfg.highThresholds[id];
+  else {
+   if(Object.hasOwn(cfg.highThresholds,id))return false;
+   cfg.highThresholds[id]=Math.round((sensor(id)?.value??40)+10);
+  }
+ },remove?'Threshold removed':'Threshold added');
 }
-async function saveSettings(){
+async function saveSettings(update=null,message='Settings saved'){
  const cfg=structuredClone(S.settings);
+ cfg.aliases=cfg.aliases||{};cfg.highThresholds=cfg.highThresholds||{};
  for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
  cfg.historyMode=byId('historyMode')?.value||'balanced';
  cfg.disabledCollectionGroups=[...document.querySelectorAll('[data-collect-group]:not(:checked)')]
@@ -701,8 +720,9 @@ async function saveSettings(){
 
  document.querySelectorAll('[data-alias]').forEach(el=>{if(el.value.trim())cfg.aliases[el.dataset.alias]=el.value.trim();else delete cfg.aliases[el.dataset.alias]});
  document.querySelectorAll('[data-threshold]').forEach(el=>{if(el.value.trim())cfg.highThresholds[el.dataset.threshold]=Number(el.value);else delete cfg.highThresholds[el.dataset.threshold]});
- try{await SDWorkspace.saveSettings(S,cfg);toast('Settings saved');render()}
- catch(err){toast('Could not save settings: '+err.message)}
+ if(update&&update(cfg)===false)return false;
+ try{await SDWorkspace.saveSettings(S,cfg);toast(message);render();return true}
+ catch(err){toast('Could not save settings: '+err.message);return false}
 }
 async function togglePin(id){
  const cfg=structuredClone(S.settings);
@@ -781,6 +801,7 @@ document.addEventListener('click',e=>{
  const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
  if(e.target.closest('[data-save-alias]')){saveAlias(false);return}
  if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
+ if(e.target.closest('#addAlias')){addAlias(byId('newAliasId')?.value);return}
  if(e.target.closest('#addThreshold')){changeThreshold(byId('newThresholdId')?.value);return}
  const removeAlias=e.target.closest('[data-remove-alias]');
  if(removeAlias){removeAlias.closest('.alias-row').querySelector('[data-alias]').value='';saveSettings();return}
