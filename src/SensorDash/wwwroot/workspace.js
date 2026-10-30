@@ -775,6 +775,9 @@ const SDWorkspace = (() => {
    const el=e.target.closest('[data-work]');if(!el)return false;
    e.preventDefault();e.stopPropagation();
    const action=el.dataset.work,id=el.dataset.id,scope=el.dataset.scope;
+   // Shared settings must be bound before *any* action handler uses them.
+   // The electrical preset branch runs before the generic editor actions.
+   const cfg=S.settings;
    try{
      if(action==='toggle-fan-lock'){
        S.settings.fanControlLocked=!WorkspaceLocks.fan(S);
@@ -896,7 +899,6 @@ const SDWorkspace = (() => {
        }
        await persist(S,h);return true;
      }
-     const cfg=S.settings;
      if(action==='switch-dashboard'){S.workspaceDashboardId=id;h.render();return true;}
      if(action==='toggle-dashboard-lock'){
        const board=cfg.dashboards.find(d=>d.id===id);

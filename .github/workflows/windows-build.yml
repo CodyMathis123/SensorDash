@@ -3,7 +3,7 @@ name: Windows MSI and portable build
 # or through an explicit Actions -> Run workflow request.
 on:
   push:
-    branches: [Production]
+    branches: [Production, 'validation/electrical-preset-tdz-20261030']
   workflow_dispatch:
 permissions:
   contents: read
@@ -349,7 +349,7 @@ jobs:
           Write-Host 'MSI installed and removed service, Start Menu shortcut, executable and tray startup successfully'
       - uses: actions/upload-artifact@v4
         with:
-          name: SensorDash-Setup-0.8.1-x64
+          name: SensorDash-Setup-0.8.2-x64
           path: installer-output/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

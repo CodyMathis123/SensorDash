@@ -266,6 +266,48 @@ const h={
  assert.equal(S.settings.simulatedFanCurves.length,before,'Locked editor cannot add curves');
  await click('toggle-fan-lock');
  assert.equal(S.settings.fanControlLocked,false);
+ // Regression: clicking the ACTUAL preset action previously hit the
+ // temporal-dead-zone of cfg, which was initialized below its handler.
+ // Calling applyPreset() in isolation never exposed this runtime failure.
+ S.view='cooling';
+ let radiator=S.settings.coolingSystems.find(x=>x.id==='loop-1')
+   .components.find(x=>x.id==='fans-1');
+ assert.equal(radiator.electrical,undefined);
+ const radResult=await click('electrical-preset',{
+   electricalScope:'component:loop-1:fans-1',
+   electricalPreset:'p12-pro-pst-ln'
+ });
+ assert.equal(radResult,true);
+ radiator=S.settings.coolingSystems.find(x=>x.id==='loop-1')
+   .components.find(x=>x.id==='fans-1');
+ assert.equal(radiator.electrical.quantity,19,
+   'ARCTIC button must persist the preset without cfg initialization errors');
+ assert.equal(radiator.electrical.ampsPerUnit,0.11);
+ assert.equal(radiator.electrical.volts,12);
+ assert.equal(radiator.electrical.model,'ARCTIC P12 Pro PST LN');
+ assert.deepEqual(Array.from(radiator.sensorIds),['rpm','duty'],
+   'Applying specs must preserve existing assigned sensors');
+ const pumpResult=await click('electrical-preset',{
+   electricalScope:'component:loop-1:pump-1',electricalPreset:'mcp355'
+ });
+ assert.equal(pumpResult,true);
+ const pump=S.settings.coolingSystems.find(x=>x.id==='loop-1')
+   .components.find(x=>x.id==='pump-1');
+ assert.equal(pump.electrical.wattsPerUnit,18,
+   'MCP355 preset button must execute through the actual click handler');
+ assert.match(workspace.render(S,'cooling',h),/43.08 W/);
+ // Locked components must reject preset application.
+ await click('toggle-cooling-lock',{id:'loop-1'});
+ radiator=S.settings.coolingSystems.find(x=>x.id==='loop-1')
+   .components.find(x=>x.id==='fans-1');
+ radiator.electrical.quantity=8;
+ await click('electrical-preset',{
+   electricalScope:'component:loop-1:fans-1',electricalPreset:'p12-pro-pst-ln'
+ });
+ assert.equal(S.settings.coolingSystems.find(x=>x.id==='loop-1')
+   .components.find(x=>x.id==='fans-1').electrical.quantity,8,
+   'Locked cooling system must block preset changes');
+ await click('toggle-cooling-lock',{id:'loop-1'});
  assert.ok(!curvesView.includes('This sandbox evaluates'));
  console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
  console.log('PASS: read-only process diagnostics, browser chart timing, time-sliced navigation and accurate live-control labels');
