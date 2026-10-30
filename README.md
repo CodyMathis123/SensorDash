@@ -1,5 +1,7 @@
 # SensorDash 0.8.2 — Cooling electrical preset click fix and Production consolidation
 
+Contributors: start with [AGENTS.md](AGENTS.md), the [project/source map](docs/project.md), [development and delivery workflow](docs/development.md), and [architecture decisions](docs/adr/README.md).
+
 The old **Curve Sandbox** screen is now **Fan Control**, with continuous service-owned, administrator-approved fan profiles. It no longer limits actual profile operation to 120 seconds or 70–100% duty; those restrictions remain only for optional manual hardware commissioning tests.
 
 ## Continuous fan profiles

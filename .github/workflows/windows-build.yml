@@ -1,7 +1,8 @@
 name: Windows MSI and portable build
-# Full Windows/MSI validation runs only after changes land in Production
-# or through an explicit Actions -> Run workflow request.
+# Validate PRs before merging, then verify Production after merge.
 on:
+  pull_request:
+    branches: [Production]
   push:
     branches: [Production]
   workflow_dispatch:
@@ -34,6 +35,8 @@ jobs:
           node --check src/SensorDash/wwwroot/cooling-electrical.js
       - name: Test configurable cooling systems and sensor usage
         run: node scripts/test-workspace.cjs
+      - name: Test cooling autosave and concurrent settings writes
+        run: node scripts/test-cooling-autosave.cjs
       - name: Test gap-aware charts and hover behavior
         run: node scripts/test-chart-gaps.cjs
       - name: Test multi-day calendar axes and date tooltips

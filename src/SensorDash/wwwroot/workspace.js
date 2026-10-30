@@ -293,8 +293,7 @@ const SDWorkspace = (() => {
          selectors(S,c.sensorIds,scope)+
          CoolingElectrical.editor(S,c,scope,true)+
          '<div class="w-add-input">'+select(S,'',s=>suitable(c.kind,s),
-           'Add compatible sensor','data-add-to="'+attr(scope)+'"')+
-         button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div></div>';
+           'Select a sensor to add automatically','data-add-to="'+attr(scope)+'"')+'</div></div>';
      }).join('');
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
@@ -315,7 +314,8 @@ const SDWorkspace = (() => {
         'An air-cooled PC can use the same model without a pump or coolant sensor.</p>'+
        '<div class="w-actions"><label>System name<input data-system-name="'+attr(sys.id)+'" value="'+attr(sys.name)+'"></label>'+
        '<label>Type<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
-       button('save-editor','Save changes')+
+       '<span class="note" role="status" aria-live="polite" data-cooling-save>'+safe(saveState(S).status)+'</span>'+
+       button('retry-cooling-save','Retry save','data-cooling-retry '+(saveState(S).failed?'':'hidden'))+
        button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+
        button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>':
          WorkspaceLocks.readonly('Cooling system')+
@@ -682,21 +682,89 @@ const SDWorkspace = (() => {
      '<div class="note">Collector access: '+(diag?.isAdministrator?'Elevated':'Unknown')+
      ' · '+(diag?.storagePollSeconds||'—')+' sec storage poll · '+(diag?.storageSensorCount??0)+' storage readings</div>');
  };
- async function persist(S,h){
-   try{
-     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},
-       body:JSON.stringify(S.settings)});
+ const saves=new WeakMap();
+ const saveState=S=>{
+   if(!saves.has(S))saves.set(S,{tail:Promise.resolve(),timer:null,status:'Changes save automatically',failed:false,dirty:false});
+   return saves.get(S);
+ };
+ const coolingFields='[data-system-name],[data-system-kind],[data-component-name],[data-component-kind],[data-electrical-field]';
+ function saveStatus(S,status,failed=false){
+   const state=saveState(S);state.status=status;state.failed=failed;
+   for(const el of document.querySelectorAll('[data-cooling-save]'))el.textContent=status;
+   for(const el of document.querySelectorAll('[data-cooling-retry]'))el.hidden=!failed;
+ }
+ // Every settings writer shares this queue. Snapshot at execution time so a
+ // delayed request includes edits made while a previous request was in flight.
+ function saveSettings(S,draft=S.settings){
+   const state=saveState(S);
+   S.settings=draft;
+   if(state.timer)clearTimeout(state.timer);state.timer=null;
+   if(state.dirty)saveStatus(S,'Saving…');
+   const run=state.tail.then(async()=>{
+     const body=JSON.stringify(S.settings);
+     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body});
      if(!response.ok)throw Error(await response.text());
-     S.settings=await response.json();
+     const saved=await response.json();
+     // A response must never replace newer local edits.
+     if(JSON.stringify(S.settings)===body){
+       S.settings=saved;state.dirty=false;saveStatus(S,'Saved');
+     }
+     return S.settings;
+   });
+   state.tail=run.catch(()=>{});
+   return run.catch(error=>{
+     state.dirty=true;saveStatus(S,'Save failed · Edits retained',true);throw error;
+   });
+ }
+ function flushCooling(S){
+   const state=saveState(S);
+   if(state.timer)clearTimeout(state.timer);state.timer=null;
+   return state.dirty?saveSettings(S):state.tail;
+ }
+ function handleCoolingInput(event,S,h){
+   if(S.view!=='cooling')return false;
+   const el=event.target.closest(coolingFields+',select[data-add-to]');
+   if(!el)return false;
+   if(event.type==='input'&&el.tagName==='SELECT')return true;
+   const scope=el.dataset.componentName||el.dataset.componentKind||el.dataset.electricalScope||el.dataset.addTo;
+   const systemId=el.dataset.systemName||el.dataset.systemKind||scope?.split(':')[1];
+   if(WorkspaceLocks.cooling(S,systemId))return true;
+   if(el.validity&&!el.validity.valid)return true;
+   // Capture immediately, before navigation or an Add/Remove can rebuild the form.
+   const before=JSON.stringify(S.settings);
+   syncCoolingInputs(S);
+   if(el.dataset.addTo){
+     if(event.type!=='change'||!el.value)return true;
+     const [,sys,child]=scope.split(':');
+     const component=S.settings.coolingSystems.find(s=>s.id===sys)?.components.find(c=>c.id===child);
+     if(component&&!component.sensorIds.includes(el.value))component.sensorIds.push(el.value);
+     el.value='';
+   }
+   if(JSON.stringify(S.settings)===before){
+     if(event.type==='change')void flushCooling(S).catch(()=>{});
+     return true;
+   }
+   const state=saveState(S);state.dirty=true;saveStatus(S,'Saving…');
+   clearTimeout(state.timer);
+   if(event.type==='change'){
+     void flushCooling(S).catch(()=>{});
+     if(el.dataset.componentKind||el.dataset.addTo)h.render();
+   }else state.timer=setTimeout(()=>{void flushCooling(S).catch(()=>{});},450);
+   return true;
+ }
+ async function persist(S,h){
+   const cooling=S.view==='cooling';
+   if(cooling){saveState(S).dirty=true;saveStatus(S,'Saving…');h.render();}
+   try{
+     await saveSettings(S);
      // Re-read collector-owned snapshots after saving to surface a pending
      // approval immediately rather than waiting for the periodic 3s poll.
      if(S.view==='curves'&&h.refreshFanControl)await h.refreshFanControl();
-     h.toast('Configuration saved');
-     h.render();
+     if(!cooling){h.toast('Configuration saved');h.render();}
      return true;
    }catch(e){h.toast('Could not save configuration: '+e.message);return false;}
  }
- function syncInputs(S){
+ function syncCoolingInputs(S){
    const d=S.settings;
    for(const e of document.querySelectorAll('[data-system-name]')){
      const o=d.coolingSystems.find(c=>c.id===e.dataset.systemName);if(o)o.name=e.value;
@@ -711,6 +779,7 @@ const SDWorkspace = (() => {
      if(o)o[e.dataset.componentName?'name':'kind']=e.value;
    }
    for(const e of document.querySelectorAll('[data-electrical-field]')){
+     if(e.validity&&!e.validity.valid)continue;
      const [,systemId,componentId]=(e.dataset.electricalScope||'').split(':');
      const component=d.coolingSystems.find(x=>x.id===systemId)?.components.find(x=>x.id===componentId);
      if(!component||!['fan-group','pump'].includes(component.kind))continue;
@@ -724,6 +793,10 @@ const SDWorkspace = (() => {
      component.electrical=component.electrical||{quantity:1};
      component.electrical[key]=numeric?(val===''?null:Number(val)):val;
    }
+ }
+ function syncInputs(S){
+   syncCoolingInputs(S);
+   const d=S.settings;
    for(const e of document.querySelectorAll('[data-field="dashboard-name"]')){
      const o=d.dashboards.find(c=>c.id===e.dataset.object);if(o)o.name=e.value;
    }
@@ -779,11 +852,13 @@ const SDWorkspace = (() => {
    // The electrical preset branch runs before the generic editor actions.
    const cfg=S.settings;
    try{
+     if(action==='retry-cooling-save'){await flushCooling(S).catch(()=>{});return true;}
      if(action==='toggle-fan-lock'){
        S.settings.fanControlLocked=!WorkspaceLocks.fan(S);
        await persist(S,h);return true;
      }
      if(action==='toggle-cooling-lock'){
+       syncCoolingInputs(S);
        const sys=S.settings?.coolingSystems?.find(x=>x.id===id);
        if(sys){sys.locked=!sys.locked;await persist(S,h);}
        return true;
@@ -1087,5 +1162,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,isHidden,displayName,usageIndex};
 })();
