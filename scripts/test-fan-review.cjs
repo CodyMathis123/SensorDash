@@ -29,6 +29,16 @@ const S={
 assert.equal(api.WorkspaceLocks.cooling(S,'loop'),false);
 assert.equal(api.WorkspaceLocks.dashboard(S,'board'),true);
 assert.equal(api.WorkspaceLocks.fan(S),false);
+assert.equal(api.FanControlUx.profileSummary(S),'1 enabled · 1 awaiting reapproval');
+S.fanControl.persistent.profiles[0].needsReapproval=false;
+assert.equal(api.FanControlUx.profileSummary(S),'1 enabled');
+S.settings.fanProfiles.push({id:'second',name:'Case fans'});
+assert.equal(api.FanControlUx.profileSummary(S),'1 enabled · 1 not enabled');
+S.fanControl.persistent.profiles.push({id:'second',name:'Case fans'});
+assert.equal(api.FanControlUx.profileSummary(S),'2 enabled');
+S.fanControl.persistent.profiles.pop();
+S.settings.fanProfiles.pop();
+S.fanControl.persistent.profiles[0].needsReapproval=true;
 let banner=api.FanControlUx.banner(S);
 assert.match(banner,/Saved changes not yet applied to live fans/);
 assert.match(banner,/Approve saved changes/);
