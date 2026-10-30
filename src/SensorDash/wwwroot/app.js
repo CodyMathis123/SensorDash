@@ -215,12 +215,12 @@ function settingsView(){
  '<p class="note">Excluded categories remain visible live but are not recorded.</p>')+
  panel('Sensor aliases','Rename any physical or virtual sensor',
  aliases.length?aliases.map(([id,name])=>
- '<div class="alias-row"><label title="'+esc(id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
+ '<div class="alias-row"><label title="'+esc((sensor(id)?.name||id)+' · '+id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
  '<input aria-label="Alias for '+esc(sensor(id)?.name||id)+'" data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Display name">'+
  '<button type="button" class="btn secondary row-delete" title="Remove alias" aria-label="Remove alias for '+esc(sensor(id)?.name||id)+'" data-remove-alias="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join(''):
  '<p class="note">No custom aliases. Select a sensor in Sensor Explorer to rename it.</p>')+
  panel('Monitoring thresholds','Alert when a selected sensor crosses its assigned value',
- thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
+ thresholds.map(([id,number])=>'<div class="alias-row"><label title="'+esc(label(sensor(id)||{id,name:id})+' · '+id)+'">'+esc(label(sensor(id)||{id,name:id}))+'</label>'+
  '<div class="threshold-value"><input aria-label="Alert threshold for '+esc(label(sensor(id)||{id,name:id}))+'" type="number" step="any" data-threshold="'+esc(id)+'" value="'+number+'"><span>'+esc(typeUnit(sensor(id)?.type))+'</span></div>'+
  '<button type="button" class="btn secondary row-delete" title="Remove threshold" aria-label="Remove threshold for '+esc(label(sensor(id)||{id,name:id}))+'" data-remove-threshold="'+esc(id)+'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div>').join('')+
  '<div class="w-add-input"><select id="newThresholdId"><option value="">Choose sensor to monitor</option>'+
