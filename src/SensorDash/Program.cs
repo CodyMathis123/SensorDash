@@ -452,7 +452,7 @@ public sealed class HistoryStore {
     // Bounded number of requested sensors. Stream ordered raw values through
     // one accumulator per sensor; never materialize long history arrays or
     // treat gaps as continuously consumed energy.
-    public List<HistoricalSensorStats> ReadStatistics(string[] ids,double hours,
+    internal List<HistoricalSensorStats> ReadStatistics(string[] ids,double hours,
         IReadOnlyDictionary<string,string> sensorTypes,int cadenceSeconds)
     {
         var now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
