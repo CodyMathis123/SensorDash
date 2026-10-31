@@ -108,8 +108,11 @@ jobs:
               $collector -notmatch 'DisabledCollectionDeviceIds') {
             throw 'Service collection must use the generic hardware/group switch'
           }
-          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-dashboard-lock') {
-            throw 'Sensor usage or dashboard locking missing'
+          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-cooling-lock') {
+            throw 'Sensor usage or cooling configuration locking missing'
+          }
+          if ($workspace -match 'toggle-dashboard-lock' -or $workspace -match 'renderVirtual') {
+            throw 'Retired desktop dashboards or virtual sensor UI must not ship'
           }
       - name: Verify experimental fan-control security boundary
         shell: pwsh
