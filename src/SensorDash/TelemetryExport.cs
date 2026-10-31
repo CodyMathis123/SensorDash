@@ -38,6 +38,7 @@ internal sealed class TelemetryExportOptions
 
 internal sealed record TelemetryCursor(long TimestampMs, string SensorId);
 internal sealed record TelemetryRow(string SensorId, long TimestampMs, double Value);
+internal sealed record ThresholdTelemetryEvent(long Id, long TimestampMs, string SensorId, string Severity);
 
 public sealed partial class HistoryStore
 {
@@ -45,6 +46,36 @@ public sealed partial class HistoryStore
     // starts with sensor, so it cannot efficiently page in timestamp order.
     // This one-time migration is performed at collector startup before
     // SensorWorker begins controlling hardware.
+    // Only bounded, historical events are exported. Windows retains full
+    // messages; the Pi stores severity, sensor ID and original timestamp.
+    internal List<ThresholdTelemetryEvent> ReadThresholdEvents(long afterId, int limit = 128)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id,ts,sensor,severity FROM events WHERE id>$id ORDER BY id LIMIT $limit";
+        command.Parameters.AddWithValue("$id", afterId);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 256));
+        using var reader = command.ExecuteReader();
+        var result = new List<ThresholdTelemetryEvent>();
+        while (reader.Read())
+            result.Add(new ThresholdTelemetryEvent(reader.GetInt64(0), reader.GetInt64(1),
+                reader.GetString(2), reader.GetString(3)));
+        return result;
+    }
+
+    // Cheap filesystem byte counts, NOT a costly per-sensor GROUP BY. This
+    // keeps the collector and fan-control sampling independent of monitoring.
+    internal string StorageFootprint(string host, long nowMs)
+    {
+        long Size(string path) { try { return File.Exists(path) ? new FileInfo(path).Length : 0; } catch { return 0; } }
+        var safeHost = TelemetryLineProtocol.Label(host, 80);
+        return string.Join("", new[] {
+            $"sensordash_spool,host={safeHost},file=database value={Size(_path)} {nowMs}\n",
+            $"sensordash_spool,host={safeHost},file=wal value={Size(_path + "-wal")} {nowMs}\n",
+            $"sensordash_spool,host={safeHost},file=shm value={Size(_path + "-shm")} {nowMs}\n"
+        });
+    }
+
     internal void EnsureTelemetryIndex()
     {
         using var connection = Open();
@@ -120,6 +151,32 @@ internal static class TelemetryLineProtocol
     }
 }
 
+internal static class ThresholdEventProtocol
+{
+    internal static string Serialize(IEnumerable<ThresholdTelemetryEvent> events, string host)
+    {
+        var h = TelemetryLineProtocol.Label(host, 80);
+        var sb = new StringBuilder();
+        foreach (var item in events)
+        {
+            // These are the existing local threshold crossing and recovery
+            // events. Never serialize human-readable messages, paths or tokens.
+            var state = item.Severity switch
+            {
+                "warning" => "severity=warning,event=raised",
+                "info" => "severity=info,event=cleared",
+                _ => null
+            };
+            if (state is null || item.SensorId.Length > 256 || item.TimestampMs <= 0) continue;
+            sb.Append("sensordash_event,host=").Append(h)
+              .Append(",sensor=").Append(TelemetryLineProtocol.Label(item.SensorId, 256))
+              .Append(',').Append(state).Append(" value=1 ")
+              .Append(item.TimestampMs.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        }
+        return sb.ToString();
+    }
+}
+
 internal sealed class TelemetryExportWorker(
     DashboardState state, HistoryStore database, ILogger<TelemetryExportWorker> logger) : BackgroundService
 {
@@ -131,6 +188,7 @@ internal sealed class TelemetryExportWorker(
         var cursorFile = Path.Combine(directory, "telemetry-export-cursor.json");
         var metadataFile = Path.Combine(directory, "telemetry-export-metadata.json");
         var accessoryCursorFile = Path.Combine(directory, "telemetry-accessory-cursor.json");
+        var eventCursorFile = Path.Combine(directory, "telemetry-event-cursor.json");
         TelemetryExportOptions options;
         try
         {
@@ -189,6 +247,10 @@ internal sealed class TelemetryExportWorker(
             // The last server-acknowledged catalog is kept separate from the
             // data cursor: edits to aliases or cooling mappings may remove
             // previously published tag sets, which require explicit 0 tombstones.
+            var eventCursor = File.Exists(eventCursorFile)
+                ? JsonSerializer.Deserialize<long>(File.ReadAllText(eventCursorFile), JsonSerializerOptions.Web)
+                : 0L;
+            long lastSpoolAt = 0;
             var lastMetadata = TelemetryMetadata.Load(metadataFile);
             long lastMetadataAt = 0;
             long lastMetadataCheckAt = 0;
@@ -266,6 +328,39 @@ internal sealed class TelemetryExportWorker(
                         accessoryCursor = new AccessoryCursor(last.TimestampMs, last.System, last.Component);
                         SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
                     }
+                    // Persist events with their original event times. The
+                    // initial 0 cursor imports only events still held by the
+                    // bounded local Windows SQLite archive.
+                    var events = database.ReadThresholdEvents(eventCursor);
+                    if (events.Count > 0)
+                    {
+                        var payload = ThresholdEventProtocol.Serialize(events, host);
+                        if (payload.Length > 0)
+                        {
+                            using var eventRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                            eventRequest.Headers.Authorization =
+                                new AuthenticationHeaderValue("Bearer", token);
+                            eventRequest.Content = new StringContent(payload, Encoding.UTF8, "text/plain");
+                            using var eventResponse = await client.SendAsync(eventRequest, stop);
+                            eventResponse.EnsureSuccessStatusCode();
+                        }
+                        eventCursor = events[^1].Id;
+                        SaveEventCursor(eventCursorFile, eventCursor);
+                    }
+                    // The archive remains a minimal durable retry buffer. Send
+                    // three tiny aggregate gauges periodically, never filenames
+                    // or per-sensor disk allocation estimates.
+                    if (now - lastSpoolAt >= 60_000)
+                    {
+                        var spool = database.StorageFootprint(host, now);
+                        using var spoolRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                        spoolRequest.Headers.Authorization =
+                            new AuthenticationHeaderValue("Bearer", token);
+                        spoolRequest.Content = new StringContent(spool, Encoding.UTF8, "text/plain");
+                        using var spoolResponse = await client.SendAsync(spoolRequest, stop);
+                        spoolResponse.EnsureSuccessStatusCode();
+                        lastSpoolAt = now;
+                    }
                     await Task.Delay(TimeSpan.FromMilliseconds(
                         rows.Count >= 384 || power.Count >= 256 ? 500 :
                         rows.Count > 0 || power.Count > 0 ? 3000 : 7000), stop);
@@ -283,6 +378,13 @@ internal sealed class TelemetryExportWorker(
         {
             logger.LogError(exception, "Telemetry exporter could not initialize; local control and history remain available.");
         }
+    }
+
+    internal static void SaveEventCursor(string path, long cursor)
+    {
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(cursor, JsonSerializerOptions.Web));
+        File.Move(temp, path, true);
     }
 
     internal static void SaveAccessoryCursor(string path, AccessoryCursor cursor)
@@ -323,6 +425,14 @@ internal static class TelemetryExportSelfTest
         Require(lines.Contains("sensor=/cpu/0/temperature/0,kind=Temperature value=54.25 1793450400000"),
             "line formatting or timestamps");
         Require(!lines.Contains("NaN"), "invalid metric");
+        var formattedEvent = ThresholdEventProtocol.Serialize(
+            [new ThresholdTelemetryEvent(1, 1793450400000, "/amdcpu/0/temperature/0", "warning"),
+             new ThresholdTelemetryEvent(2, 1793450410000, "/amdcpu/0/temperature/0", "info")], "main-desktop");
+        Require(formattedEvent.Contains("severity=warning,event=raised value=1 1793450400000"),
+            "event warning encoding");
+        Require(formattedEvent.Contains("severity=info,event=cleared value=1 1793450410000"),
+            "event recovery encoding");
+        Require(!formattedEvent.Contains("message="), "free-form event data must stay local");
         var root = Path.Combine(Path.GetTempPath(), "SensorDash-telemetry-selftest-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -341,6 +451,16 @@ internal static class TelemetryExportSelfTest
                     """;
                 command.ExecuteNonQuery();
             }
+            history.Event("warning", "/amdcpu/0/temperature/0", "CPU warning", 81);
+            history.Event("info", "/amdcpu/0/temperature/0", "CPU clear", 55);
+            var firstEvent = history.ReadThresholdEvents(0, 1);
+            Require(firstEvent.Count == 1 && firstEvent[0].Severity == "warning",
+                "event cursor initial pagination");
+            Require(history.ReadThresholdEvents(firstEvent[0].Id).Count == 1,
+                "event cursor retained second row");
+            var spool = history.StorageFootprint("WIN-PC", 1793450400000);
+            Require(spool.Contains("file=database value=") && spool.Contains("file=wal value=")
+                && !spool.Contains("telemetry.db"), "safe local spool gauges");
             history.EnsureTelemetryIndex();
             var one = history.ReadTelemetryBatch(new TelemetryCursor(0, ""), 1);
             Require(one.Count == 1 && one[0].SensorId == "a" && one[0].Value == 0,
