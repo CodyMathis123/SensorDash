@@ -327,11 +327,7 @@ public sealed class DashboardSettings {
     public int SaveEverySeconds { get; set; } = 10;
     public int RetentionDays { get; set; } = 30; // configurable through 3 years
     public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
-    public List<WorkspaceDashboardConfig> Dashboards { get; set; } = [
-        new() { Id = "system", Name = "System dashboard" }
-    ];
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
-    public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
     public List<FanProfileConfig> FanProfiles { get; set; } = [];
     public bool FanControlLocked { get; set; } // UI editor lock only; not hardware authorization.
     // Advisory mapping metadata never authorizes a hardware command.
@@ -467,6 +463,11 @@ public sealed partial class HistoryStore {
         if (config.ExcludedHistoryHardwareTypes.Contains(sensor.DeviceType, StringComparer.OrdinalIgnoreCase))
             return false;
         if (config.HistoryMode == "all") return true;
+        // Preserve real SSD/NVMe data channels for Pi storage dashboards.
+        // This remains a bounded archive/retry spool, not a second viewer.
+        if (config.HistoryMode == "balanced" && sensor.DeviceType == "Storage" &&
+            (sensor.Type is "Temperature" or "Load" or "Throughput" or "Data" or "Level"))
+            return true;
         if (config.HistoryMode == "in-use")
             return (used ?? WorkspaceLogic.ReferencedSensorIds(config)).Contains(sensor.Id);
         if (config.PinnedSensors.Contains(sensor.Id)) return true;
@@ -663,8 +664,6 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 foreach (var hardware in _computer.Hardware)
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
-                var baseFrame = new SensorFrame(now, readings, null, devices);
-                readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 state.Publish(frame);
