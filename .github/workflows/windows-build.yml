@@ -289,8 +289,12 @@ jobs:
           if ($denied.StatusCode -ne 403) {
             throw 'Cross-origin or originless write requests must be rejected before UAC'
           }
-            if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
-            if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
+            if ($script.Content -match 'chart-hover-overlay' -or
+                $script.Content -match 'hoverCtx.clearRect' -or
+                $script.Content -notmatch 'scheduleLivePaint' -or
+                $script.Content -notmatch 'telemetryConfigPanel') {
+              throw 'Obsolete history overlay present or local live/configuration UI absent'
+            }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             # Invoke-RestMethod deserializes the JSON array into a PowerShell
