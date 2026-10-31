@@ -2,7 +2,7 @@
 <html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b111a"><title>SensorDash · Local Hardware Control</title>
-  <link rel="stylesheet" href="/style.css"><script defer src="/fan-commissioning.js"></script><script defer src="/fan-control-ux.js"></script><script defer src="/fan-control-debug.js"></script><script defer src="/workspace-locks.js"></script><script defer src="/fan-feedback.js"></script><script defer src="/cooling-insights.js"></script><script defer src="/cooling-timeline.js"></script><script defer src="/chart-gaps.js"></script><script defer src="/chart-time-axis.js"></script><script defer src="/cooling-electrical.js"></script><script defer src="/workspace.js"></script><script defer src="/driver-status.js"></script><script defer src="/app.js"></script>
+  <link rel="stylesheet" href="/style.css"><script defer src="/fan-commissioning.js"></script><script defer src="/fan-control-ux.js"></script><script defer src="/fan-control-debug.js"></script><script defer src="/workspace-locks.js"></script><script defer src="/fan-feedback.js"></script><script defer src="/cooling-insights.js"></script><script defer src="/cooling-electrical.js"></script><script defer src="/workspace.js"></script><script defer src="/driver-status.js"></script><script defer src="/app.js"></script>
 </head><body>
 <div class="shell">
  <aside class="sidebar">
@@ -24,7 +24,7 @@
  </aside>
  <main class="workspace">
   <header class="topbar"><div class="crumb">SENSORDASH <span> / </span> <b id="crumbName">COOLING</b></div>
-    <div class="top-actions"><div class="connection"><span class="status-led"></span><span id="liveStatus">Connecting</span></div><select id="range" aria-label="History range"><option value=".25">Last 15 minutes</option><option value="1" selected>Last hour</option><option value="6">Last 6 hours</option><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select><button id="refresh" class="icon-button" title="Refresh history">↻</button></div>
+    <div class="top-actions"><div class="connection"><span class="status-led"></span><span id="liveStatus">Connecting</span></div><button id="refresh" class="icon-button" title="Refresh local status">↻</button></div>
   </header>
   <div class="content-wrap">
    <div id="heading"></div>

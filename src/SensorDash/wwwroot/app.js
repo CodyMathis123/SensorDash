@@ -10,7 +10,6 @@ const titles={
  events:['HISTORY','Event log','Alerts and recoveries'],
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
-const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
  status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
@@ -323,7 +322,7 @@ function render(){
  
 }
 // Collecting data and painting the UI run independently. Incoming 2-second sensor
-// frames must never force a costly canvas redraw in the middle of a graph hover.
+// frames update local readouts without any historical chart render.
 function scheduleLivePaint() {
  if(S.livePaintQueued||document.hidden)return;
  S.livePaintQueued=true;
@@ -557,6 +556,8 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
  }
  if(e.target.closest('#saveSettings'))saveSettings();
   if(e.target.closest('#saveTelemetryConfig'))void saveTelemetryConfig();
+  if(e.target.closest('#refresh'))void Promise.all([loadEvents(),loadFanControl(),loadStatus(false),loadTelemetryConfig()]).then(()=>toast('Local status refreshed'));
+
 });
 document.addEventListener('input',e=>{
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
