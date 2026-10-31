@@ -350,6 +350,22 @@ jobs:
             if ($blockedTelemetry.StatusCode -ne 403) {
               throw 'Telemetry configuration without verified origin and action header must be rejected'
             }
+            # A valid local browser action changes only exporter settings; it
+            # must not require a collector restart or expose token/CA contents.
+            $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
+              -TimeoutSec 8
+            $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($confirmedTelemetry.hostLabel -ne 'ci-desktop' -or
+                $confirmedTelemetry.endpoint -ne 'https://192.168.1.43:8429/ingest' -or
+                $confirmedTelemetry.restartRequired -or $confirmedTelemetry.token -or
+                $confirmedTelemetry.caCertificatePem) {
+              throw 'Local exporter configuration was not saved/redacted or incorrectly requires service restart'
+            }
+            if (!$allowedTelemetry.configured) {
+              throw 'Local exporter settings write was not acknowledged'
+            }
             Start-Sleep -Seconds 2
             $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
             $curve = @($preview.results | Where-Object { $_.id -eq 'ci-curve' })
