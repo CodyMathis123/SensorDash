@@ -55,11 +55,9 @@ const system={id:'loop-1',name:'Workstation loop',kind:'liquid',components:[
 const settings={
  aliases:{},hiddenSensorIds:[],hiddenDeviceIds:[],hiddenHardwareTypes:[],
  coolingSystems:[system],
- dashboards:[{id:'board',name:'Thermal',locked:false,widgets:[
-  {id:'widget',title:'Coolant reading',kind:'metric',sensorIds:['coolant']}]}],
  pinnedSensors:[],highThresholds:{},
  trayWidgets:[{id:'tray',sensorId:'coolant',label:'Coolant'}],
- virtualSensors:[],fanProfiles:[],
+ fanProfiles:[],
  simulatedFanCurves:[{id:'curve',name:'Fan cooling',sourceSensorId:'coolant',
   outputSensorId:'rpm',points:[{temperature:25,percent:25},{temperature:50,percent:100}]}]
 };
@@ -74,14 +72,13 @@ const h={
  const references=workspace.usageIndex(S);
  const coolant=references.get('coolant');
  assert.ok(coolant.some(r=>r.page==='cooling'&&r.systemId==='loop-1'&&r.componentId==='probe-1'));
- assert.ok(coolant.some(r=>r.page==='dashboards'&&r.dashboardId==='board'));
+
  assert.ok(coolant.some(r=>r.page==='tray'));
  assert.ok(coolant.some(r=>r.page==='curves'));
  assert.equal(references.get('rpm').filter(r=>r.page==='cooling').length,1);
  assert.equal(workspace.isHidden(S,readings[7]),false);
  const html=workspace.render(S,'cooling',h);
- for(const unit of ['°C','W','RPM','%','L/h'])
-  assert.ok(html.includes('unit="'+unit+'"'),'Missing history chart '+unit);
+ assert.ok(!html.includes('<chart'),'Historical charts are Grafana owned');
  assert.ok(html.includes('data-cooling-component-id="probe-1"'));
  assert.ok(html.includes('2 power readings'),'Separate power readings should not be summed');
  assert.ok(html.includes('108 L/h'),'Single physical flow reading should appear in circulation summary');
@@ -112,13 +109,6 @@ const h={
  assert.ok(allSystems.includes('Secondary cooling system'));
  assert.ok(allSystems.includes('108 L/h'));
  assert.equal(S.settings.coolingSystems.length,2);
- await click('cooling-to-dashboard',{id:system.id});
- const board=S.settings.dashboards.at(-1);
- assert.match(board.name,/Workstation loop/);
- for(const title of ['Temperature history','Power history','RPM history','Flow history'])
-  assert.ok(board.widgets.some(w=>w.title===title),'Missing generated dashboard widget '+title);
- assert.ok(workspace.usageIndex(S).get('coolant').some(r=>r.dashboardId===board.id));
- assert.equal(S.view,'dashboards');
  assert.ok(app.includes('data-usage-component')&&app.includes('scrollIntoView'));
  assert.ok(css.includes('.w-referenced-component'));
  // Exercise the actual Explorer renderer, not only the index helper.
@@ -138,13 +128,6 @@ const h={
  assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
  assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
  assert.ok(explorerHtml.includes('data-select="coolant"'));
- // Layout locks are presentation-only: edit actions disappear, metrics remain.
- S.workspaceDashboardId=board.id;
- board.locked=true;
- const locked=workspace.render(S,'dashboards',h);
- assert.ok(locked.includes('Unlock layout'));
- assert.ok(!locked.includes('data-widget-title'));
- assert.ok(locked.includes('Coolant reading')||locked.includes('Current readings'));
  assert.ok(css.includes('grid-template-areas:"index sensor label color precision remove"'));
  assert.ok(script.includes('data-curve-temperature')&&script.includes('data-curve-percentage'));
  assert.ok(!script.includes('data-curve-points='));
@@ -305,5 +288,5 @@ const h={
  assert.ok(!curvesView.includes('This sandbox evaluates'));
  console.log('PASS: exact radiator Max/NVMe starters, durable control editor, data cache, tooltip and dynamic version footer');
  console.log('PASS: read-only process diagnostics, browser chart timing, time-sliced navigation and accurate live-control labels');
- console.log('PASS: cooling analytics, chart groups, templates, sensor usage, deep links, visibility, dashboard creation and removal of legacy roles');
+ console.log('PASS: cooling configuration, event references, sensor usage, fan curves and Grafana history separation');
 })().catch(err=>{console.error(err);process.exitCode=1;});

@@ -58,9 +58,9 @@ assert.ok(bridge.includes('"historyStats" => new'));
 assert.ok(bridge.includes('"historyStorage" => db.ReadStorage'));
 assert.ok(history.includes('interval<=maximumGapMs'));
 assert.ok(history.includes('Temperature readings never claim electricity usage'));
-assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes('HistoryInsights.markup(S)'));
-assert.ok(read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.afterRender(S)'));
-assert.ok(read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.storagePanel()'));
+assert.ok(!read('src/SensorDash/wwwroot/workspace.js').includes('HistoryInsights.markup(S)'));
+assert.ok(!read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.afterRender(S)'));
+assert.ok(!read('src/SensorDash/wwwroot/app.js').includes('HistoryInsights.storagePanel()'));
 assert.ok(read('src/SensorDash/wwwroot/index.html').includes('/history-insights.js'));
 console.log('PASS: month/retention peak summaries, power coverage, actual disk files, device/sensor shares and adjustable retention');
 
