@@ -27,7 +27,7 @@ Under `C:\ProgramData\SensorDash\`, with ACLs restricting access to SYSTEM and A
 }
 ```
 
-Save this as `telemetry-export.json`. Copy the Pi-issued CA certificate into `telemetry-ca.crt` and the **secret** bearer token into `telemetry-token.txt`. Replace the example IP with the reserved Pi IPv4; the HTTPS certificate has this IP as its SAN. Restart the **SensorDashCollector** service deliberately after configuration. No UI toggle or auto-reload exists yet.
+Save this as `telemetry-export.json`. Copy the Pi-issued CA certificate into `telemetry-ca.crt` and the **secret** bearer token into `telemetry-token.txt`. Replace the example IP with the reserved Pi IPv4; the HTTPS certificate has this IP as its SAN. Restart the **SensorDashCollector** service deliberately after configuration. No UI toggle or auto-reload exists yet. **On first enablement, the service builds an index over the existing SQLite history** to avoid costly full-table scans on every export. This one-time operation may take time or require additional disk space; perform it during a maintenance window while the fans are safely governed by motherboard firmware. The index is created before the sensor/fan worker starts.
 
 Never commit or share `telemetry-token.txt`, and never turn off certificate-name or CA validation. Do not copy the Pi's CA private key to Windows.
 
