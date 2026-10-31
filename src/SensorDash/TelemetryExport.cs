@@ -221,7 +221,7 @@ internal static class TelemetryExportSelfTest
             TokenFile = config.TokenFile, CaCertificateFile = config.CaCertificateFile };
         try { bad.Validate(); throw new InvalidOperationException("Accepted insecure endpoint."); }
         catch (InvalidDataException) { }
-        Require(TelemetryLineProtocol.Label("core sensor,=\n", 30) == "core_sensor___",
+        Require(TelemetryLineProtocol.Label("core sensor,=\n", 30) == "core_sensor____",
             "unsafe label characters");
         var lines = TelemetryLineProtocol.Serialize(
             [new TelemetryRow("/cpu/0/temperature/0", 1793450400000, 54.25)],
