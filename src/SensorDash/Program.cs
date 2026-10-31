@@ -111,7 +111,7 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return;
     }
-    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     await next(context);
 });
 IResult Resource(string name, string mediaType)
