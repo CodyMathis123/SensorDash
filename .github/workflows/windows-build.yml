@@ -270,7 +270,7 @@ jobs:
             $driverScript = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/driver-status.js' -UseBasicParsing
             if ($driverScript.Content -notmatch 'DriverStatus') { throw 'Driver status UI was not embedded' }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
-            if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
+            if ($page.Content -notmatch 'Local Hardware Control' -or $page.Content -match 'data-view="virtual"') { throw 'Missing local control-only HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
             if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
           $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
@@ -309,17 +309,12 @@ jobs:
             # Save real workspace configurations across the UI -> named pipe -> service.
             $settings.disabledCollectionGroups = @('Network')
             $settings.disabledCollectionDeviceIds = @()
-            $settings.dashboards = @(@{
-              id='ci-dashboard'; name='CI Workspace';
-              widgets=@(@{id='ci-widget';title='CPU history';kind='chart';sensorIds=@('/ci/temperature')})
-            })
             $settings.coolingSystems = @(@{
               id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
                 @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
               )
             })
             $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
-            $settings.virtualSensors = @(@{id='virtual:ci-max';name='CI Max';operation='max';sensorIds=@('/ci/temperature')})
             $settings.simulatedFanCurves = @(@{
               id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
               outputSensorId='';maxSampleAgeSeconds=30;
@@ -337,8 +332,21 @@ jobs:
             if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
               throw 'Generic collection family setting did not persist through service IPC'
             }
-            if ($persisted.dashboards[0].widgets[0].kind -ne 'chart' -or $persisted.simulatedFanCurves[0].id -ne 'ci-curve') {
-              throw 'Collector did not persist workspace and simulated curve configuration'
+            if ($persisted.simulatedFanCurves[0].id -ne 'ci-curve' -or
+                $persisted.PSObject.Properties.Name -contains 'virtualSensors' -or
+                $persisted.PSObject.Properties.Name -contains 'dashboards') {
+              throw 'Legacy virtual/dashboard settings survived or fan simulation was lost'
+            }
+            $telemetrySettings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($telemetrySettings.PSObject.Properties.Name -contains 'token' -or
+                $telemetrySettings.PSObject.Properties.Name -contains 'caCertificatePem') {
+              throw 'Collector exposed telemetry secret values in read-only configuration API'
+            }
+            $blockedTelemetry = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"","hostLabel":"ci-test"}' `
+              -SkipHttpErrorCheck
+            if ($blockedTelemetry.StatusCode -ne 403) {
+              throw 'Telemetry configuration without verified origin and action header must be rejected'
             }
             Start-Sleep -Seconds 2
             $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
@@ -346,7 +354,7 @@ jobs:
             if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
               throw 'Missing-input simulated curve must produce no hardware target'
             }
-            Write-Host 'Verified configurable cooling systems, dashboards, tray icons, virtual sensors and simulated curves'
+            Write-Host 'Verified cooling systems, tray icons, curve simulation and redacted telemetry settings'
 
             Write-Host 'Verified desktop + collector named pipe + browser shell'
           } finally {
