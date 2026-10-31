@@ -263,7 +263,23 @@ A successful [Windows build](https://github.com/CodyMathis123/SensorDash/actions
 
 The service's SQLite history and settings live under `%ProgramData%\SensorDash`. They are retained across MSI updates. Prior prototype-specific preferences are not maintained with compatibility shims; adjust any old custom configurations using the new editors if needed.
 
-The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens only on `http://127.0.0.1:8765/`. Hardware monitoring, fan-curve simulation, and locally approved fan profiles work without cloud access. The MSI does not install, replace or configure Fan Control or the shared PawnIO driver. SensorDash checks PawnIO in the collector and shows a setup warning plus status in Settings → Hardware driver. Install/update the official signed edition from https://pawnio.eu/ when prompted, then restart SensorDash Collector or Windows. PawnIO 2.0 or newer is needed for supported low-level CPU/motherboard access in LibreHardwareMonitor 0.9.6; other supported sensors can work without it. SensorDash uninstall leaves PawnIO intact. See [hardware driver setup](docs/hardware-drivers.md).
+The collector and desktop communicate over an ACL-restricted local named pipe. The elevated collector has no HTTP listener. The standard-user dashboard listens on `http://127.0.0.1:8765/` by default; private-network access is opt-in and read-only for remote devices. Hardware monitoring, fan-curve simulation, and locally approved fan profiles work without cloud access. The MSI does not install, replace or configure Fan Control or the shared PawnIO driver. SensorDash checks PawnIO in the collector and shows a setup warning plus status in Settings → Hardware driver. Install/update the official signed edition from https://pawnio.eu/ when prompted, then restart SensorDash Collector or Windows. PawnIO 2.0 or newer is needed for supported low-level CPU/motherboard access in LibreHardwareMonitor 0.9.6; other supported sensors can work without it. SensorDash uninstall leaves PawnIO intact. See [hardware driver setup](docs/hardware-drivers.md).
+
+### View SensorDash from your phone (feature branch)
+
+The desktop tray process must be running; the collector alone does not host the dashboard.
+
+1. On the PC, choose **Settings → Phone / private-network access**, enable the LAN preference, save, then exit and reopen SensorDash from the tray.
+2. Run PowerShell **as Administrator** to allow TCP port 8765 only from the local subnet on the Private Windows Firewall profile:
+   ```powershell
+   New-NetFirewallRule -DisplayName "SensorDash Private LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8765 -Profile Private -RemoteAddress LocalSubnet
+   ```
+   To remove it later: `Remove-NetFirewallRule -DisplayName "SensorDash Private LAN"`.
+3. On the PC, run `ipconfig` to find its LAN IPv4 address; on your phone while connected to the same home Wi-Fi open `http://<PC-IP>:8765`. Guest or isolated networks may prevent access.
+
+All non-loopback clients are **read-only**: they can view charts and readings but cannot change settings or send fan-control requests. This is enforced by the server, not just by the UI. The local UI remains fully functional. Network preferences are kept in `%LocalAppData%\SensorDash\network.json`, separate from collector configuration, and LAN listening is disabled by default.
+
+LAN HTTP is **not encrypted and requires no password**, so only use this on a trusted private network. **Do not forward port 8765 on the router or expose it on Public firewall profiles.** For remote access away from home, use an authenticated private VPN such as Tailscale on both devices. Public HTTPS and Let's Encrypt certificate management are not part of this feature. See [ADR 0006](docs/adr/0006-private-network-dashboard.md).
 
 ## Build and test
 
@@ -273,6 +289,7 @@ On Windows with the .NET 10 SDK:
 node --check src/SensorDash/wwwroot/app.js
 node --check src/SensorDash/wwwroot/workspace.js
 node scripts/test-workspace.cjs
+node scripts/test-network-mobile.cjs
 dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist
 .\dist\SensorDash.exe --self-test
 dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64

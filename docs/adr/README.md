@@ -9,3 +9,4 @@ Use ADRs for durable decisions affecting architecture, dependencies, persistence
 | [0003](0003-ci-msi-versions.md) | Accepted | Increasing CI build versions and previous-Production upgrade tests; supersedes allocation/testing portions of 0002 |
 | [0004](0004-history-reclamation-and-accessory-estimates.md) | Accepted | Retention space reclamation and accessory power history |
 | [0005](0005-cooling-preset-catalog.md) | Accepted | Reviewed JSON cooling presets packaged with the application |
+| [0006](0006-private-network-dashboard.md) | Accepted | Opt-in LAN dashboard viewing with remote read-only policy |

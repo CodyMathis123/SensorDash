@@ -7,6 +7,7 @@ SensorDash is a Windows hardware telemetry application with a tray UI, browser d
 | Location | Responsibility |
 | --- | --- |
 | `src/SensorDash/Program.cs` | Application/service startup, API and telemetry/history integration |
+| `src/SensorDash/DashboardNetworkOptions.cs` | Opt-in network preference and remote read-only policy |
 | `src/SensorDash/HardwareCollection.cs` | Hardware collection selection |
 | `src/SensorDash/ServiceBridge.cs`, `AdminFanControl.cs` | Collector communication and administrator control boundary |
 | `src/SensorDash/FanControlRuntime.cs`, `FanPwmChannels.cs` | Hardware control execution and channel adapters |

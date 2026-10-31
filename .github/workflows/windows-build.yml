@@ -49,6 +49,8 @@ jobs:
           node --check src/SensorDash/wwwroot/cooling-electrical.js
       - name: Test Settings alias and threshold pickers
         run: node scripts/test-settings-pickers.cjs
+      - name: Test phone layout and network access wiring
+        run: node scripts/test-network-mobile.cjs
       - name: Test hardware driver status UI
         run: node scripts/test-driver-status.cjs
       - name: Test previous MSI artifact selection
@@ -249,6 +251,14 @@ jobs:
               } catch { }
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
+            $net = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/network' -TimeoutSec 5
+            if ($net.lanEnabled -or $net.active -or $net.remote) { throw 'LAN must be disabled by default on the local host' }
+            $enabledNet = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/network' -Method Put -ContentType 'application/json' -Body '{"lanEnabled":true}' -TimeoutSec 5
+            if (!$enabledNet.lanEnabled -or !$enabledNet.restartRequired -or $enabledNet.active) {
+              throw 'LAN preference should persist and require a restart'
+            }
+            $disabledNet = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/network' -Method Put -ContentType 'application/json' -Body '{"lanEnabled":false}' -TimeoutSec 5
+            if ($disabledNet.lanEnabled -or $disabledNet.restartRequired) { throw 'LAN preference could not be disabled' }
             $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
             $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
             if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }

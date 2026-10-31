@@ -411,3 +411,57 @@
 .electrical-presets{align-items:flex-end}.electrical-presets label{display:flex;flex-direction:column;gap:6px;flex:1;max-width:460px;min-width:160px;font-size:12px;color:var(--muted)}.electrical-presets select{width:100%}
 
 .driver-warning{display:flex;gap:8px 16px;align-items:center;flex-wrap:wrap;border-left:3px solid #f4be68}.driver-warning span{flex:1;min-width:220px}.driver-warning a{white-space:nowrap}
+
+
+/* Private-network view: pages remain readable, but the server rejects
+   all non-local mutations. The local-only Settings page is hidden. */
+.remote-view .sidebar nav:not(#navigation){display:none}
+.network-toggle{display:flex;align-items:center;gap:11px;line-height:1.45;margin:8px 0 13px;cursor:pointer}
+.network-toggle input{width:20px;height:20px;flex:none;accent-color:var(--cyan)}
+.network-restart{color:var(--yellow);font-weight:650}
+.network-readonly-note{margin-top:0}
+
+/* On narrow touch screens use a swipeable labeled navigation strip instead
+   of consuming precious viewport width with a permanent icon-only sidebar. */
+@media(max-width:700px){
+ .shell{display:block;min-width:0}
+ .sidebar{position:sticky;top:0;z-index:20;width:100%;height:auto;min-height:0;
+  padding:7px 9px;flex-direction:row;align-items:center;gap:6px;
+  border-right:0;border-bottom:1px solid #31465a;box-shadow:0 3px 14px #0006}
+ .sidebar .brand,.sidebar .group-title,.sidebar .sidebar-foot{display:none}
+ .sidebar #navigation{display:flex;align-items:center;gap:5px;flex:1;min-width:0;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+ .sidebar nav:not(#navigation){display:flex;flex:none}
+ .sidebar .nav{display:flex;align-items:center;justify-content:center;flex:none;
+  width:auto;margin:0;gap:6px;padding:10px 11px;min-height:43px;white-space:nowrap;
+  font-size:12px;line-height:1.15}
+ .sidebar .nav>span:first-child{font-size:18px;width:auto}
+ .sidebar .nav-number{display:none}
+ .workspace{width:100%;min-width:0}
+ .workspace .topbar{height:auto;min-height:58px;padding:8px 12px;gap:8px}
+ .topbar .crumb{letter-spacing:.7px;white-space:nowrap}
+ .top-actions{gap:8px;min-width:0}
+ .top-actions select{width:auto;max-width:46vw}
+ .top-actions .icon-button{padding:7px 10px}
+ .content-wrap{padding:17px 12px 25px}
+ .page-head{align-items:flex-start;margin-bottom:17px}
+ .page-head h1{font-size:24px}
+ .panel{padding:14px}
+ .chart-wrap{height:220px}
+ .chart-wrap.small{height:196px}
+ .table-container{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+ .stat-row{flex-wrap:wrap;gap:6px}
+ .stat-row label,.stat-row strong{overflow-wrap:anywhere}
+ .chart-legend{gap:8px}
+ #toast{left:12px;right:12px;bottom:12px}
+}
+@media(max-width:410px){
+ .metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .metric{padding:11px}
+ .metric-num b{font-size:clamp(22px,7vw,28px);letter-spacing:-1px}
+ .metric-top{font-size:10px}
+ .metric-detail{font-size:11px}
+ .topbar .crumb{font-size:10px}
+ .top-actions select{max-width:43vw;font-size:12px;padding:8px 7px}
+ .mini-rows{grid-template-columns:1fr}
+}

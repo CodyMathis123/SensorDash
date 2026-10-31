@@ -12,7 +12,7 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
-const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
+const S={view:'overview',network:null,frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
  hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,misses:0,requests:0,lastFetchMs:null},chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0},chartGeneration:0,status:null,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -180,6 +180,15 @@ function settingsView(){
  const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
    .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
+ panel('Phone / private-network access', 'Read-only dashboard viewing on your Wi-Fi or private VPN',
+  S.network?.remote
+   ? '<p class="note">This session is read-only. Network access can only be changed on the PC itself.</p>'
+   : '<label class="network-toggle"><input type="checkbox" id="allowLan" '+(S.network?.lanEnabled?'checked':'')+
+     '> Allow dashboard viewing from devices on my private network</label>'+
+     '<p class="note">Saved on this PC. Restart SensorDash to apply a change. Allow TCP port 8765 through Windows Firewall only for trusted private networks. Do not forward this port on your router.</p>'+
+     '<p class="note">Remote sessions cannot change settings or control fans. For access away from home, use an authenticated private VPN such as Tailscale.</p>'+
+     (S.network?.restartRequired?'<p class="network-restart">Restart required to apply the saved preference.</p>':'')+
+     '<button class="btn" id="saveNetwork">Save network preference</button>')+
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
@@ -256,7 +265,7 @@ function settingsView(){
 
  '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
- '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
+ '<div class="stat-row"><label>Web address</label><strong>'+esc(S.network?.remote ? location.host : '127.0.0.1:8765')+'</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
  '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
@@ -280,7 +289,9 @@ function render(){
   ? SDWorkspace.render(S,S.view,{metric,panel,chart})
   : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
- byId('content').innerHTML='<div id="driverWarning">'+DriverStatus.warning(frame?.pawnIo)+'</div>'+error+content;
+ byId('content').innerHTML='<div id="driverWarning">'+DriverStatus.warning(frame?.pawnIo)+'</div>'+
+  (S.network?.remote?'<div class="help network-readonly-note" role="status">Private-network view · Read-only. Use the desktop app on this PC to change settings or control fans.</div>':'')+
+  error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
  HistoryInsights.afterRender(S);
@@ -731,8 +742,16 @@ async function togglePin(id){
  try{await SDWorkspace.saveSettings(S,cfg);toast(cfg.pinnedSensors.includes(id)?'Sensor pinned':'Sensor unpinned');render()}
  catch(err){toast(err.message)}
 }
+async function saveNetwork(){
+ const allow=!!byId('allowLan')?.checked;
+ try{
+  S.network=await fetchJSON('/api/network',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({lanEnabled:allow})});
+  render();toast(S.network.restartRequired?'Saved. Restart SensorDash to apply network access.':'Network preference saved');
+ }catch(err){toast('Network preference: '+err.message)}
+}
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{
+ if(e.target.closest('#saveNetwork')){void saveNetwork();return}
  if(e.target.id==='refreshStorageFootprint'){
   HistoryInsights.handle(e,S);return;
  }
@@ -865,13 +884,15 @@ setInterval(()=>{
 },30000);
 async function bootstrap(){
  try{
-   const [cfg,frame,groups,status]=await Promise.all([
+   const [cfg,frame,groups,status,network]=await Promise.all([
      fetchJSON('/api/settings'),fetchJSON('/api/live'),
-     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),CoolingElectrical.loadCatalog()
+     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),fetchJSON('/api/network'),CoolingElectrical.loadCatalog()
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
+   S.network=network;document.body.classList.toggle('remote-view',!!network.remote);
+   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);
+   if(titles[initial]&&!(network.remote&&initial==='settings'))S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};

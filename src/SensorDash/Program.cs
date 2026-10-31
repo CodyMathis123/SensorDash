@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); DashboardNetworkOptionsSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -85,7 +85,7 @@ catch (TaskCanceledException) { }
 
 var userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
 Directory.CreateDirectory(userDir);
-// The desktop process only serves loopback minimal APIs and embedded assets.
+// The desktop serves loopback by default. Opt-in LAN sessions are read-only.
 // SlimBuilder avoids unrelated MVC/configuration defaults in the tray host;
 // the elevated collector keeps its normal Windows Service host.
 var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
@@ -93,10 +93,28 @@ var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
-builder.WebHost.UseUrls("http://127.0.0.1:8765");
+var networkOptions = DashboardNetworkOptions.Load(userDir);
+builder.WebHost.UseUrls(networkOptions.LanEnabled ? "http://0.0.0.0:8765" : "http://127.0.0.1:8765");
 builder.Services.AddSingleton(new DashboardState(userDir));
 builder.Services.AddHostedService<DashboardBridgeWorker>();
 var app = builder.Build();
+// Read-only, private-network access is enforced before every endpoint.
+// This never changes permissions on the collector pipe or hardware control.
+app.Use(async (context, next) =>
+{
+    var remoteAddress = context.Connection.RemoteIpAddress;
+    if (!DashboardNetworkOptions.IsTrustedClient(remoteAddress) ||
+        !DashboardNetworkOptions.IsAllowedHost(context.Request.Host.Host, context.Connection.LocalIpAddress, remoteAddress) ||
+        (!DashboardNetworkOptions.CanMutate(remoteAddress) &&
+         !HttpMethods.IsGet(context.Request.Method) &&
+         !HttpMethods.IsHead(context.Request.Method)))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    await next(context);
+});
 IResult Resource(string name, string mediaType)
 {
     var resource = typeof(DashboardState).Assembly.GetManifestResourceStream("SensorDash.Web." + name);
@@ -126,13 +144,45 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
     app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
     collectorOnline = state.Latest is { Error: null },
-    localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
+    localOnly = !networkOptions.LanEnabled, started = state.Started, now = DateTimeOffset.UtcNow,
     pawnIo = state.Latest?.PawnIo,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
     process = ProcessTelemetry.Snapshot(),
     lastSample = state.Latest?.Timestamp,
     error = state.Latest?.Error
 }));
+app.MapGet("/api/network", (HttpContext context) =>
+{
+    var requested = DashboardNetworkOptions.Load(userDir).LanEnabled;
+    return Results.Ok(new
+    {
+        lanEnabled = requested, active = networkOptions.LanEnabled,
+        restartRequired = requested != networkOptions.LanEnabled,
+        remote = !DashboardNetworkOptions.IsLocalClient(context.Connection.RemoteIpAddress),
+        port = 8765
+    });
+});
+app.MapPut("/api/network", async (HttpContext context) =>
+{
+    if (!DashboardNetworkOptions.CanMutate(context.Connection.RemoteIpAddress))
+        return Results.StatusCode(403);
+    if (context.Request.ContentLength > 1024)
+        return Results.StatusCode(413);
+    try
+    {
+        var requested = await JsonSerializer.DeserializeAsync<DashboardNetworkOptions>(
+            context.Request.Body, JsonSerializerOptions.Web, context.RequestAborted);
+        if (requested is null) return Results.BadRequest("Invalid network preference.");
+        DashboardNetworkOptions.Save(userDir, requested.LanEnabled);
+        return Results.Ok(new
+        {
+            lanEnabled = requested.LanEnabled, active = networkOptions.LanEnabled,
+            restartRequired = requested.LanEnabled != networkOptions.LanEnabled,
+            remote = false, port = 8765
+        });
+    }
+    catch (JsonException) { return Results.BadRequest("Invalid network preference."); }
+});
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
 app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
