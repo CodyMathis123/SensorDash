@@ -40,7 +40,11 @@ Never commit or share `telemetry-token.txt`, and never turn off certificate-name
 - Retains a resume cursor in `telemetry-export-cursor.json`. A successful HTTP response is required before advancing. A crash after server acceptance but before cursor persistence can replay a batch; the Pi's VictoriaMetrics profile enables 1 ms query deduplication.
 - The existing SQLite history and retention act as the bounded queue. If the Pi is unreachable longer than Windows retention, data may be lost when old samples expire. Failure is logged without affecting collector fan operation.
 
-Sensor aliases are intentionally **not** included as series labels because alias edits would fragment historical identity. Sensor catalog/alias metadata, cooling components and derived wattage estimates are the next milestone.
+Sensor aliases are intentionally **not** included on the raw measurement series, because alias edits would fragment historical identity. The exporter now also publishes a small **read-only metadata catalog**, with two gauge series: `sensordash_sensor_info_value` (names, device, kind and aliases) and `sensordash_cooling_binding_value` (system/component role assignments). These are emitted on configuration changes or at least every two minutes, and removed/renamed entries receive `value=0` tombstones. Only successfully acknowledged catalog snapshots advance the local metadata checkpoint (`telemetry-export-metadata.json`). Metadata failure does not block raw sensor samples or hardware control.
+
+Grafana's new `SensorDash · Cooling Systems` view joins the raw sensor data with active component bindings without duplicating measurements. See the [cooling Grafana guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/pi4-home-infrastructure/docs/COOLING-GRAFANA.md).
+
+Derived fan/pump watts with measurement provenance and calculation revision remain **future work**. Cooling editor and electrical calibrations remain exclusively in SensorDash. If the Pi is unreachable, snapshots retry, but existing local history retention still limits raw backfill.
 
 ## Diagnosis
 
