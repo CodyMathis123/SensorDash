@@ -1,11 +1,11 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const nodes=Object.fromEntries(['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays','historyMode','range','refresh'].map(id=>[id,{value:id==='historyMode'?'balanced':'30',addEventListener(){}}]));
+const nodes=Object.fromEntries(['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays','historyMode','refresh'].map(id=>[id,{value:id==='historyMode'?'balanced':'30',addEventListener(){}}]));
 const fields=[];const writes=[];
 const context={structuredClone,console,setInterval(){},setTimeout(){},clearTimeout(){},
  document:{addEventListener(){},getElementById:id=>nodes[id]||null,querySelectorAll:selector=>fields.filter(f=>selector===f.selector)},
  window:{addEventListener(){}},confirm:()=>true,
- DriverStatus:{details:()=>''},HistoryInsights:{storagePanel:()=>''},
+ DriverStatus:{details:()=>''},
  SDWorkspace:{saveSettings:async(S,cfg)=>{S.settings=structuredClone(cfg);writes.push(structuredClone(cfg));}}
 };
 const source=fs.readFileSync('src/SensorDash/wwwroot/app.js','utf8').replace(/bootstrap\(\);\s*$/,'');
@@ -20,7 +20,7 @@ let html=app.settingsView();
 assert.match(html,/id="addAlias"/);assert.match(html,/Fan &lt;2&gt;/);
 const options=id=>html.split('id="'+id+'"')[1].split('</select>')[0];
 assert.doesNotMatch(options('newAliasId'),/value="cpu"/);assert.doesNotMatch(options('newThresholdId'),/value="cpu"/);
-assert.match(html,/Balanced · key temperatures/);assert.match(html,/In use · cooling/);assert.match(html,/All sensors · largest history database/);
+assert.match(html,/Balanced · key temperatures/);assert.match(html,/In use · cooling/);assert.match(html,/All sensors · higher local archive and Pi ingest load/);
 fields.push({selector:'[data-alias]',dataset:{alias:'cpu'},value:'Edited processor'});
 fields.push({selector:'[data-threshold]',dataset:{threshold:'cpu'},value:'80'});
 (async()=>{
