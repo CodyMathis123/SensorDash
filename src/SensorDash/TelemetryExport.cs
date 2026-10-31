@@ -181,17 +181,22 @@ internal sealed class TelemetryExportWorker(
             // previously published tag sets, which require explicit 0 tombstones.
             var lastMetadata = TelemetryMetadata.Load(metadataFile);
             long lastMetadataAt = 0;
+            long lastMetadataCheckAt = 0;
             logger.LogInformation("Telemetry export enabled; cursor starts at {TimestampMs}.", cursor.TimestampMs);
             while (!stop.IsCancellationRequested)
             {
                 try
                 {
                     var latest = state.Latest;
-                    if (latest is { Error: null } && latest.Sensors.Count > 0)
+                    var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    // A large retry backlog can flush many batches per second.
+                    // Only rebuild the potentially large catalog every 5 seconds.
+                    if (latest is { Error: null } && latest.Sensors.Count > 0 &&
+                        now - lastMetadataCheckAt >= 5_000)
                     {
+                        lastMetadataCheckAt = now;
                         try
                         {
-                            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                             var current = TelemetryMetadata.Build(latest, state.Settings, host);
                             if (!current.SetEquals(lastMetadata) || now - lastMetadataAt >= 120_000)
                             {
