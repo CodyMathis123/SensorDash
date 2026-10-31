@@ -144,24 +144,24 @@ internal static class TelemetryMetadataSelfTest
                 }
             ]
         };
-        var previous = Build(frame, config, "My Desktop");
+        var previous = TelemetryMetadata.Build(frame, config, "My Desktop");
         Check(previous.Count == 5, "three sensor descriptors plus two cooling bindings");
         Check(previous.Any(x => x.Contains("alias=CPU_Coolant_Proxy") && x.Contains("sensor=/cpu/0/temperature/0")),
             "alias is informational and stripped of spaces");
         Check(previous.Any(x => x.StartsWith("sensordash_cooling_binding,") &&
             x.Contains("system=loop-one") && x.Contains("component=heat-cpu")),
             "stable cooling component keys");
-        var snapshot = Serialize(previous, new(StringComparer.Ordinal), 1793450400000);
+        var snapshot = TelemetryMetadata.Serialize(previous, new(StringComparer.Ordinal), 1793450400000);
         Check(snapshot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 5,
             "snapshot count");
         config.Aliases["/cpu/0/temperature/0"] = "CPU Temperature";
         config.CoolingSystems[0].Components[0].SensorIds.Remove("/cpu/0/power/0");
-        var current = Build(frame, config, "My Desktop");
-        var changes = Serialize(current, previous, 1793450460000);
+        var current = TelemetryMetadata.Build(frame, config, "My Desktop");
+        var changes = TelemetryMetadata.Serialize(current, previous, 1793450460000);
         Check(changes.Split(" value=0 ", StringSplitOptions.None).Length - 1 == 2,
             "tombstone changed alias and removed binding");
         Check(changes.Contains("alias=CPU_Temperature value=1 "), "new alias published");
-        var chunks = Chunks(string.Concat(Enumerable.Repeat(snapshot, 500)));
+        var chunks = TelemetryMetadata.Chunks(string.Concat(Enumerable.Repeat(snapshot, 500)));
         Check(chunks.Count > 1 && chunks.All(x => Encoding.ASCII.GetByteCount(x) <= 128 * 1024),
             "metadata requests chunk safely");
         var dir = Path.Combine(Path.GetTempPath(), "sensordash-metadata-" + Guid.NewGuid().ToString("N"));
@@ -169,11 +169,11 @@ internal static class TelemetryMetadataSelfTest
         try
         {
             var path = Path.Combine(dir, "metadata.json");
-            Save(path, current);
-            Check(Load(path).SetEquals(current), "persisted snapshot");
+            TelemetryMetadata.Save(path, current);
+            Check(TelemetryMetadata.Load(path).SetEquals(current), "persisted snapshot");
         }
         finally { Directory.Delete(dir, true); }
-        Check(Build(new SensorFrame(DateTimeOffset.UtcNow, [], "Offline"), config, "PC").Count == 0,
+        Check(TelemetryMetadata.Build(new SensorFrame(DateTimeOffset.UtcNow, [], "Offline"), config, "PC").Count == 0,
             "offline frame must not trigger tombstones");
     }
 }
