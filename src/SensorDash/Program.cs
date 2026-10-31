@@ -120,7 +120,6 @@ app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/j
 app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
 app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
 app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
-app.MapGet("/history-insights.js", () => Resource("history-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-electrical.js", () => Resource("cooling-electrical.js", "text/javascript; charset=utf-8"));
 app.MapGet("/driver-status.js", () => Resource("driver-status.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
