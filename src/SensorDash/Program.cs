@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryMetadataSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -408,6 +408,14 @@ public sealed partial class HistoryStore {
             CREATE TABLE IF NOT EXISTS samples(sensor TEXT NOT NULL, ts INTEGER NOT NULL, value REAL NOT NULL, PRIMARY KEY(sensor, ts));
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, severity TEXT, sensor TEXT, message TEXT, value REAL);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+            CREATE TABLE IF NOT EXISTS accessory_power (
+                system TEXT NOT NULL, component TEXT NOT NULL,
+                ts INTEGER NOT NULL, watts REAL NOT NULL,
+                source TEXT NOT NULL, revision TEXT NOT NULL,
+                PRIMARY KEY(system,component,ts)
+            );
+            CREATE INDEX IF NOT EXISTS idx_accessory_power_export
+                ON accessory_power(ts,system,component);
             """;
         cmd.ExecuteNonQuery();
     }
@@ -573,7 +581,7 @@ public sealed partial class HistoryStore {
     public void Cleanup(int retentionDays) {
         var before = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeMilliseconds();
         using var conn = Open(); using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before";
+        cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before; DELETE FROM accessory_power WHERE ts < $before";
         cmd.Parameters.AddWithValue("$before", before);
         using (var transaction = conn.BeginTransaction()) {
             cmd.Transaction = transaction;
@@ -638,6 +646,12 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
                     db.Record(frame, cfg);
+                    // Derived electrical history is observational only. A failed
+                    // optional computation/storage cannot interrupt fan control.
+                    try { db.RecordAccessoryPower(frame, cfg); }
+                    catch (Exception electricalError) {
+                        logger.LogWarning(electricalError, "Accessory power archive failed; control is unchanged.");
+                    }
                     CheckEvents(frame, cfg);
                     _lastSaved = now;
                 }
