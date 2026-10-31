@@ -1,19 +1,18 @@
 'use strict';
 const titles={
- overview:['OVERVIEW','Hardware at a glance','Discovered sensors, live readings and configurable workspaces'],
- dashboards:['WORKSPACE','Dashboards','Build metric, chart and sensor-list layouts'],
+
  cooling:['COOLING','Cooling systems','Model any number of air, liquid or custom cooling systems'],
  curves:['FAN CONTROL','Fan control','Control fans with temperature curves'],
- virtual:['DERIVED','Virtual sensors','Define maximum, minimum, average and difference sensors'],
+
  tray:['NOTIFICATION AREA','Tray readouts','Keep sensor readings in your Windows tray'],
- storage:['HARDWARE','Storage sensors','Drive temperatures and activity'],
+
  explorer:['SENSOR LIBRARY','Sensor Explorer','Discover, rename, search and pin sensor data'],
  events:['HISTORY','Event log','Alerts and recoveries'],
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
-const S={view:'overview',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,misses:0,requests:0,lastFetchMs:null},chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0},chartGeneration:0,status:null,liveCache:new Map(),connected:false,diagnostics:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
+ hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,misses:0,requests:0,lastFetchMs:null},chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0},chartGeneration:0,status:null,liveCache:new Map(),connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -165,6 +164,61 @@ function settingsCandidates(field){
   (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type)))
   .sort((a,b)=>label(a).localeCompare(label(b)));
 }
+
+function telemetryConfigPanel(){
+ const cfg=S.telemetryConfig;
+ if(!cfg)return panel('Pi telemetry export','Outbound HTTPS to the Pi',
+  '<p class="note">Reading exporter settings from the Windows collector…</p>');
+ const ready=x=>x?'Ready':'Not installed';
+ return panel('Pi telemetry export','Windows controls hardware; Grafana only records and displays.',
+  '<div class="form-grid">'+
+  '<div class="field"><label for="telemetryEndpoint">HTTPS ingest URL</label>'+
+  '<input id="telemetryEndpoint" type="url" value="'+esc(cfg.endpoint||'')+
+  '" placeholder="https://192.168.1.43:8429/ingest"></div>'+
+  '<div class="field"><label for="telemetryHost">Computer label</label>'+
+  '<input id="telemetryHost" value="'+esc(cfg.hostLabel||'main-desktop')+'"></div></div>'+
+  '<label class="collection-toggle"><input type="checkbox" id="telemetryEnabled" '+
+  (cfg.enabled?'checked':'')+'>Export recorded telemetry to the Pi</label>'+
+  '<div class="form-grid">'+
+  '<div class="field"><label for="telemetryToken">Bearer token · optional replacement</label>'+
+  '<input id="telemetryToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="'+
+  (cfg.tokenReady?'Installed — leave blank to keep':'Paste Pi-issued token')+'"></div>'+
+  '<div class="field"><label for="telemetryCa">CA certificate PEM · optional replacement</label>'+
+  '<textarea id="telemetryCa" rows="3" spellcheck="false" placeholder="'+
+  (cfg.caReady?'Installed — leave blank to keep':'Paste Pi-issued public CA certificate')+'"></textarea></div></div>'+
+  '<p class="note">Status: '+(cfg.enabled?'Enabled':'Disabled')+' · token '+ready(cfg.tokenReady)+
+   ' · CA '+ready(cfg.caReady)+(cfg.restartRequired?' · Collector restart required':'')+'</p>'+
+  '<p class="note">Secrets remain in ProgramData, are never returned to the browser and do not affect fan-control approval. '+
+  'Saving these settings never restarts the Windows service.</p>'+
+  '<button type="button" class="btn secondary" id="saveTelemetryConfig">Save exporter settings</button>');
+}
+async function loadTelemetryConfig(){
+ try{
+  S.telemetryConfig=await fetchJSON('/api/telemetry-config');
+  if(S.view==='settings')render();
+ }catch(e){console.warn('Telemetry configuration unavailable:',e.message);}
+}
+async function saveTelemetryConfig(){
+ if(!S.telemetryConfig){toast('Collector configuration unavailable');return;}
+ const payload={
+  enabled:byId('telemetryEnabled').checked,
+  endpoint:byId('telemetryEndpoint').value.trim(),
+  hostLabel:byId('telemetryHost').value.trim(),
+  token:byId('telemetryToken').value.trim()||null,
+  caCertificatePem:byId('telemetryCa').value.trim()||null
+ };
+ try{
+  const r=await fetch('/api/telemetry-config',{
+   method:'PUT',headers:{'Content-Type':'application/json','X-SensorDash-Action':'telemetry-config'},
+   body:JSON.stringify(payload)
+  });
+  if(!r.ok)throw new Error('HTTP '+r.status+'. Verify HTTPS URL and credentials.');
+  S.telemetryConfig=await r.json();
+  toast('Telemetry saved. Restart the collector when it is safe to apply the change.');
+  render();
+ }catch(e){toast('Could not save exporter: '+e.message);}
+}
+
 function settingsView(){
  const cfg=S.settings;if(!cfg)return '<div class="loading">Waiting for collector settings…</div>';
  const aliases=Object.entries(cfg.aliases||{}).sort((a,b)=>a[0].localeCompare(b[0]));
@@ -186,12 +240,10 @@ function settingsView(){
  ['saveEverySeconds','History save interval (sec)'],['retentionDays','History retention (days)']]
  .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="'+(['storagePollSeconds','saveEverySeconds'].includes(key)?5:1)+'" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" title="'+(key==='retentionDays'?'1–1,095 days. Older history is deleted.':key==='fastPollSeconds'?'1–30 seconds':'5–120 seconds')+'" value="'+cfg[key]+'"></div>').join('')+
  '</div>')+
- panel('History storage','',
- HistoryInsights.storagePanel())+
  panel('Recorded sensors','Choose what to monitor and save',
  '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
  [['balanced','Balanced · key temperatures, fans, power and activity'],
-  ['in-use','In use · dashboards, cooling, tray, curves, alerts and pins'],
+  ['in-use','In use · cooling, tray, curves, alerts and pins'],
   ['all','All sensors · largest history database']].map(([val,text])=>
    '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
  '</select></label>'+
@@ -219,7 +271,7 @@ function settingsView(){
   ((cfg.excludedHistoryHardwareTypes||[]).includes(t)?'checked':'')+'>'+
   esc(t)+'</label>').join('')+'</div>'+
  '<p class="note">Excluded categories remain visible live but are not recorded.</p>')+
- panel('Sensor aliases','Rename any physical or virtual sensor',
+ panel('Sensor aliases','Rename discovered physical sensors',
  (aliases.length?aliases.map(([id,name])=>
  '<div class="alias-row"><label title="'+esc((sensor(id)?.name||id)+' · '+id)+'">'+esc(sensor(id)?.name||id)+'</label>'+
  '<input aria-label="Alias for '+esc(sensor(id)?.name||id)+'" data-alias="'+esc(id)+'" value="'+esc(name)+'" placeholder="Display name">'+
@@ -236,7 +288,8 @@ function settingsView(){
  thresholdChoices.map(s=>
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
- '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
+ telemetryConfigPanel()+
+  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
 
  [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
@@ -276,14 +329,14 @@ function render(){
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
  const frame=S.frame;
  const error=frame?.error?`<div class="help" style="border-left-color:#ec8792">Sensor collector: ${esc(frame.error)}. The web app is running; readings may require administrator access or a supported hardware driver.</div>`:'';
- const content=['overview','dashboards','cooling','curves','tray','virtual','storage'].includes(S.view)
+ const content=['cooling','curves','tray'].includes(S.view)
   ? SDWorkspace.render(S,S.view,{metric,panel,chart})
   : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
  byId('content').innerHTML='<div id="driverWarning">'+DriverStatus.warning(frame?.pawnIo)+'</div>'+error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
  ensureHistory();
- HistoryInsights.afterRender(S);
+
 }
 // Collecting data and painting the UI run independently. Incoming 2-second sensor
 // frames must never force a costly canvas redraw in the middle of a graph hover.
@@ -352,8 +405,8 @@ async function loadDiagnostics(shouldRender=true){
  try {
   const previous=JSON.stringify(S.diagnostics);
   S.diagnostics=await fetchJSON('/api/diagnostics');
-  if(shouldRender&&S.view==='storage'&&previous!==JSON.stringify(S.diagnostics))render();
- }catch(e){console.warn('Storage diagnostics unavailable:',e.message);}
+  if(shouldRender&&S.view==='settings'&&previous!==JSON.stringify(S.diagnostics))render();
+ }catch(e){console.warn('Collector diagnostics unavailable:',e.message);}
 }
 async function saveAlias(clear=false){
  const current=S.selected;if(!sensor(current))return;
@@ -732,12 +785,8 @@ async function togglePin(id){
  catch(err){toast(err.message)}
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
-document.addEventListener('click',e=>{
- if(e.target.id==='refreshStorageFootprint'){
-  HistoryInsights.handle(e,S);return;
- }
- if(S.view==='cooling'&&e.target.closest('[data-view],[data-usage-target]'))void SDWorkspace.flushCooling(S).catch(()=>{});
- const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='storage'||S.view==='settings')loadDiagnostics().catch(()=>{});
+document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[data-view],[data-usage-target]'))void SDWorkspace.flushCooling(S).catch(()=>{});
+ const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='settings'){loadDiagnostics().catch(()=>{});void loadTelemetryConfig();}
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
@@ -765,10 +814,7 @@ document.addEventListener('click',e=>{
  if(FanCommissioning.handle(e,S,{render,toast}))return;
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast,refreshFanControl:loadFanControl});return}
  const usages=e.target.closest('[data-usage-target]');if(usages){
-   const target=usages.dataset.usageTarget;
-   if(target==='dashboards'&&usages.dataset.usageDashboard)
-     S.workspaceDashboardId=usages.dataset.usageDashboard;
-   S.focusCoolingTarget=target==='cooling'?{
+   const target=usages.dataset.usageTarget;S.focusCoolingTarget=target==='cooling'?{
      systemId:usages.dataset.usageSystem,
      componentId:usages.dataset.usageComponent
    }:null;
@@ -811,6 +857,7 @@ document.addEventListener('click',e=>{
   return;
  }
  if(e.target.closest('#saveSettings'))saveSettings();
+  if(e.target.closest('#saveTelemetryConfig'))void saveTelemetryConfig();
 });
 document.addEventListener('input',e=>{
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
@@ -832,9 +879,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
- if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
- if(HistoryInsights.handle(e,S))return;
- if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
+ if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
  if(e.target.id==='explorerGroup'){S.explorerGrouping=e.target.value;render()}
@@ -871,7 +916,7 @@ async function bootstrap(){
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);loadSimulation();loadFanControl();
+   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};

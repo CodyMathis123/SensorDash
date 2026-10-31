@@ -1,21 +1,20 @@
 <!doctype html>
 <html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b111a"><title>SensorDash · Hardware workspaces</title>
-  <link rel="stylesheet" href="/style.css"><script defer src="/fan-commissioning.js"></script><script defer src="/fan-control-ux.js"></script><script defer src="/fan-control-debug.js"></script><script defer src="/workspace-locks.js"></script><script defer src="/fan-feedback.js"></script><script defer src="/cooling-insights.js"></script><script defer src="/cooling-timeline.js"></script><script defer src="/chart-gaps.js"></script><script defer src="/chart-time-axis.js"></script><script defer src="/history-insights.js"></script><script defer src="/cooling-electrical.js"></script><script defer src="/workspace.js"></script><script defer src="/driver-status.js"></script><script defer src="/app.js"></script>
+  <meta name="theme-color" content="#0b111a"><title>SensorDash · Local Hardware Control</title>
+  <link rel="stylesheet" href="/style.css"><script defer src="/fan-commissioning.js"></script><script defer src="/fan-control-ux.js"></script><script defer src="/fan-control-debug.js"></script><script defer src="/workspace-locks.js"></script><script defer src="/fan-feedback.js"></script><script defer src="/cooling-insights.js"></script><script defer src="/cooling-timeline.js"></script><script defer src="/chart-gaps.js"></script><script defer src="/chart-time-axis.js"></script><script defer src="/cooling-electrical.js"></script><script defer src="/workspace.js"></script><script defer src="/driver-status.js"></script><script defer src="/app.js"></script>
 </head><body>
 <div class="shell">
  <aside class="sidebar">
-  <div class="brand"><div class="brand-icon">◈</div><div><strong>SensorDash</strong><small>HARDWARE WORKSPACE</small></div></div>
+  <div class="brand"><div class="brand-icon">◈</div><div><strong>SensorDash</strong><small>LOCAL CONTROL</small></div></div>
   <div class="group-title">MONITOR</div>
   <nav id="navigation">
-   <button class="nav active" data-view="overview"><span>▦</span> Overview</button>
-   <button class="nav" data-view="dashboards"><span>▤</span> Dashboards</button>
-   <button class="nav" data-view="cooling"><span>◉</span> Cooling Systems</button>
+
+   <button class="nav active" data-view="cooling"><span>◉</span> Cooling Systems</button>
    <button class="nav" data-view="curves"><span>⌁</span> Fan Control</button>
-   <button class="nav" data-view="virtual"><span>≋</span> Virtual Sensors</button>
+
    <button class="nav" data-view="tray"><span>▣</span> Tray Readouts</button>
-   <button class="nav" data-view="storage"><span>▰</span> Storage</button>
+
    <button class="nav" data-view="explorer"><span>⌕</span> Sensor Explorer</button>
    <button class="nav" data-view="events"><span>⚑</span> Events <span id="eventCount" class="nav-number"></span></button>
   </nav>
@@ -24,7 +23,7 @@
   <div class="sidebar-foot"><div class="status-led"></div><div><b id="collectorStatus">Connecting…</b><small>Local • Collector controlled</small></div></div>
  </aside>
  <main class="workspace">
-  <header class="topbar"><div class="crumb">SENSORDASH <span> / </span> <b id="crumbName">OVERVIEW</b></div>
+  <header class="topbar"><div class="crumb">SENSORDASH <span> / </span> <b id="crumbName">COOLING</b></div>
     <div class="top-actions"><div class="connection"><span class="status-led"></span><span id="liveStatus">Connecting</span></div><select id="range" aria-label="History range"><option value=".25">Last 15 minutes</option><option value="1" selected>Last hour</option><option value="6">Last 6 hours</option><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select><button id="refresh" class="icon-button" title="Refresh history">↻</button></div>
   </header>
   <div class="content-wrap">
