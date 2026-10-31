@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
 using System.Text.RegularExpressions;
 
 // A display-safe configuration surface. Collector stores credentials on disk
@@ -23,6 +26,32 @@ internal static class TelemetryConfiguration
     private static readonly object Gate = new();
     private static string DataDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
+
+    // A newly created secret is empty until its NTFS DACL is set. Write
+    // credentials only after granting access solely to SYSTEM/Admins, then
+    // atomically rename the protected file. Never leave plaintext in a
+    // temporary file inheriting ProgramData's possibly broad folder ACL.
+    private static void WriteProtectedCredential(string path, string contents)
+    {
+        var temp = path + ".tmp";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            var acl = new FileSecurity();
+            acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            acl.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                FileSystemRights.FullControl, AccessControlType.Allow));
+            acl.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+                FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(temp).SetAccessControl(acl);
+            var bytes = Encoding.UTF8.GetBytes(contents);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(temp, path, overwrite: true);
+    }
 
     public static TelemetryConfigurationStatus Snapshot() => Snapshot(DataDirectory);
 
@@ -103,15 +132,11 @@ internal static class TelemetryConfiguration
             if (endpoint.Length > 0) existing.Validate();
             if (newToken.Length > 0)
             {
-                var nextToken = existing.TokenFile + ".tmp";
-                File.WriteAllText(nextToken, newToken + Environment.NewLine);
-                File.Move(nextToken, existing.TokenFile, overwrite: true);
+                WriteProtectedCredential(existing.TokenFile, newToken + Environment.NewLine);
             }
             if (newCa.Length > 0)
             {
-                var nextCa = existing.CaCertificateFile + ".tmp";
-                File.WriteAllText(nextCa, newCa + Environment.NewLine);
-                File.Move(nextCa, existing.CaCertificateFile, overwrite: true);
+                WriteProtectedCredential(existing.CaCertificateFile, newCa + Environment.NewLine);
             }
             if (existing.Enabled && (!File.Exists(existing.TokenFile) || !File.Exists(existing.CaCertificateFile)))
                 throw new InvalidDataException("Install the Pi-issued telemetry token and CA certificate before enabling export.");
@@ -163,6 +188,16 @@ internal static class TelemetryConfigurationSelfTest
             if (withToken.Enabled || !withToken.TokenReady ||
                 JsonSerializer.Serialize(withToken, JsonSerializerOptions.Web).Contains(actualSecret, StringComparison.Ordinal))
                 throw new InvalidOperationException("Telemetry config: secret leaked or missing.");
+            // Secret files must not inherit broad ProgramData/Temp ACLs.
+            var tokenAcl = new FileInfo(Path.Combine(dir, "telemetry-token.txt")).GetAccessControl();
+            if (!tokenAcl.AreAccessRulesProtected ||
+                tokenAcl.GetAccessRules(true, true, typeof(SecurityIdentifier))
+                    .Cast<FileSystemAccessRule>().Any(rule =>
+                        rule.AccessControlType == AccessControlType.Allow &&
+                        rule.IdentityReference is SecurityIdentifier sid &&
+                        sid != new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null) &&
+                        sid != new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)))
+                throw new InvalidOperationException("Telemetry config: credential ACL is not restricted.");
             var active = TelemetryConfiguration.Save(candidate with { Enabled = true }, dir);
             if (!active.Enabled || !active.CaReady || !active.TokenReady)
                 throw new InvalidOperationException("Telemetry config: readiness reporting failed.");
