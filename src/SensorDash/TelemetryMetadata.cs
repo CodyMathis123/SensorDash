@@ -134,7 +134,9 @@ internal static class TelemetryMetadataSelfTest
             new SensorReading("/cpu/0/power/0", "CPU Power", "AMD CPU", "Cpu",
                 "Power", 80),
             new SensorReading("/gpu/0/temperature/0", "GPU Core", "Radeon GPU", "Gpu",
-                "Temperature", 35)
+                "Temperature", 35),
+            new SensorReading("/mb/0/control/0", "Radiator Fan PWM", "Aorus Super IO",
+                "Motherboard", "Control", 24)
         ], null);
         var config = new DashboardSettings
         {
@@ -150,20 +152,31 @@ internal static class TelemetryMetadataSelfTest
                         {
                             Id = "heat-cpu", Name = "CPU Heat Source", Kind = "heat-source",
                             SensorIds = ["/cpu/0/temperature/0", "/cpu/0/power/0"]
+                        },
+                        new CoolingComponentConfig
+                        {
+                            Id = "radiators", Name = "Radiator PWM Hub", Kind = "fan-group",
+                            Electrical = new CoolingElectricalConfig
+                            {
+                                ControlSensorId = "/mb/0/control/0"
+                            }
                         }
                     ]
                 }
             ]
         };
         var previous = TelemetryMetadata.Build(frame, config, "My Desktop");
-        Check(previous.Count == 5, "three sensor descriptors plus two cooling bindings");
+        Check(previous.Count == 7, "four sensor descriptors plus three cooling bindings");
         Check(previous.Any(x => x.Contains("alias=CPU_Coolant_Proxy") && x.Contains("sensor=/cpu/0/temperature/0")),
             "alias is informational and stripped of spaces");
         Check(previous.Any(x => x.StartsWith("sensordash_cooling_binding,") &&
             x.Contains("system=loop-one") && x.Contains("component=heat-cpu")),
             "stable cooling component keys");
+        Check(previous.Any(x => x.Contains("sensor=/mb/0/control/0") &&
+            x.Contains("component=radiators") && x.Contains("role=fan-group")),
+            "electrical-only PWM sensor included without a general SensorIds assignment");
         var snapshot = TelemetryMetadata.Serialize(previous, new(StringComparer.Ordinal), 1793450400000);
-        Check(snapshot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 5,
+        Check(snapshot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 7,
             "snapshot count");
         config.Aliases["/cpu/0/temperature/0"] = "CPU Temperature";
         config.CoolingSystems[0].Components[0].SensorIds.Remove("/cpu/0/power/0");
