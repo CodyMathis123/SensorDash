@@ -1,3 +1,14 @@
+# SensorDash — local hardware control and remote observability
+
+SensorDash is the local Windows control utility for sensor discovery, aliases, cooling-system topology, physical PWM fan profiles, power calibration, tray readouts, event thresholds, recording policy and outgoing telemetry. The Windows service and administrator-authorized fan controller remain the sole hardware authority. The non-PWM DDC pump stays tachometer-only.
+
+The local UI now presents Cooling Systems, Fan Control, Tray Readouts, Sensor Explorer, Events and Settings. It deliberately removes standalone Overview, custom Dashboards, Virtual Sensors and Storage. Pi-hosted Grafana/VictoriaMetrics handle general history, SSD/NVMe data, threshold event timelines, power observations and history-buffer footprint. SensorDash still records to a bounded local SQLite retry spool because the Pi may be offline.
+
+The Pi telemetry URL, computer label, token and public CA can be entered in SensorDash Settings, without hand-editing JSON. Secret material is saved by the collector and never returned by a GET. Saving exporter settings does not restart or change active fan control; applying a changed export configuration currently requires a deliberate Windows collector restart in a safe maintenance window.
+
+See [ADR 0008](docs/adr/0008-local-control-observability.md) for the ownership split and deployment order. **Deploy the Pi's expanded ingestion schema before installing the new Windows exporter.** Keep Production fan-control builds in place until supervised hardware parity is verified.
+
+---
 # SensorDash — versioned CI builds
 
 Current CI downloads: a raw versioned MSI and installer diagnostics. Portable ZIP downloads are no longer published.
