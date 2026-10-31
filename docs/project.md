@@ -38,3 +38,5 @@ Read the relevant source and tests for exact current behavior. This map describe
 `PawnIoStatus.cs` probes optional shared driver availability in the collector. `driver-status.js` presents actionable status without rebuilding active forms; see [hardware driver setup](hardware-drivers.md).
 
 New remote configuration and redacted status live in TelemetryConfiguration.cs and same-origin /api/telemetry-config; time-stamped event export and local spool-file sizes live in TelemetryExport.cs. Current sensor metadata, including device_type=Storage, lives in TelemetryMetadata.cs. Long historical analysis is owned by Grafana.
+
+**Controls-only cleanup:** redundant `/api/history*` and history IPC routes and the browser chart files (`chart-gaps.js`, `chart-time-axis.js`, `cooling-timeline.js`, `history-insights.js`) have been removed. The Windows process still archives records for the separate telemetry exporter. Pi exporter settings are dynamically observed; a change reopens only the outbound HTTPS client without a service restart. Timed manual commissioning is released on sleep/collection gaps; approved profiles retain their existing rearm policy.

@@ -5,11 +5,11 @@
 
 ## Authoritative Windows owner
 
-SensorDashCollector alone samples hardware, assigns stable sensor IDs, and owns fan curves, fan-output approval, cooling systems and sensor/component association, accessory calibration, aliases, thresholds, recording policy, and tray readouts. The pump remains tachometer-only. The Pi cannot mutate any hardware or config.
+SensorDashCollector alone samples hardware, assigns stable sensor IDs, and owns fan curves, fan-output approval, cooling systems and sensor/component association, accessory calibration, aliases, thresholds, recording policy, and tray readouts. The pump remains tachometer-only. The Pi cannot mutate any hardware or config. A long collector gap forces rearm on previously approved profiles, while time-limited manual commissioning is terminated and firmware restore attempted rather than silently resuming a manual override after sleep.
 
-The local browser now only offers Cooling Systems, Fan Control, Tray Readouts, Sensor Explorer, Events and Settings. Removed: desktop Overview, custom Dashboards, Virtual Sensors (including the evaluator and model), and Storage. Historical charts no longer duplicate Grafana in Cooling Systems. Virtual sensors are unused by the installed configuration and need no compatibility path.
+The local browser now only offers Cooling Systems, Fan Control, Tray Readouts, Sensor Explorer, Events and Settings. Removed: desktop Overview, custom Dashboards, Virtual Sensors (including the evaluator and model), and Storage. Historical charts no longer duplicate Grafana in Cooling Systems or Sensor Explorer. The dead client history chart engine, range picker, old chart scripts/tests and desktop-only historical HTTP/IPC routes were removed; the SQLite recorder and local current sensor views remain. Virtual sensors are unused by the installed configuration and need no compatibility path.
 
-Settings retains physical collection and storage-poll intervals, recording/retention controls for the local spool, aliases, thresholds, hardware/device enablement, and diagnostics. A same-origin HTTP + local pipe flow allows editing the outbound telemetry destination, host label, token and public CA. Raw credentials are never returned; no browser request can restart a service or activate PWM.
+Settings retains physical collection and storage-poll intervals, recording/retention controls for the local spool, aliases, thresholds, hardware/device enablement, and diagnostics. A same-origin HTTP + local pipe flow allows editing the outbound telemetry destination, host label, token and public CA. The separate exporter detects configuration/credential content changes and hot-reloads only its outbound HTTPS session: no Windows collector restart is required for export settings. Raw credentials are never returned; no browser request can restart a service or activate PWM.
 
 ## Pi observability owner
 

@@ -1,65 +1,38 @@
-# Opt-in export to HomeAwayFromHome Grafana
+# SensorDash outbound telemetry → HomeAway Grafana
 
-**Status:** first milestone / raw-sensor proof of concept. Existing SensorDash hardware collection, approved fan profiles, PWM fallback, cooling configurations, tray icons, SQLite archive and web dashboard are unchanged.
+**Architecture:** the local Windows collector remains responsible for hardware, while a separate bounded worker reads already-recorded SQLite rows and POSTs to the Pi over authenticated TLS. The Pi can display metrics but has **no** endpoint for fan commands, sensor aliases, cooling topology edits or local collection policies.
 
-## Ownership boundary
+## Windows UI configuration
 
-- **Windows SensorDashCollector:** single authority for LHM sampling, sensor IDs, fan-control decisions, profile approval and cooling system definitions. Never use Grafana to write hardware settings.
-- **Windows SQLite archive:** still records samples using existing retention/collection policy. A separate hosted worker reads this archive in small batches; no duplicate hardware polls or second persistent database.
-- **HomeAway Pi:** authenticated TLS-only intake -> internal VictoriaMetrics -> Grafana dashboards. Pi failure must not impact fan control.
-- **Current Windows local dashboard:** still available for configuration and side-by-side comparisons. Do not remove it before metrics and analysis parity tests.
+1. Deploy the Pi ingestion allowlist and dashboards from [HomeAwayFromHome](https://github.com/CodyMathis123/HomeAwayFromHome/pull/1) first. Set up Pi-issued token and public CA certificate using that repository's instructions.
+2. On the Windows machine, open `http://127.0.0.1:8765` → **Settings → Pi telemetry export**. Enter the HTTPS endpoint (`https://192.168.1.43:8429/ingest` for this deployment), stable host label (`main-desktop`), and optionally the bearer token and public CA PEM if not already installed.
+3. Enable export and save. Existing token and CA are **preserved when optional replacement fields are blank**. Secrets are stored under `%ProgramData%\SensorDash`, protected by restricted SYSTEM/Administrators NTFS permissions when newly written. The UI's read endpoint returns presence/status only, not the secret values.
+4. The exporter automatically enables/reconnects after a change in its config/token/CA content. There is **no need to restart the privileged Windows service** to edit Pi export settings. SensorDash does not restart or modify fan outputs when the exporter reconnects.
+5. In Settings, check exporter state, last successful delivery, last failure class and reload count. In Grafana, inspect `SensorDash · Overview`, `Cooling Systems`, `Fan & Pump Electricity`, `Storage`, and `Events`. No event impulse appears unless a local threshold actually crosses or recovers.
 
-## Enable explicitly on a test collector
+The export settings file `telemetry-export.json` is still an internal durable configuration file with `enabled`, `endpoint`, `hostLabel`, `tokenFile` and `caCertificateFile` fields. Using the UI is preferred to editing JSON manually. Neither the file nor its secrets are sent to the Pi.
 
-The exporter is completely disabled unless the Windows Service can read a config file with `enabled: true`. No network listener, firewall change, reverse proxy, system certificate trust change or automatic service migration is needed.
+## Series and data guarantees
 
-Follow the Pi's [telemetry setup](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/pi4-home-infrastructure/docs/TELEMETRY.md) to install the optional Grafana/VM profile, generate credentials and obtain a copy of the dedicated `ca.crt` and token securely.
+The receiver's strict allowlist accepts only:
+- Raw numeric sensor values, indexed by stable host/sensor IDs, with original sample times.
+- Sensor metadata (name, alias, device and hardware type), cooling-system/component bindings, component catalog and metadata tombstones for removed assignments.
+- Fan/pump accessory watts recorded **at collection time** with source `measured`, `calibrated`, `curve` or `rated`, and calibration revision. A change in the number of fans or power model creates a distinct revision; estimates are not retrospectively overwritten.
+- Event warning/recovery impulses at their observed timestamps; full Windows event messages remain local.
+- Aggregate byte sizes of the local SQLite database and WAL/SHM files. These are **not** per-sensor byte allocation estimates.
 
-Under `C:\ProgramData\SensorDash\`, with ACLs restricting access to SYSTEM and Administrators, create:
+No private IP endpoint, domain-level DNS history, telemetry bearer, private CA key, arbitrary events, remote control messages, or arbitrary dynamic Influx tags are exported.
 
-```json
-{
-  "enabled": true,
-  "endpoint": "https://192.168.1.10:8429/ingest",
-  "tokenFile": "C:\\ProgramData\\SensorDash\\telemetry-token.txt",
-  "caCertificateFile": "C:\\ProgramData\\SensorDash\\telemetry-ca.crt",
-  "hostLabel": "main-desktop"
-}
-```
+The worker persists separate cursors for raw samples, accessory watts and events. A successful receiver acknowledgement must occur before a cursor advances. Incomplete writes retry and a Pi outage never changes PWM. On first activation, archived numeric samples start from the newest retained sample rather than silently uploading the entire old database; events use their own bounded cursor.
 
-Save this as `telemetry-export.json`. Copy the Pi-issued CA certificate into `telemetry-ca.crt` and the **secret** bearer token into `telemetry-token.txt`. Replace the example IP with the reserved Pi IPv4; the HTTPS certificate has this IP as its SAN. Restart the **SensorDashCollector** service deliberately after configuration. No UI toggle or auto-reload exists yet. **On first enablement, the service builds an index over the existing SQLite history** to avoid costly full-table scans on every export. This one-time operation may take time or require additional disk space; perform it during a maintenance window while the fans are safely governed by motherboard firmware. The index is created before the sensor/fan worker starts.
+**Historical limitations:** no watt-hours are inferred through Windows sleep/shutdown gaps. Estimated accessory watts are source/revision-labeled and must not be conflated with a physical wall-power sensor. Current sample counts aren't precise per-sensor database sizes because VictoriaMetrics storage is compressed/shared. Missing coolant or flow probes remain genuinely absent.
 
-Never commit or share `telemetry-token.txt`, and never turn off certificate-name or CA validation. Do not copy the Pi's CA private key to Windows.
+## Troubleshooting
 
-## What exports
+- **Disabled:** confirm Settings toggle. The worker remains running and periodically checks configuration; it no longer exits when disabled.
+- **Retrying:** check the last failure class and local Windows service logs. Confirm that the Pi receiver and TLS certificate for `192.168.1.43` are valid, and the Pi-issued token matches. Do not paste tokens, CA private keys or full credential files into chat.
+- **No data in Grafana:** verify the Pi receiver and VictoriaMetrics containers, then run `sudo bash scripts/verify-telemetry.sh main-desktop` on the Pi. Raw and catalog series should be populated; the event series can legitimately be empty between threshold changes.
+- **Still seeing old configuration:** the exporter re-fingerprints config/token/CA before each batch and constructs a fresh TLS/HTTP session on change. Wait for the next sender iteration or check its retry status; **do not restart a working fan-controlling service solely for telemetry settings**.
+- **Windows upgrade:** back up `%ProgramData%\SensorDash` with an SQLite-consistent copy and preserve the existing approved fan profiles. Validate physical fan safety before any supervised service restart/install.
 
-- Only archived numeric samples, in order by timestamp and stable sensor ID.
-- First activation begins at the latest existing sample, avoiding a surprise historical backfill. Importing older local history will be a separate, reviewed migration.
-- A 384-sample max request, preserving each archived millisecond timestamp. Batch requests are separated by brief delays; network errors have retries.
-- Each series has the Prometheus-compatible name `sensordash_reading_value`, with labels `host`, `sensor` and `kind`.
-- Retains a resume cursor in `telemetry-export-cursor.json`. A successful HTTP response is required before advancing. A crash after server acceptance but before cursor persistence can replay a batch; the Pi's VictoriaMetrics profile enables 1 ms query deduplication.
-- The existing SQLite history and retention act as the bounded queue. If the Pi is unreachable longer than Windows retention, data may be lost when old samples expire. Failure is logged without affecting collector fan operation.
-
-Sensor aliases are intentionally **not** included on the raw measurement series, because alias edits would fragment historical identity. The exporter now also publishes a small **read-only metadata catalog**, with two gauge series: `sensordash_sensor_info_value` (names, device, kind and aliases) and `sensordash_cooling_binding_value` (system/component role assignments). These are emitted on configuration changes or at least every two minutes, and removed/renamed entries receive `value=0` tombstones. Only successfully acknowledged catalog snapshots advance the local metadata checkpoint (`telemetry-export-metadata.json`). Metadata failure does not block raw sensor samples or hardware control.
-
-Grafana's new `SensorDash · Cooling Systems` view joins the raw sensor data with active component bindings without duplicating measurements. See the [cooling Grafana guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/pi4-home-infrastructure/docs/COOLING-GRAFANA.md).
-
-**Fan and pump watts are now archived at capture time**, using the existing `AccessoryPowerModel.Estimate` C# function already used by SensorDash history. A new `accessory_power` table in the existing SQLite database records system/component IDs, watts, measurement source (`measured`, `calibrated`, `curve` or `rated`) and a deterministic 16-hex calibration fingerprint. **The electrical calculation does not multiply whole-group calibrated watts by fan count again.** Measurements with stale tachometer observations are not fabricated, and the new table is subject to the existing retention cleanup. Failures in this optional archive are logged without interrupting fan control. A separate `telemetry-accessory-cursor.json` ensures retry/backfill uses the original archived estimate, not whichever calibration is currently configured.
-
-The Pi receives `sensordash_accessory_power_value` and can join it to `sensordash_component_info_value` for human-readable names. A change to the fan quantity, calibration curve or measurement sensor creates a new `revision` label, whereas renaming the component does not. The new Grafana **Fan & Pump Electricity** dashboard shows measured-only, rated, calibrated and curve-derived wattage separately.
-
-**Gap-aware watt-hours and coverage are not yet exported.** Don't infer electricity consumption by connecting power samples across sleep/shutdown gaps or extrapolating rated wattage. The existing SensorDash historical C# integrator continues to own those calculations until a real parity comparison is complete. Cooling editor and electrical calibration stay exclusively in SensorDash. If the Pi is unreachable, snapshots retry, but existing local history retention still limits raw backfill.
-
-## Diagnosis
-
-1. Verify `SensorDashCollector` is running and has recent readings in the existing dashboard.
-2. Confirm the Pi's restricted intake container is running and can reach `victoria-metrics` internally.
-3. Check the Windows Service event logs / collector logging for `Telemetry export` messages.
-4. In Grafana, inspect **HomeAway → SensorDash · Hardware Telemetry**. Select the host and sensor IDs. The dashboards will remain empty until new samples arrive and the exporter is enabled.
-5. If a token or CA is rotated, update both sides consistently and restart the collector. Do not delete the cursor casually; that may replay a large history or prevent expected delivery.
-
-### Safety and migration criteria
-
-Before retiring Windows history graphs, compare time-aligned readings, raw recorded maxima, device sleep gaps, energy coverage and estimates across both systems. New Pi metrics are observational only; virtual sensors used for fan control, approved profiles, cooling topology and electrical configuration remain local.
-
-The full plan is in [ADR 0007](adr/0007-remote-telemetry-boundary.md).
+See [HomeAway telemetry guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/pi4-home-infrastructure/docs/TELEMETRY.md), [ADR 0008](adr/0008-local-control-observability.md).
