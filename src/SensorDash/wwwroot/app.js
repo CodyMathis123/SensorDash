@@ -12,14 +12,12 @@ const titles={
 };
 const colors=['#62d5ce','#6fa7ed','#f2bd6d','#ec8792','#a991e8','#69b5cc','#e4a5cb'];
 const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- hours:1,history:{},historyCache:new Map(),historyRequests:new Map(),historyKey:'',historyFetch:0,historyPending:false,lastRefresh:0,historyStats:{hits:0,misses:0,requests:0,lastFetchMs:null},chartStats:{paints:0,lastMs:0,slowestMs:0,lastCharts:0,lastBatches:0},chartGeneration:0,status:null,liveCache:new Map(),connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false,chartPaintTimer:null,chartDirty:false,lastChartPaint:0};
+ status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
 const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'—';
-// ChartTimeAxis owns date/time formatting for every history chart so the
-// 7-/30-day views never show ambiguous time-of-day-only labels.
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>{
  const alias=S.settings?.aliases?.[s?.id];
@@ -34,11 +32,6 @@ const metric=(name,s,accent,detail,unit,icon)=>`<div class="metric" style="--acc
 const panel=(title,subtitle,content,tag='')=>`<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle?' <p>'+esc(subtitle)+'</p>':''}</div>${tag}</div>${content}</section>`;
 const stat=(name,s,unit)=>`<div class="stat-row"><label>${esc(name)}</label><strong ${s?.id?`data-live-reading="${esc(s.id)}" data-live-format="unit" data-live-unit="${esc(unit||typeUnit(s?.type))}"`:''}>${fmt(s?.value,s?.type==='Fan'?0:1)} ${unit||typeUnit(s?.type)}</strong></div>`;
 const idMatch=(...ids)=>ids.map(id=>sensor(id)).filter(Boolean);
-function chart(ids,unit='',small=false,coolingId=''){
- const valid=ids.map(id=>typeof id==='string'?sensor(id):id).filter(Boolean);
- const labels=valid.map((s,i)=>`<span><i class="legend-key" style="background:${colors[i%colors.length]}"></i>${esc(label(s))}</span>`).join('');
- return `<div class="chart-wrap ${small?'small':''}"><canvas data-chart="${valid.map(s=>esc(s.id)).join('|')}" data-unit="${esc(unit)}"${coolingId?' data-cooling-timeline="'+esc(coolingId)+'"':''}></canvas><canvas class="chart-hover-overlay" aria-hidden="true"></canvas></div><div class="chart-legend">${labels||'Waiting for compatible sensor data'}</div><div class="chart-gap-note" hidden></div>`;
-}
 function latest(s) {return s?.value==null?'No reading':fmt(s.value,s.type==='Fan'?0:1)+' '+typeUnit(s.type);}
 function explorer(){
  const usage=SDWorkspace.usageIndex(S);
@@ -134,10 +127,10 @@ function explorer(){
     '<button class="btn secondary" data-hide-type="'+esc(chosen.deviceType)+'">'+(hideType?'Show all '+chosen.deviceType:'Hide all '+chosen.deviceType)+'</button></div>'+
    '<p class="note">Hidden sensors continue recording. Find them with the Hidden filter.</p>'+
    '<h3 class="sensor-used-title">Used in '+uses.length+' place'+(uses.length===1?'':'s')+'</h3>'+referenceList+
-   chart([chosen],typeUnit(chosen.type))+
-   '<div class="badge-line"><span class="note">Pin to include this sensor in history.</span>'+
+   '<div class="badge-line"><span class="note">Recorded peaks and long-term charts are in Grafana. This editor shows the current physical reading.</span></div>'+
+   '<div class="badge-line"><span class="note">Pin this sensor for local recording and tray selection.</span>'+
     '<button class="btn tiny" data-pin="'+esc(chosen.id)+'">'+
-     (S.settings?.pinnedSensors?.includes(chosen.id)?'Unpin history':'Pin for history')+'</button></div>')+'</div>';
+     (S.settings?.pinnedSensors?.includes(chosen.id)?'Unpin sensor':'Pin sensor')+'</button></div>')+'</div>';
  })():'';
  return '<section class="panel full"><div class="panel-head"><div><h2>Sensor registry</h2>'+
   '<p>'+S.sensors.length+' discovered · '+counts.used+' in use · '+counts.hidden+
@@ -289,7 +282,7 @@ function settingsView(){
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
  telemetryConfigPanel()+
-  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only process memory, history cache and chart rendering',
+  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only collector and browser memory',
 
  [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
@@ -298,16 +291,9 @@ function settingsView(){
   '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'
  ).join('')+
- '<h3 class="sensor-used-title">Browser chart workload</h3>'+
- '<div class="stat-row"><label>Last paint CPU time</label><strong>'+fmt(S.chartStats.lastMs,1)+' ms across '+S.chartStats.lastCharts+' charts / '+S.chartStats.lastBatches+' frame(s)</strong></div>'+
- '<div class="stat-row"><label>Slowest paint CPU time</label><strong>'+fmt(S.chartStats.slowestMs,1)+' ms</strong></div>'+
- '<div class="stat-row"><label>Completed chart paints</label><strong>'+S.chartStats.paints+'</strong></div>'+
- '<div class="stat-row"><label>History cache entries</label><strong>'+S.historyCache.size+' / 120</strong></div>'+
- '<div class="stat-row"><label>Cache hits / misses</label><strong>'+S.historyStats.hits+' / '+S.historyStats.misses+'</strong></div>'+
- '<div class="stat-row"><label>History fetch requests</label><strong>'+S.historyStats.requests+'</strong></div>'+
- '<div class="stat-row"><label>Last history request</label><strong>'+(S.historyStats.lastFetchMs==null?'—':S.historyStats.lastFetchMs+' ms')+'</strong></div>'+
-
- '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
+ '<h3 class="sensor-used-title">Historical analysis</h3>'+
+  '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
+  '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
  '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
@@ -324,19 +310,17 @@ function heading(){
  byId('heading').innerHTML=`<div class="page-head"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1><p class="sub">${esc(desc)}</p></div><div class="small-date">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}<br>${S.sensors.length} discovered sensors</div></div>`;
 }
 function render(){
- CoolingTimeline.reset();
- heading();
+  heading();
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
  const frame=S.frame;
  const error=frame?.error?`<div class="help" style="border-left-color:#ec8792">Sensor collector: ${esc(frame.error)}. The web app is running; readings may require administrator access or a supported hardware driver.</div>`:'';
  const content=['cooling','curves','tray'].includes(S.view)
-  ? SDWorkspace.render(S,S.view,{metric,panel,chart})
+  ? SDWorkspace.render(S,S.view,{metric,panel})
   : ({explorer,events,settings:settingsView})[S.view]?.() ?? '<div class="empty">Choose a workspace from the menu.</div>';
  const scroll=S.view==='explorer'?byId('sensorList')?.scrollTop:null;
  byId('content').innerHTML='<div id="driverWarning">'+DriverStatus.warning(frame?.pawnIo)+'</div>'+error+content;
  if(scroll!=null&&byId('sensorList'))byId('sensorList').scrollTop=scroll;
- ensureHistory();
-
+ 
 }
 // Collecting data and painting the UI run independently. Incoming 2-second sensor
 // frames must never force a costly canvas redraw in the middle of a graph hover.
@@ -364,37 +348,6 @@ function updateLiveValues(){
  SDWorkspace.paintFanControl(S);
  SDWorkspace.paintProfiles(S);
 }
-// Graph history draws at most once every 8 seconds. While a graph is being
-// inspected/dragged, freeze its base paint so the hover remains uninterrupted.
-// Telemetry keeps recording at full speed regardless of cursor position.
-const CHART_PAINT_INTERVAL_MS=8000;
-function chartInUse(){
- return !!document.querySelector('.chart-wrap:hover');
-}
-function scheduleChartPaint(){
- S.chartDirty=true;
- if(S.chartPaintTimer!==null||document.hidden||!document.querySelector('canvas[data-chart]'))return;
- const delay=Math.max(0,CHART_PAINT_INTERVAL_MS-(performance.now()-S.lastChartPaint));
- S.chartPaintTimer=setTimeout(()=>{
-   S.chartPaintTimer=null;
-   if(!S.chartDirty||document.hidden||chartInUse())return;
-   S.chartDirty=false;
-   S.lastChartPaint=performance.now();
-   requestAnimationFrame(()=>{if(chartInUse()){S.chartDirty=true;return}drawAll()});
- },delay);
-}
-function flushChartAfterHover(){
- if(!S.chartDirty||chartInUse()||document.hidden)return;
- // Avoid an immediate paint during the last mouse event of the interaction.
- setTimeout(()=>{
-   if(chartInUse()||!S.chartDirty||document.hidden)return;
-   if(S.chartPaintTimer!==null){clearTimeout(S.chartPaintTimer);S.chartPaintTimer=null}
-   S.chartDirty=false;
-   S.lastChartPaint=performance.now();
-   requestAnimationFrame(()=>{if(!chartInUse())drawAll();else S.chartDirty=true});
- },120);
-}
-
 async function loadStatus(shouldRender=false){
  try{
   S.status=await fetchJSON('/api/status');
@@ -423,13 +376,6 @@ function updateFrame(frame){
  DriverStatus.paint(frame.pawnIo);
  S.byId=new Map(S.sensors.map(s=>[s.id,s]));
  const t=Date.parse(frame.timestamp);
- S.sensors.forEach(s=>{
-    if(s.value==null)return;
-    const a=S.liveCache.get(s.id)||[];
-    if(!a.length||a[a.length-1].t!==t)a.push({t,v:s.value});
-    while(a.length>140)a.shift();
-    S.liveCache.set(s.id,a);
- });
  S.connected=!frame.error;
  document.body.classList.toggle('offline',!S.connected);
  byId('liveStatus').textContent=S.connected?'Live telemetry':'Sensor unavailable';
@@ -439,258 +385,17 @@ function updateFrame(frame){
  if(S.schemaKey!==signature){S.schemaKey=signature;render();return}
  scheduleLivePaint();
  FanFeedback.paint(S);
- scheduleChartPaint();
-}
+ }
 async function loadEvents(){
  try{
   S.events=await fetchJSON('/api/events');
   byId('eventCount').textContent=S.events.filter(e=>e.severity==='warning').length||'';
   if(S.view==='events')render();
-  if(S.view==='cooling')CoolingInsights.paintEvents(S);
- }catch{}
+   }catch{}
 }
 async function fetchJSON(url,opts){
  const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text()||'Request failed');return r.json();
 }
-// Bounded per-sensor/per-range history cache. Re-entering a page immediately
-// paints its previous chart data; only expired/missing sensors are requested.
-// In-flight fetches survive navigation so rapid back/forward doesn't refetch.
-const HISTORY_TTL_MS=60000;
-const HISTORY_CACHE_LIMIT=120;
-function ensureHistory(){
- const nodes=[...document.querySelectorAll('canvas[data-chart]')];
- const ids=[...new Set(nodes.flatMap(c=>c.dataset.chart.split('|').filter(Boolean)))];
- if(!ids.length)return;
- const hours=S.hours,now=Date.now();
- const desired=new Set(ids.map(id=>hours+'|'+id));
- const needed=[];
- S.history={};
- for(const id of ids){
-   const k=hours+'|'+id, cached=S.historyCache.get(k);
-   if(cached){
-     S.history[id]=cached.points;
-     if(now-cached.fetched<HISTORY_TTL_MS){S.historyStats.hits++;continue}
-   }
-   if(!cached)S.historyStats.misses++;
-   if(!S.historyRequests.has(k))needed.push(id);
- }
- drawAll(); // instant cached paint, even after returning from another page
- CoolingInsights.paint(S);
- if(!needed.length)return;
- for(let at=0;at<needed.length;at+=12){
-   const batch=needed.slice(at,at+12);
-   const keys=batch.map(id=>hours+'|'+id);
-   const started=Date.now();
-   S.historyStats.requests++;
-   S.historyFetch=started;
-   const work=fetchJSON('/api/history?ids='+encodeURIComponent(batch.join(','))+
-     '&hours='+encodeURIComponent(hours))
-      .then(result=>{
-       S.historyStats.lastFetchMs=Date.now()-started;
-       const found=new Map((result.series||[]).map(line=>[line.id,line.points||[]]));
-       for(const id of batch){
-         const key=hours+'|'+id;
-         // Move refreshed entry to the back, retaining the most recent 120
-         // sensor/range pairs and avoiding unbounded browser memory growth.
-         S.historyCache.delete(key);
-         const data=found.get(id)||[];
-         S.historyCache.set(key,{fetched:Date.now(),points:data});
-         if(S.hours===hours && [...document.querySelectorAll('canvas[data-chart]')].some(canvas=>
-             canvas.dataset.chart.split('|').includes(id)))S.history[id]=data;
-       }
-       while(S.historyCache.size>HISTORY_CACHE_LIMIT)
-         S.historyCache.delete(S.historyCache.keys().next().value);
-       // New history should paint promptly on the active page, independently
-       // of the slower routine eight-second live-chart refresh.
-       if(S.hours===hours && !document.hidden && !chartInUse())
-         requestAnimationFrame(drawAll);
-       else scheduleChartPaint();
-       if(S.hours===hours)CoolingInsights.paint(S);
-     })
-     .catch(e=>console.warn('History fetch:',e.message))
-     .finally(()=>{for(const key of keys)if(S.historyRequests.get(key)===work)
-       S.historyRequests.delete(key)});
-   for(const key of keys)S.historyRequests.set(key,work);
- }
-}
-
-// Spread expensive canvas work across animation frames rather than blocking
-// page navigation with every history chart in a single synchronous task.
-// A newer navigation/paint invalidates the old canvas batch immediately.
-function drawAll(){
- if(document.hidden||chartInUse()){S.chartDirty=true;return}
- const canvases=[...document.querySelectorAll('canvas[data-chart]')];
- if(!canvases.length)return;
- const generation=++S.chartGeneration;
- let index=0,workMs=0,batches=0;
- const paintBatch=()=>{
-  if(generation!==S.chartGeneration)return;
-  if(document.hidden||chartInUse()){S.chartDirty=true;return}
-  const frameStart=performance.now();
-  batches++;
-  do{
-   const canvas=canvases[index++];
-   if(canvas.isConnected){
-    const began=performance.now();
-    drawCanvas(canvas);
-    workMs+=performance.now()-began;
-   }
-  }while(index<canvases.length && performance.now()-frameStart<7);
-  if(index<canvases.length){requestAnimationFrame(paintBatch);return}
-  const stats=S.chartStats;
-  stats.paints++;
-  stats.lastMs=Math.round(workMs*10)/10;
-  stats.slowestMs=Math.max(stats.slowestMs,stats.lastMs);
-  stats.lastCharts=canvases.length;
-  stats.lastBatches=batches;
-  S.lastChartPaint=performance.now();
-  S.chartDirty=false;
- };
- requestAnimationFrame(paintBatch);
-}
-function drawCanvas(canvas){
- const ids=canvas.dataset.chart.split('|').filter(Boolean), series=ids.map((id,i)=>{
-   const base=S.history[id]||[], live=S.liveCache.get(id)||[], first=Date.now()-S.hours*3600000;
-   const points=base.filter(p=>p.t>=first);
-   live.forEach(p=>{if(p.t>=first&&(!points.length||p.t>points[points.length-1].t))points.push(p)});
-   const prepared=ChartGaps.prepare(points,S.hours);
-   return {id,name:label(sensor(id)),color:colors[i%colors.length],...prepared};
- }).filter(s=>s.points.length);
- const rect=canvas.getBoundingClientRect(),w=Math.max(100,rect.width),h=Math.max(100,rect.height);
- const ratio=Math.min(window.devicePixelRatio||1,2);
- const pixelWidth=Math.round(w*ratio),pixelHeight=Math.round(h*ratio);
- // Canvas dimensions erase the bitmap and reset its context, so never assign
- // them when unchanged. Only full/redraws should touch these buffers.
- if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
- if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
- const ctx=canvas.getContext('2d');ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,w,h);
- const p={l:49,r:14,t:17,b:31};const cw=w-p.l-p.r,ch=h-p.t-p.b;
- if(!series.length){const overlay=canvas.nextElementSibling;if(overlay?.classList.contains('chart-hover-overlay')){overlay.width=canvas.width;overlay.height=canvas.height}ctx.fillStyle='#829aad';ctx.font='12px Segoe UI';ctx.textAlign='center';ctx.fillText('Collecting sensor history…',w/2,h/2);return}
- let lo=Math.min(...series.flatMap(s=>s.points.map(p=>p.v))),hi=Math.max(...series.flatMap(s=>s.points.map(p=>p.v)));
- if(lo===hi){lo-=5;hi+=5}
- const pad=(hi-lo)*.12;lo-=pad;hi+=pad;
- const xmin=Date.now()-S.hours*3600000,xmax=Date.now();
- const tx=t=>p.l+Math.max(0,Math.min(1,(t-xmin)/(xmax-xmin)))*cw;
- const ty=v=>p.t+ch-(v-lo)/(hi-lo)*ch;
- ctx.lineWidth=1;ctx.font='11px Segoe UI';
- for(let i=0;i<=4;i++){
-   const y=p.t+i*ch/4;ctx.strokeStyle='#263b4a';ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();
-   ctx.textAlign='right';ctx.fillStyle='#7990a3';ctx.fillText(fmt(hi-i*(hi-lo)/4,0),p.l-9,y+4);
- }
- for(const tick of ChartTimeAxis.ticks(xmin,xmax,cw,S.hours)){
-   const x=tx(tick.t);
-   ctx.fillStyle='#7990a3';ctx.textAlign='center';
-   ctx.fillText(tick.label,x,h-8,Math.max(50,cw/4));
- }
- // A shared telemetry outage gets a subtle background; individual sensor
- // outages still appear only as breaks in that sensor's own line.
- const outages=ChartGaps.sharedOutages(series);
- for(const gap of outages){
-   const left=tx(gap.start),right=tx(gap.end),width=right-left;
-   if(width<=0)continue;
-   ctx.fillStyle='rgba(108,135,155,0.13)';
-   ctx.fillRect(left,p.t,width,ch);
-   ctx.strokeStyle='rgba(155,180,197,0.48)';
-   ctx.setLineDash([3,5]);
-   for(const x of [left,right]){
-     ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,p.t+ch);ctx.stroke();
-   }
-   ctx.setLineDash([]);
-   if(width>=100){
-     ctx.fillStyle='#acc3d2';ctx.textAlign='center';ctx.font='10px Segoe UI';
-     ctx.fillText('NO DATA · '+ChartGaps.duration(gap.end-gap.start),
-       left+width/2,p.t+14,Math.max(35,width-10));
-     ctx.font='11px Segoe UI';
-   }
- }
- const gapNote=canvas.parentElement?.nextElementSibling?.nextElementSibling;
- if(gapNote?.classList.contains('chart-gap-note')){
-   const hasBreaks=series.some(s=>s.gaps.length);
-   const message=outages.length?'Shaded bands and line breaks show missing readings':
-     'Line breaks indicate missing sensor readings';
-   if(hasBreaks && gapNote.textContent!==message)gapNote.textContent=message;
-   gapNote.hidden=!hasBreaks;
- }
- series.forEach(s=>{
-   ctx.strokeStyle=s.color;ctx.fillStyle=s.color;
-   ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';
-   for(const segment of s.segments){
-     if(segment.length===1){
-       const q=segment[0];
-       ctx.beginPath();ctx.arc(tx(q.t),ty(q.v),2.5,0,Math.PI*2);ctx.fill();
-       continue;
-     }
-     ctx.beginPath();
-     segment.forEach((q,j)=>{const x=tx(q.t),y=ty(q.v);
-       if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
-     });
-     ctx.stroke();
-   }
- });
- // The base canvas contains the graph only. Mouse interaction draws into a
- // transparent, independently cleared overlay so moving the cursor cannot leave
- // crosshairs or tooltip "ghosts" behind.
- const overlay=canvas.nextElementSibling;
- if(!overlay || !overlay.classList.contains('chart-hover-overlay'))return;
- if(overlay.width!==canvas.width)overlay.width=canvas.width;
- if(overlay.height!==canvas.height)overlay.height=canvas.height;
- const hoverCtx=overlay.getContext('2d');
- hoverCtx.setTransform(ratio,0,0,ratio,0,0);
- const clearHover=()=>hoverCtx.clearRect(0,0,w,h);
- const layout={tx,ty,p,h,w,cw,ch,unit:canvas.dataset.unit||''};
- const drawAt=time=>drawCanvasOverlay(hoverCtx,series,layout,time);
- if(canvas.dataset.coolingTimeline)
-   CoolingTimeline.register(canvas,{clear:clearHover,draw:drawAt});
- canvas.onmousemove=e=>{
-   const x=e.clientX-canvas.getBoundingClientRect().left;
-   const desired=xmin+(x-p.l)/cw*(xmax-xmin);
-   if(desired>=xmin&&desired<=xmax){
-     if(!CoolingTimeline.hover(canvas,desired)){clearHover();drawAt(desired);}
-   }
- };
- canvas.onmouseleave=()=>{
-   if(!CoolingTimeline.leave(canvas))clearHover();
-   flushChartAfterHover();
- };
-}
-function drawCanvasOverlay(ctx,series,layout,desired){
- const {tx,p,h,w,unit}=layout;
- if(desired<Date.now()-S.hours*3600000||desired>Date.now())return;
- const values=series.map(s=>ChartGaps.closest(s,desired));
- if(!values.length)return;
- const x=tx(desired);
- ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#819aab';
- ctx.beginPath();ctx.moveTo(x,p.t);ctx.lineTo(x,h-p.b);ctx.stroke();ctx.restore();
- const cap=s=>s.length>32?s.slice(0,29)+'…':s;
- const names=series.map(s=>cap(s.name||s.id));
- ctx.font='11px Segoe UI';
- const labelWidth=Math.max(50,...names.map(n=>ctx.measureText(n).width));
- const valWidth=Math.max(45,...values.map(q=>ctx.measureText(
-   q?fmt(q.v,1)+(unit?' '+unit:''):'No data').width));
- const header=ChartTimeAxis.tooltip(desired);
- const headerWidth=ctx.measureText(header).width;
- const tipW=Math.min(w-10,Math.max(175,Math.ceil(labelWidth+valWidth+45),Math.ceil(headerWidth+20)));
- const tipH=26+values.length*20;
- const tipX=Math.max(5,Math.min(w-tipW-5,x+11)),tipY=5;
- ctx.fillStyle='#101923ed';ctx.strokeStyle='#3b5867';
- ctx.fillRect(tipX,tipY,tipW,tipH);ctx.strokeRect(tipX,tipY,tipW,tipH);
- ctx.textAlign='left';ctx.fillStyle='#b1c5d2';
- ctx.fillText(header,tipX+10,tipY+16,Math.max(60,tipW-20));
- values.forEach((q,i)=>{
-   const rowY=tipY+35+i*20;
-   ctx.fillStyle=series[i].color;ctx.fillRect(tipX+9,rowY-9,8,8);
-   ctx.fillStyle='#dcecf5';
-   const maxTextWidth=Math.max(30,tipW-valWidth-37);
-   ctx.save();ctx.beginPath();ctx.rect(tipX+23,rowY-12,maxTextWidth,15);ctx.clip();
-   ctx.fillText(names[i],tipX+23,rowY);
-   ctx.restore();
-   ctx.fillStyle=series[i].color;ctx.textAlign='right';
-   ctx.fillStyle=q?series[i].color:'#829aab';
-   ctx.fillText(q?fmt(q.v,1)+(unit?' '+unit:''):'No data',tipX+tipW-10,rowY);
-   ctx.textAlign='left';
- });
-}
-
 async function loadSimulation(){
  if(S.view!=='curves')return;
  try{S.simulation=await fetchJSON('/api/simulation');SDWorkspace.paintSimulation(S);}
@@ -786,16 +491,10 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[data-view],[data-usage-target]'))void SDWorkspace.flushCooling(S).catch(()=>{});
- const v=e.target.closest('[data-view]');if(v){CoolingTimeline.reset();S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);S.historyKey='';if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='settings'){loadDiagnostics().catch(()=>{});void loadTelemetryConfig();}
+ const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='settings'){loadDiagnostics().catch(()=>{});void loadTelemetryConfig();}
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
- const event=e.target.closest('[data-cooling-focus]');
- if(event){
-   e.preventDefault();
-   CoolingTimeline.focus(event.dataset.coolingFocus,Number(event.dataset.coolingAt));
-   return;
- }
  const coolingFold=e.target.closest('.cooling-config-fold > summary');
  if(coolingFold){
   const details=coolingFold.parentElement;
@@ -822,7 +521,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
      S.coolingConfigOpen=S.coolingConfigOpen||{};
      S.coolingConfigOpen[usages.dataset.usageSystem]=true;
    }
-   S.view=target;history.replaceState(null,'','#'+target);S.historyKey='';render();
+   S.view=target;history.replaceState(null,'','#'+target);render();
    if(target==='cooling'&&S.focusCoolingTarget){
      const focus=S.focusCoolingTarget;
      requestAnimationFrame(()=>{
@@ -844,7 +543,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
  if(hType){e.stopPropagation();changeVisibility('hiddenHardwareTypes',hType.dataset.hideType);return;}
  const f=e.target.closest('[data-filter]');if(f){S.filter=f.dataset.filter;render();return}
  const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
- const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;S.historyKey='';render();return}
+ const sel=e.target.closest('[data-select]');if(sel){S.selected=sel.dataset.select;render();return}
  if(e.target.closest('[data-save-alias]')){saveAlias(false);return}
  if(e.target.closest('[data-clear-alias]')){saveAlias(true);return}
  if(e.target.closest('#addAlias')){addAlias(byId('newAliasId')?.value);return}
@@ -885,29 +584,13 @@ document.addEventListener('change',e=>{
  if(e.target.id==='explorerGroup'){S.explorerGrouping=e.target.value;render()}
  if(e.target.id==='explorerShowHidden'){S.showHidden=e.target.checked;render()}
 });
-byId('range').addEventListener('change',e=>{S.hours=Number(e.target.value);S.historyKey='';render()});
-byId('refresh').addEventListener('click',()=>{
- S.historyCache.clear();S.historyKey='';
- loadEvents();render();toast('Fetching fresh sensor history');
-});
-let resizePaint;
-window.addEventListener('resize',()=>{
-  clearTimeout(resizePaint);
-  resizePaint=setTimeout(()=>{S.chartDirty=true;flushChartAfterHover();if(!chartInUse())drawAll()},200);
-});
 window.addEventListener('beforeunload',e=>{
  if(SDWorkspace.hasPendingCooling(S)){e.preventDefault();e.returnValue='';}
 });
 document.addEventListener('visibilitychange',()=>{
  if(document.hidden)void SDWorkspace.flushCooling(S).catch(()=>{});
- if(!document.hidden){scheduleLivePaint();scheduleChartPaint()}
+ if(!document.hidden) scheduleLivePaint();
 });
-// A history query is cheap compared to polling hardware; perform it separately
-// every 30 seconds to keep long-running graphs complete beyond liveCache's 140 samples.
-setInterval(()=>{
- if(document.hidden||!document.querySelector('canvas[data-chart]'))return;
- ensureHistory();
-},30000);
 async function bootstrap(){
  try{
    const [cfg,frame,groups,status]=await Promise.all([
