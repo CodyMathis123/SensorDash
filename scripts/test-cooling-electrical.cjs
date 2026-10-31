@@ -107,7 +107,7 @@ assert.equal(electrical.applyPreset(S,'component:main:pump1','mcp355'),true);
 assert.equal(pump.electrical.wattsPerUnit,18);
 assert.ok(read('src/SensorDash/WorkspaceModels.cs').includes('CoolingElectricalConfig'));
 assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes('CoolingElectrical.summaryCard(S,sys)'));
-assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes('CoolingElectrical.overview(S)'));
+assert.ok(!read('src/SensorDash/wwwroot/workspace.js').includes('CoolingElectrical.overview(S)'));
 assert.ok(read('src/SensorDash/wwwroot/workspace.js').includes("action==='electrical-preset'"));
 assert.ok(read('src/SensorDash/Program.cs').includes('CoolingElectricalSelfTest.Run()'));
 assert.ok(read('src/SensorDash/wwwroot/index.html').includes('/cooling-electrical.js'));
