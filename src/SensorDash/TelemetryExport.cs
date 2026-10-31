@@ -129,6 +129,7 @@ internal sealed class TelemetryExportWorker(
             Environment.SpecialFolder.CommonApplicationData), "SensorDash");
         var settingsFile = Path.Combine(directory, "telemetry-export.json");
         var cursorFile = Path.Combine(directory, "telemetry-export-cursor.json");
+        var metadataFile = Path.Combine(directory, "telemetry-export-metadata.json");
         TelemetryExportOptions options;
         try
         {
@@ -175,11 +176,50 @@ internal sealed class TelemetryExportWorker(
                 cursor = new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff");
                 SaveCursor(cursorFile, cursor);
             }
+            // The last server-acknowledged catalog is kept separate from the
+            // data cursor: edits to aliases or cooling mappings may remove
+            // previously published tag sets, which require explicit 0 tombstones.
+            var lastMetadata = TelemetryMetadata.Load(metadataFile);
+            long lastMetadataAt = 0;
             logger.LogInformation("Telemetry export enabled; cursor starts at {TimestampMs}.", cursor.TimestampMs);
             while (!stop.IsCancellationRequested)
             {
                 try
                 {
+                    var latest = state.Latest;
+                    if (latest is { Error: null } && latest.Sensors.Count > 0)
+                    {
+                        try
+                        {
+                            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                            var current = TelemetryMetadata.Build(latest, state.Settings, host);
+                            if (!current.SetEquals(lastMetadata) || now - lastMetadataAt >= 120_000)
+                            {
+                                var payload = TelemetryMetadata.Serialize(current, lastMetadata, now);
+                                foreach (var chunk in TelemetryMetadata.Chunks(payload))
+                                {
+                                    using var metadataRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                                    metadataRequest.Headers.Authorization =
+                                        new AuthenticationHeaderValue("Bearer", token);
+                                    metadataRequest.Content = new StringContent(chunk, Encoding.UTF8, "text/plain");
+                                    using var metadataResponse = await client.SendAsync(metadataRequest, stop);
+                                    metadataResponse.EnsureSuccessStatusCode();
+                                }
+                                // Only persist the new snapshot after the entire
+                                // batch was acknowledged; replays are idempotent.
+                                TelemetryMetadata.Save(metadataFile, current);
+                                lastMetadata = current;
+                                lastMetadataAt = now;
+                            }
+                        }
+                        catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
+                        catch (Exception e)
+                        {
+                            // Catalog metadata must never block numeric readings
+                            // or the local hardware control path.
+                            logger.LogWarning(e, "Telemetry catalog synchronization failed; retrying.");
+                        }
+                    }
                     var rows = database.ReadTelemetryBatch(cursor);
                     if (rows.Count == 0)
                     {
