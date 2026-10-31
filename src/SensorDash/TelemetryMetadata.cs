@@ -36,6 +36,18 @@ internal static class TelemetryMetadata
         foreach (var system in (settings.CoolingSystems ?? []).Take(20))
         foreach (var component in (system.Components ?? []).Take(32))
         {
+            // A component exists even without sensor instrumentation (e.g. a
+            // fixed-speed DDC with no measured wattage or RPM channel).
+            result.Add("sensordash_component_info,host=" + h +
+                ",system=" + TelemetryLineProtocol.Label(system.Id, 80) +
+                ",component=" + TelemetryLineProtocol.Label(component.Id, 80) +
+                ",system_name=" + TelemetryLineProtocol.Label(system.Name, 96) +
+                ",component_name=" + TelemetryLineProtocol.Label(component.Name, 96) +
+                ",role=" + TelemetryLineProtocol.Label(component.Kind, 40));
+        }
+        foreach (var system in (settings.CoolingSystems ?? []).Take(20))
+        foreach (var component in (system.Components ?? []).Take(32))
+        {
             // Electrical instrumentation can be assigned separately from the
             // component's general SensorIds (e.g. PWM hub feedback and DDC tach).
             // It is observational metadata, never fan-control authority.
@@ -104,7 +116,8 @@ internal static class TelemetryMetadata
         if (values.Count > MaxMetadataLines ||
             values.Any(v => string.IsNullOrWhiteSpace(v) ||
                 (!v.StartsWith("sensordash_sensor_info,", StringComparison.Ordinal) &&
-                 !v.StartsWith("sensordash_cooling_binding,", StringComparison.Ordinal)) ||
+                 !v.StartsWith("sensordash_cooling_binding,", StringComparison.Ordinal) &&
+                 !v.StartsWith("sensordash_component_info,", StringComparison.Ordinal)) ||
                 v.Contains('\n') || v.Contains('\r')))
             throw new InvalidDataException("Invalid stored metadata lines.");
         return values.ToHashSet(StringComparer.Ordinal);
@@ -166,7 +179,7 @@ internal static class TelemetryMetadataSelfTest
             ]
         };
         var previous = TelemetryMetadata.Build(frame, config, "My Desktop");
-        Check(previous.Count == 7, "four sensor descriptors plus three cooling bindings");
+        Check(previous.Count == 9, "four sensor descriptors, three bindings and two components");
         Check(previous.Any(x => x.Contains("alias=CPU_Coolant_Proxy") && x.Contains("sensor=/cpu/0/temperature/0")),
             "alias is informational and stripped of spaces");
         Check(previous.Any(x => x.StartsWith("sensordash_cooling_binding,") &&
@@ -175,8 +188,11 @@ internal static class TelemetryMetadataSelfTest
         Check(previous.Any(x => x.Contains("sensor=/mb/0/control/0") &&
             x.Contains("component=radiators") && x.Contains("role=fan-group")),
             "electrical-only PWM sensor included without a general SensorIds assignment");
+        Check(previous.Any(x => x.StartsWith("sensordash_component_info,") &&
+            x.Contains("component=radiators") && x.Contains("role=fan-group")),
+            "independent component descriptor even for electrical-only references");
         var snapshot = TelemetryMetadata.Serialize(previous, new(StringComparer.Ordinal), 1793450400000);
-        Check(snapshot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 7,
+        Check(snapshot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 9,
             "snapshot count");
         config.Aliases["/cpu/0/temperature/0"] = "CPU Temperature";
         config.CoolingSystems[0].Components[0].SensorIds.Remove("/cpu/0/power/0");
