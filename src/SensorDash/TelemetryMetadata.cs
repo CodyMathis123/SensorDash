@@ -31,7 +31,8 @@ internal static class TelemetryMetadata
                 ",sensor=" + id + ",kind=" + kind + ",name=" + name +
                 ",alias=" + TelemetryLineProtocol.Label(
                     string.IsNullOrWhiteSpace(alias) ? "unassigned" : alias, 96) +
-                ",device=" + device);
+                ",device=" + device +
+                ",device_type=" + TelemetryLineProtocol.Label(sensor.DeviceType, 40));
         }
         foreach (var system in (settings.CoolingSystems ?? []).Take(20))
         foreach (var component in (system.Components ?? []).Take(32))
@@ -180,6 +181,8 @@ internal static class TelemetryMetadataSelfTest
         };
         var previous = TelemetryMetadata.Build(frame, config, "My Desktop");
         Check(previous.Count == 9, "four sensor descriptors, three bindings and two components");
+        Check(previous.Any(x => x.Contains("device_type=Cpu") && x.Contains("sensor=/cpu/0/temperature/0")),
+            "storage and CPU hardware family metadata must be available for Grafana without guessing sensor IDs");
         Check(previous.Any(x => x.Contains("alias=CPU_Coolant_Proxy") && x.Contains("sensor=/cpu/0/temperature/0")),
             "alias is informational and stripped of spaces");
         Check(previous.Any(x => x.StartsWith("sensordash_cooling_binding,") &&
