@@ -35,9 +35,19 @@ internal static class TelemetryMetadata
         }
         foreach (var system in (settings.CoolingSystems ?? []).Take(20))
         foreach (var component in (system.Components ?? []).Take(32))
-        foreach (var sensorId in (component.SensorIds ?? []).Distinct(StringComparer.Ordinal).Take(16))
         {
-            if (!sensors.TryGetValue(sensorId, out var sensor)) continue;
+            // Electrical instrumentation can be assigned separately from the
+            // component's general SensorIds (e.g. PWM hub feedback and DDC tach).
+            // It is observational metadata, never fan-control authority.
+            var electrical = component.Electrical;
+            var references = (component.SensorIds ?? []).Take(16)
+                .Concat(new[] { electrical?.RpmSensorId, electrical?.ControlSensorId,
+                    electrical?.PowerSensorId })
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal);
+            foreach (var sensorId in references)
+            {
+                if (!sensors.TryGetValue(sensorId!, out var sensor)) continue;
             result.Add("sensordash_cooling_binding,host=" + h +
                 ",sensor=" + TelemetryLineProtocol.Label(sensorId, 256) +
                 ",system=" + TelemetryLineProtocol.Label(system.Id, 80) +
@@ -46,6 +56,7 @@ internal static class TelemetryMetadata
                 ",component_name=" + TelemetryLineProtocol.Label(component.Name, 96) +
                 ",role=" + TelemetryLineProtocol.Label(component.Kind, 40) +
                 ",kind=" + TelemetryLineProtocol.Label(sensor.Type, 40));
+            }
         }
         // Defense in depth against unexpectedly large sensor inventories.
         return result.Count <= MaxMetadataLines
