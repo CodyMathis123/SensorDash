@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryMetadataSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
