@@ -35,17 +35,21 @@ internal static class TelemetryConfiguration
     {
         var temp = path + ".tmp";
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        // Create the *empty* temporary file first, release its exclusive
+        // handle, and set the DACL before writing any secret bytes. Windows
+        // ACL APIs may open a second handle, which FileShare.None would block.
+        using (var empty = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None)) { }
+        var acl = new FileSecurity();
+        acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        acl.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl, AccessControlType.Allow));
+        acl.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            FileSystemRights.FullControl, AccessControlType.Allow));
+        new FileInfo(temp).SetAccessControl(acl);
+        using (var stream = new FileStream(temp, FileMode.Open, FileAccess.Write, FileShare.None))
         {
-            var acl = new FileSecurity();
-            acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            acl.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-                FileSystemRights.FullControl, AccessControlType.Allow));
-            acl.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
-                FileSystemRights.FullControl, AccessControlType.Allow));
-            new FileInfo(temp).SetAccessControl(acl);
             var bytes = Encoding.UTF8.GetBytes(contents);
             stream.Write(bytes, 0, bytes.Length);
             stream.Flush(flushToDisk: true);
