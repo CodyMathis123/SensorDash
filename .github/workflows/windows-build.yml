@@ -157,18 +157,26 @@ jobs:
               $ui -notmatch 'starter-radiators' -or $ui -notmatch 'starter-nvme') {
             throw 'Missing CPU/GPU MAX and NVMe fan profiles'
           }
-          if ($app -notmatch 'HISTORY_CACHE_LIMIT' -or $app -notmatch 'tipW' -or
-              $html -match 'Curve simulation only') {
-            throw 'Chart cache, hover tooltip, or live-control footer missing'
+          if ($app -match 'HISTORY_CACHE_LIMIT' -or $app -match 'function drawAll' -or
+              $html -match 'Curve simulation only' -or $html -match 'id="range"' -or
+              $app -notmatch 'fanOutputStatus') {
+            throw 'Retired chart cache is still bundled or live fan feedback was lost'
           }
-      - name: Check polling / rendering separation
+      - name: Check live streaming and exporter isolation
         shell: pwsh
         run: |
           $js = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
-          if ($js -notmatch 'CHART_PAINT_INTERVAL_MS=8000') { throw 'Missing throttled chart painting' }
-          if ($js -notmatch 'scheduleChartPaint\(\)') { throw 'Missing chart paint scheduling' }
-          if ($js -notmatch 'if\(document.hidden\|\|chartInUse\(\)\)') { throw 'Missing hover redraw guard' }
-          if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
+          $export = Get-Content 'src/SensorDash/TelemetryExport.cs' -Raw
+          $control = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          if ($js -notmatch 'scheduleLivePaint' -or $js -notmatch 'EventSource' -or
+              $js -match '/api/history' -or $js -match 'ChartGaps') {
+            throw 'Local UI must stream live measurements without duplicate historical charts'
+          }
+          if ($export -notmatch 'TelemetryExportRuntime.Fingerprint' -or
+              $export -notmatch 'TelemetryExportRuntime.Reloading' -or
+              $control -notmatch 'EndManualAfterGap') {
+            throw 'Exporter hot reload or interrupted manual PWM safeguards are missing'
+          }
       - name: Publish Windows application
         run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
       - name: Validate generic models and simulation engine
@@ -181,7 +189,7 @@ jobs:
             if (Test-Path $log) { Get-Content $log }
             throw "Workspace self-test failed: $($test.ExitCode)"
           }
-          Write-Host 'Validated virtual sensors, curves, generic hardware collection, cooling references, history rules and tray icons'
+          Write-Host 'Validated real sensors, curves, cooling references, local archive and tray icons'
       - name: Verify executable and assets
         shell: pwsh
         run: |
