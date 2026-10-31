@@ -160,7 +160,7 @@ internal static class TelemetryMetadataSelfTest
         var changes = TelemetryMetadata.Serialize(current, previous, 1793450460000);
         Check(changes.Split(" value=0 ", StringSplitOptions.None).Length - 1 == 2,
             "tombstone changed alias and removed binding");
-        Check(changes.Contains("alias=CPU_Temperature value=1 "), "new alias published");
+        Check(changes.Contains("alias=CPU_Temperature,device=AMD_CPU value=1 "), "new alias published");
         var chunks = TelemetryMetadata.Chunks(string.Concat(Enumerable.Repeat(snapshot, 500)));
         Check(chunks.Count > 1 && chunks.All(x => Encoding.ASCII.GetByteCount(x) <= 128 * 1024),
             "metadata requests chunk safely");
