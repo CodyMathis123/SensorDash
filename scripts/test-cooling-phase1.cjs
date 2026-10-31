@@ -122,14 +122,14 @@ assert.ok(dashboardDraws[0].includes(now+123)&&dashboardDraws[1].includes(now+12
 assert.ok(!dashboardDraws[2].includes(now+123)&&!seen[0].includes(now+123),'Dashboard hover stays in its dashboard');
 timelineApi.leave(dashboardCharts[0]);
 assert.equal(dashboardDraws[1].at(-1),'clear');
-assert.ok(workspace.includes("false,'dashboard:'+chosen.id)"),'Dashboard charts must opt into their own timeline group');
+assert.ok(!workspace.includes("false,'dashboard:'+chosen.id"),'Retired Windows dashboards must not define timeline groups');
 assert.equal(timelineApi.hover({dataset:{}},now),false);
 
 for(const role of ['coolant-probe','case-air','room-ambient'])
  assert.ok(model.includes('"'+role+'"'),role+' must round-trip through server settings');
 assert.ok(workspace.includes('CoolingInsights.overview(S,sys)'));
-assert.ok(workspace.includes('CoolingInsights.activity(S,sys)'));
-assert.ok(workspace.includes('h.chart(limit,unit(type),false,sys.id)'));
+assert.ok(!workspace.includes('CoolingInsights.activity(S,sys)'),'Historical cooling-event timelines are now on the Pi');
+assert.ok(!workspace.includes('h.chart(limit,unit(type),false,sys.id)'),'Historical cooling charts now belong to Grafana');
 assert.ok(app.includes('data-cooling-timeline')&&app.includes('CoolingTimeline.hover(canvas,desired)'));
 assert.ok(app.includes('CoolingInsights.paint(S)')&&app.includes('CoolingInsights.paintEvents(S)'));
 assert.ok(admin.includes('CoolingEventRecorder.Describe(command)')&&admin.includes('db.Event'));
