@@ -59,8 +59,10 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
             services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
             services.AddSingleton<SimulationState>();
             services.AddSingleton(new FanControlRuntime(data));
-            services.AddHostedService<SensorWorker>();
+            // If telemetry is enabled, build its timestamp index before fan
+            // collection starts. Otherwise no telemetry work is performed.
             services.AddHostedService<TelemetryExportWorker>();
+            services.AddHostedService<SensorWorker>();
             services.AddHostedService<SimulationWorker>();
             services.AddHostedService<CollectorPipeServer>();
             services.AddHostedService<AdminFanControlPipeServer>();
