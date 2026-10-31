@@ -31,6 +31,7 @@ public sealed class FanControlRuntime
     private Pending? _pending;
     private Session? _session;
     private bool _firstWritePending;
+    private DateTimeOffset? _lastHardwareTick;
     private FanControlStatus _status = new("off", "", "", "", null, null,
         "Firmware/default fan control is in charge.");
 
@@ -159,6 +160,15 @@ public sealed class FanControlRuntime
     {
         // Called only from the hardware collection thread.
         var controls = FindControls(computer);
+        // Timed commissioning is NOT a persistent fan profile. A sleep/
+        // collector stall invalidates that short manual session; restore BIOS
+        // rather than silently resuming a manual PWM override hours later.
+        if (FanResumePolicy.EndManualAfterGap(_lastHardwareTick, now, _session != null))
+        {
+            _trace.Event("MANUAL-GAP", "Timed manual test was interrupted; restoring firmware ownership.", now);
+            Release(controls, "Manual test interrupted by sleep/collector gap; restored firmware defaults.");
+        }
+        _lastHardwareTick = now;
         var listing = new List<FanOutputInfo>();
         void Visit(IHardware hardware)
         {
@@ -280,6 +290,7 @@ public sealed class FanControlRuntime
     public void ReleaseBeforeClose(Computer? computer, string reason)
     {
         _trace.Event("STOP",reason);
+        _lastHardwareTick = null;
         Dictionary<string, IControl> channels;
         try { channels = computer == null ? [] : FindControls(computer); }
         catch { channels = []; }

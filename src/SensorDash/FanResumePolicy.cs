@@ -5,6 +5,12 @@ internal static class FanResumePolicy
 {
     internal static readonly TimeSpan GapThreshold = TimeSpan.FromSeconds(20);
 
+    // Timed manual commissioning never survives an interrupted collection.
+    // Persistent profiles are separately rearmed using the same gap detection.
+    internal static bool EndManualAfterGap(DateTimeOffset? previous,
+        DateTimeOffset now, bool manualSessionActive) =>
+        NeedsRearm(previous, now, manualSessionActive);
+
     internal static bool NeedsRearm(DateTimeOffset? previous, DateTimeOffset now,
         bool hasApprovedProfiles)
     {

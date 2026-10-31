@@ -35,6 +35,12 @@ internal static class FanResumeSelfTest
             "Large gap implies resume or collection stall");
         Check(FanResumePolicy.NeedsRearm(now,now.AddSeconds(-5),true),
             "Clock going backwards requires rearm");
+        Check(FanResumePolicy.EndManualAfterGap(now,now.AddSeconds(25),true),
+            "A temporary manual fan test is terminated after a collector gap");
+        Check(!FanResumePolicy.EndManualAfterGap(now,now.AddSeconds(25),false),
+            "No new manual control session can be authorized by a wake event");
+        Check(!FanResumePolicy.EndManualAfterGap(now,now.AddSeconds(2),true),
+            "Ordinary rapid polling keeps the current short manual test");
 
         var dir=Directory.CreateTempSubdirectory("SensorDash-Resume-");
         try
