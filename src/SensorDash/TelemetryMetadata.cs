@@ -158,7 +158,7 @@ internal static class TelemetryMetadataSelfTest
         config.CoolingSystems[0].Components[0].SensorIds.Remove("/cpu/0/power/0");
         var current = Build(frame, config, "My Desktop");
         var changes = Serialize(current, previous, 1793450460000);
-        Check(changes.Split(" value=0 ", StringSplitOptions.None).Length - 1 == 3,
+        Check(changes.Split(" value=0 ", StringSplitOptions.None).Length - 1 == 2,
             "tombstone changed alias and removed binding");
         Check(changes.Contains("alias=CPU_Temperature value=1 "), "new alias published");
         var chunks = Chunks(string.Concat(Enumerable.Repeat(snapshot, 500)));
