@@ -183,7 +183,7 @@ internal sealed class TelemetryExportWorker(
                 ? JsonSerializer.Deserialize<AccessoryCursor>(
                     File.ReadAllText(accessoryCursorFile), JsonSerializerOptions.Web)
                     ?? throw new InvalidDataException("Invalid accessory telemetry cursor.")
-                : new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\\uffff", "\\uffff");
+                : new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\uffff", "\uffff");
             if (!File.Exists(accessoryCursorFile))
                 SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
             // The last server-acknowledged catalog is kept separate from the
