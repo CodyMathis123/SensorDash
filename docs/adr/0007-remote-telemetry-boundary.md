@@ -9,7 +9,7 @@ SensorDash currently owns both an elevated Windows hardware/control service and 
 
 ## Decision
 
-Add a **disabled-by-default** exporter hosted independently of the fast collection/control loop. It reads samples already committed to the existing SQLite archive (same local retention policy), starts from the newest recorded sample on its first activation, paginates with a persisted timestamp/sensor cursor, and ships original timestamps in a strict Influx-compatible schema. On successful server response the cursor advances atomically. Non-2xx responses retain the cursor and retry.
+Add a **disabled-by-default** exporter hosted independently of the fast collection/control loop. It reads samples already committed to the existing SQLite archive (same local retention policy), starts from the newest recorded sample on its first activation, paginates with a persisted timestamp/sensor cursor, and ships original timestamps in a strict Influx-compatible schema. The exporter creates an opt-in SQLite index on `(ts,sensor)` before the SensorWorker starts, avoiding repeated full scans of the preexisting `(sensor,ts)` archive; the one-time index build may delay startup and require free disk. On successful server response the cursor advances atomically. Non-2xx responses retain the cursor and retry.
 
 Export only to an explicit HTTPS endpoint with a private CA trusted *per exporter*, verify the hostname/IP, and use a strong bearer token. Pi deploys an isolated, write-only TLS receiver; VictoriaMetrics has no LAN-published port. Grafana reads time series but has no remote fan-control authority.
 
