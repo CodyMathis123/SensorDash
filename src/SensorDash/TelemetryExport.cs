@@ -189,16 +189,22 @@ internal sealed class TelemetryExportWorker(
         var metadataFile = Path.Combine(directory, "telemetry-export-metadata.json");
         var accessoryCursorFile = Path.Combine(directory, "telemetry-accessory-cursor.json");
         var eventCursorFile = Path.Combine(directory, "telemetry-event-cursor.json");
-        TelemetryExportOptions options;
+        // Reconfigure the network-only exporter independently of the collector.
+        // No network setting ever influences the sensor sampler or PWM writer.
+        while (!stop.IsCancellationRequested)
+        {
         try
         {
-            options = TelemetryExportOptions.Load(settingsFile);
+            var options = TelemetryExportOptions.Load(settingsFile);
             if (!options.Enabled)
             {
-                logger.LogInformation("Remote telemetry export disabled (opt-in configuration absent or disabled).");
-                return;
+                TelemetryExportRuntime.Disabled();
+                await Task.Delay(TimeSpan.FromSeconds(3), stop);
+                continue;
             }
             options.Validate();
+            var fingerprint = TelemetryExportRuntime.Fingerprint(
+                settingsFile, options.TokenFile, options.CaCertificateFile);
             var token = File.ReadAllText(options.TokenFile).Trim();
             if (token.Length < 40 || token.Any(c => !Uri.IsHexDigit(c)))
                 throw new InvalidDataException("Telemetry token must contain at least 40 hexadecimal characters.");
@@ -254,11 +260,19 @@ internal sealed class TelemetryExportWorker(
             var lastMetadata = TelemetryMetadata.Load(metadataFile);
             long lastMetadataAt = 0;
             long lastMetadataCheckAt = 0;
-            logger.LogInformation("Telemetry export enabled; cursor starts at {TimestampMs}.", cursor.TimestampMs);
+            logger.LogInformation("Telemetry export session active; cursor starts at {TimestampMs}.", cursor.TimestampMs);
+            TelemetryExportRuntime.Running();
             while (!stop.IsCancellationRequested)
             {
                 try
                 {
+                    if (TelemetryExportRuntime.Fingerprint(
+                        settingsFile, options.TokenFile, options.CaCertificateFile) != fingerprint)
+                    {
+                        TelemetryExportRuntime.Reloading();
+                        logger.LogInformation("Telemetry export configuration changed; rebuilding only the outbound HTTPS session.");
+                        break;
+                    }
                     var latest = state.Latest;
                     var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     // A large retry backlog can flush many batches per second.
@@ -311,6 +325,7 @@ internal sealed class TelemetryExportWorker(
                         var last = rows[^1];
                         cursor = new TelemetryCursor(last.TimestampMs, last.SensorId);
                         SaveCursor(cursorFile, cursor);
+                        TelemetryExportRuntime.Delivered();
                     }
                     // Archive-time estimates are never recalculated from the
                     // current calibration during retries or sleep resumes.
@@ -327,6 +342,7 @@ internal sealed class TelemetryExportWorker(
                         var last = power[^1];
                         accessoryCursor = new AccessoryCursor(last.TimestampMs, last.System, last.Component);
                         SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
+                        TelemetryExportRuntime.Delivered();
                     }
                     // Persist events with their original event times. The
                     // initial 0 cursor imports only events still held by the
@@ -346,6 +362,7 @@ internal sealed class TelemetryExportWorker(
                         }
                         eventCursor = events[^1].Id;
                         SaveEventCursor(eventCursorFile, eventCursor);
+                        TelemetryExportRuntime.Delivered();
                     }
                     // The archive remains a minimal durable retry buffer. Send
                     // three tiny aggregate gauges periodically, never filenames
@@ -360,6 +377,7 @@ internal sealed class TelemetryExportWorker(
                         using var spoolResponse = await client.SendAsync(spoolRequest, stop);
                         spoolResponse.EnsureSuccessStatusCode();
                         lastSpoolAt = now;
+                        TelemetryExportRuntime.Delivered();
                     }
                     await Task.Delay(TimeSpan.FromMilliseconds(
                         rows.Count >= 384 || power.Count >= 256 ? 500 :
@@ -368,15 +386,25 @@ internal sealed class TelemetryExportWorker(
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
                 catch (Exception e)
                 {
-                    logger.LogWarning(e, "Telemetry delivery failed; keeping local history and retrying.");
+                    TelemetryExportRuntime.Failed(e);
+                    logger.LogWarning("Telemetry delivery failed ({ExceptionType}); keeping local history and retrying.", e.GetType().Name);
                     try { await Task.Delay(TimeSpan.FromSeconds(15), stop); }
                     catch (OperationCanceledException) { break; }
                 }
             }
         }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            break;
+        }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Telemetry exporter could not initialize; local control and history remain available.");
+            TelemetryExportRuntime.Failed(exception);
+            logger.LogWarning("Telemetry exporter could not initialize ({ExceptionType}); local hardware control is unaffected.",
+                exception.GetType().Name);
+            try { await Task.Delay(TimeSpan.FromSeconds(5), stop); }
+            catch (OperationCanceledException) { break; }
+        }
         }
     }
 
