@@ -69,7 +69,7 @@ public sealed partial class HistoryStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT sensor, ts, value FROM samples
-            WHERE ts > $ts OR (ts = $ts AND sensor > $sensor)
+            WHERE (ts, sensor) > ($ts, $sensor)
             ORDER BY ts ASC, sensor ASC LIMIT $limit
             """;
         command.Parameters.AddWithValue("$ts", cursor.TimestampMs);
