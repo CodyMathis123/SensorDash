@@ -41,6 +41,19 @@ internal sealed record TelemetryRow(string SensorId, long TimestampMs, double Va
 
 public sealed partial class HistoryStore
 {
+    // Index only when explicitly enabling export. The existing primary key
+    // starts with sensor, so it cannot efficiently page in timestamp order.
+    // This one-time migration is performed at collector startup before
+    // SensorWorker begins controlling hardware.
+    internal void EnsureTelemetryIndex()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "CREATE INDEX IF NOT EXISTS idx_samples_telemetry_export ON samples(ts, sensor)";
+        command.ExecuteNonQuery();
+    }
+
     internal long LatestTelemetryTimestamp()
     {
         using var connection = Open();
@@ -126,6 +139,8 @@ internal sealed class TelemetryExportWorker(
                 return;
             }
             options.Validate();
+            // Bootstrap the read cursor index before the fan worker starts.
+            database.EnsureTelemetryIndex();
             var token = File.ReadAllText(options.TokenFile).Trim();
             if (token.Length < 40 || token.Any(c => !Uri.IsHexDigit(c)))
                 throw new InvalidDataException("Telemetry token must contain at least 40 hexadecimal characters.");
@@ -247,6 +262,7 @@ internal static class TelemetryExportSelfTest
                     """;
                 command.ExecuteNonQuery();
             }
+            history.EnsureTelemetryIndex();
             var one = history.ReadTelemetryBatch(new TelemetryCursor(0, ""), 1);
             Require(one.Count == 1 && one[0].SensorId == "a" && one[0].Value == 0,
                 "first row / zero preservation");
