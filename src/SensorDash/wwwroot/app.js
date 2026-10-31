@@ -265,7 +265,7 @@ function settingsView(){
 
  '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
- '<div class="stat-row"><label>Web address</label><strong>'+esc(location.host)+'</strong></div>'+
+ '<div class="stat-row"><label>Web address</label><strong>'+esc(S.network?.remote ? location.host : '127.0.0.1:8765')+'</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
  '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
