@@ -7,6 +7,8 @@ using Microsoft.Data.Sqlite;
 // These records are written at archive time, under the *then-current* cooling
 // configuration. Replaying a network backlog never reinterprets old values
 // using a newer PWM calibration or different component wiring.
+internal sealed record AccessoryCursor(long TimestampMs, string System, string Component);
+
 internal sealed record ArchivedAccessoryPower(
     string System, string Component, long TimestampMs, double Watts,
     string Source, string Revision);
@@ -253,8 +255,12 @@ internal static class AccessoryPowerTelemetrySelfTest
         Assert(data[1].Watts == 0 && data[1].Source == "rated",
             "explicit stopped RPM reports zero rated power");
         e.LowDutyPercent = null; e.HighDutyPercent = null;
+        // A running tachometer still permits a conservative rated estimate.
+        Assert(AccessoryPowerCapture.Capture(frame, settings)[0].Source == "rated",
+            "running tachometer permits a labeled nameplate estimate");
+        frame = frame with { Sensors = [R("pump-rpm", "Fan", 0)] };
         Assert(AccessoryPowerCapture.Capture(frame, settings).Count == 1,
-            "fan draw unknown without measured watts, calibration, curve or active RPM");
+            "unknown fan group must not fabricate a wattage sample");
         frame = frame with { Sensors = [R("pump-rpm", "Fan", 4200, stamp.AddMinutes(-3))] };
         Assert(AccessoryPowerCapture.Capture(frame, settings).Count == 0,
             "stale tachometer never becomes an inferred power reading");
