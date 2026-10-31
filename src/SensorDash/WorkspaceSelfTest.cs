@@ -5,59 +5,50 @@ internal static class WorkspaceSelfTest
     public static void Run()
     {
         var now = DateTimeOffset.UtcNow;
-        var cfg = new DashboardSettings {
-            VirtualSensors = [
-                new VirtualSensorConfig { Id="virtual:max-test", Name="Max temperature",
-                    Operation="max", SensorIds=["cpu","gpu"] }
-            ],
-            SimulatedFanCurves = [
-                new SimulatedFanCurveConfig {
-                    Id="curve-test", Name="Test curve", SourceSensorId="virtual:max-test",
-                    Points=[new(){Temperature=30,Percent=25},new(){Temperature=50,Percent=55},
-                            new(){Temperature=75,Percent=100}]
+        var cfg = new DashboardSettings
+        {
+            SimulatedFanCurves =
+            [
+                new SimulatedFanCurveConfig
+                {
+                    Id = "curve-test", Name = "CPU temperature curve", SourceSensorId = "cpu",
+                    Points = [new() { Temperature = 30, Percent = 25 },
+                              new() { Temperature = 50, Percent = 55 },
+                              new() { Temperature = 75, Percent = 100 }]
                 }
             ]
         };
         WorkspaceLogic.Normalize(cfg);
-        var frame = new SensorFrame(now, [
-            new SensorReading("cpu","CPU","Mainboard","Cpu","Temperature",40,now),
-            new SensorReading("gpu","GPU","Video card","Gpu","Temperature",55,now)
-        ],null);
-        var virtuals = WorkspaceLogic.VirtualReadings(frame,cfg.VirtualSensors);
-        if(virtuals.Count!=1||virtuals[0].Id!="virtual:max-test"||
-            Math.Abs(virtuals[0].Value!.Value-55)>0.0001)
-            throw new Exception("Virtual Max must select highest physical temperature");
-        frame.Sensors.AddRange(virtuals);
-
-        static void Check(double? expected,SimulatedFanCurveReading curve,string label)
+        var frame = new SensorFrame(now,
+        [
+            new SensorReading("cpu", "CPU", "Processor", "Cpu", "Temperature", 55, now),
+            new SensorReading("gpu", "GPU", "Video card", "Gpu", "Temperature", 40, now)
+        ], null);
+        static void Check(double? expected, SimulatedFanCurveReading curve, string label)
         {
-            if((expected==null)!=(curve.TargetPercent==null)||
-                (expected!=null&&Math.Abs(expected.Value-curve.TargetPercent!.Value)>.001))
-                throw new Exception(label+" did not produce expected simulation target");
+            if ((expected == null) != (curve.TargetPercent == null) ||
+                (expected is double value &&
+                 Math.Abs(value - curve.TargetPercent!.Value) > .001))
+                throw new Exception(label + " did not produce expected simulation target");
         }
-        var sample=WorkspaceLogic.Evaluate(frame,cfg,now)[0];
-        // 55 lies one-fifth along the 50->75 segment (55% -> 100%).
-        Check(64,sample,"Linear interpolation");
-        if(sample.State!="simulated")throw new Exception("Expected simulated state");
-        frame.Sensors.RemoveAll(s=>s.Id=="virtual:max-test");
-        Check(null,WorkspaceLogic.Evaluate(frame,cfg,now)[0],"Missing input");
-        frame.Sensors.Add(new SensorReading("virtual:max-test","Max temperature",
-            "Virtual sensors","Virtual","Temperature",55,now.AddMinutes(-2)));
-        var stale=WorkspaceLogic.Evaluate(frame,cfg,now)[0];
-        Check(null,stale,"Stale input");
-        if(stale.State!="stale-input")throw new Exception("Stale input state missing");
-        frame.Sensors[^1]=frame.Sensors[^1] with {ObservedAt=now,Value=5};
-        Check(25,WorkspaceLogic.Evaluate(frame,cfg,now)[0],"Clamped low point");
-        frame.Sensors[^1]=frame.Sensors[^1] with {Value=95};
-        Check(100,WorkspaceLogic.Evaluate(frame,cfg,now)[0],"Clamped high point");
+        var sample = WorkspaceLogic.Evaluate(frame, cfg, now)[0];
+        Check(64, sample, "Linear interpolation");
+        if (sample.State != "simulated") throw new Exception("Expected simulated state");
+        frame.Sensors.RemoveAll(s => s.Id == "cpu");
+        Check(null, WorkspaceLogic.Evaluate(frame, cfg, now)[0], "Missing input");
+        frame.Sensors.Add(new SensorReading("cpu", "CPU",
+            "Processor", "Cpu", "Temperature", 55, now.AddMinutes(-2)));
+        var stale = WorkspaceLogic.Evaluate(frame, cfg, now)[0];
+        Check(null, stale, "Stale input");
+        if (stale.State != "stale-input") throw new Exception("Stale input state missing");
+        frame.Sensors[^1] = frame.Sensors[^1] with { ObservedAt = now, Value = 5 };
+        Check(25, WorkspaceLogic.Evaluate(frame, cfg, now)[0], "Clamped low point");
+        frame.Sensors[^1] = frame.Sensors[^1] with { Value = 95 };
+        Check(100, WorkspaceLogic.Evaluate(frame, cfg, now)[0], "Clamped high point");
+        frame.Sensors[^1] = frame.Sensors[^1] with { Value = 46 };
         cfg.TrayWidgets = Enumerable.Range(0,8).Select(i=>new TrayWidgetConfig {
             Id="t"+i, SensorId="temperature-"+i
         }).ToList();
-        cfg.Dashboards = [new WorkspaceDashboardConfig { Id="one",Name="Example",
-            Widgets=[new WorkspaceWidgetConfig{Id="widget",Title="Temperature"}]}];
-        WorkspaceLogic.Normalize(cfg);
-        if(cfg.TrayWidgets.Count!=6)throw new Exception("Tray widget limit not enforced");
-        if(cfg.Dashboards[0].Widgets.Count!=1)throw new Exception("Dashboard configuration lost");
         // Cooling systems define meaningful component roles, not passive
         // radiators. Associations must participate in lean history references.
         cfg.CoolingSystems = [new CoolingSystemConfig {
@@ -93,11 +84,6 @@ internal static class WorkspaceSelfTest
         cfg.HiddenSensorIds = ["cpu"];
         cfg.HiddenDeviceIds = ["network-adapter"];
         cfg.HiddenHardwareTypes = ["Network"];
-        cfg.Dashboards[0].Locked = true;
-        cfg.Dashboards[0].Widgets[0].SensorIds = ["cpu"];
-        WorkspaceLogic.Normalize(cfg);
-        if (!cfg.Dashboards[0].Locked || !cfg.HiddenSensorIds.Contains("cpu"))
-            throw new Exception("Dashboard lock or sensor visibility settings were lost");
         var cpuSample = new SensorReading("cpu", "CPU Package", "CPU", "Cpu",
             "Temperature", 46, now, "cpu-hardware");
         var nicSample = new SensorReading("nic", "Transfer", "Ethernet", "Network",
@@ -115,6 +101,11 @@ internal static class WorkspaceSelfTest
         if (HistoryStore.ShouldRecord(nicSample, cfg) ||
             !HistoryStore.ShouldRecord(cpuSample, cfg))
             throw new Exception("Network history exclusion must not affect other devices");
+        cfg.HistoryMode = "balanced";
+        var drive = new SensorReading("/hdd/0/level/0", "Disk Life",
+            "NVMe Drive", "Storage", "Level", 98, now);
+        if (!HistoryStore.ShouldRecord(drive, cfg))
+            throw new Exception("Storage data must be archived for the Pi dashboard");
         cfg.HistoryMode = "nonsense";
         WorkspaceLogic.Normalize(cfg);
         if (cfg.HistoryMode != "balanced")

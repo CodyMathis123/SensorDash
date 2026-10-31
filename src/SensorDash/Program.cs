@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -59,6 +59,9 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
             services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
             services.AddSingleton<SimulationState>();
             services.AddSingleton(new FanControlRuntime(data));
+            // If telemetry is enabled, build its timestamp index before fan
+            // collection starts. Otherwise no telemetry work is performed.
+            services.AddHostedService<TelemetryExportWorker>();
             services.AddHostedService<SensorWorker>();
             services.AddHostedService<SimulationWorker>();
             services.AddHostedService<CollectorPipeServer>();
@@ -114,10 +117,6 @@ app.MapGet("/fan-control-debug.js", () => Resource("fan-control-debug.js", "text
 app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
-app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
-app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
-app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
-app.MapGet("/history-insights.js", () => Resource("history-insights.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-electrical.js", () => Resource("cooling-electrical.js", "text/javascript; charset=utf-8"));
 app.MapGet("/driver-status.js", () => Resource("driver-status.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
@@ -153,23 +152,30 @@ app.MapPut("/api/settings", async (HttpContext ctx) =>
     }
     catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
 });
-app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken ct) =>
+// Configuration changes are local to the Windows collector. No HTTP endpoint
+// ever returns the bearer token or certificate PEM. Never trust cross-origin
+// pages with service-owned secrets.
+app.MapGet("/api/telemetry-config", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("telemetrySettings"), ct));
+app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
 {
-    var sensors = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Distinct().Take(12).ToArray();
-    return await ProxyAsync(new PipeCommand("history", sensors, hours), ct);
+    if (ctx.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
+        ctx.Request.Headers["X-SensorDash-Action"].ToString() != "telemetry-config" ||
+        ctx.Request.ContentType is not string mime ||
+        !mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+        return Results.StatusCode(403);
+    if (ctx.Request.ContentLength is > 24_576)
+        return Results.StatusCode(413);
+    try
+    {
+        var update = await JsonSerializer.DeserializeAsync<TelemetryConfigurationUpdate>(
+            ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
+        return update is null
+            ? Results.BadRequest("Invalid telemetry configuration.")
+            : await ProxyAsync(new PipeCommand("saveTelemetrySettings", Telemetry: update), ctx.RequestAborted);
+    }
+    catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
 });
-// Separate from chart buckets: preserve real recorded spikes and observed power
-// intervals. Restricted to explicit sensor IDs, with no additional polling.
-app.MapGet("/api/history/stats", async (string? ids, double? hours, CancellationToken ct) =>
-{
-    var selected=(ids??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries)
-        .Where(id=>id.Length is >0 and <=256).Distinct().Take(8).ToArray();
-    var span=double.IsFinite(hours??720)?Math.Clamp(hours??720,0.1,26280):720;
-    return await ProxyAsync(new PipeCommand("historyStats",selected,span),ct);
-});
-app.MapGet("/api/history/storage", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("historyStorage"),ct));
 app.MapGet("/api/events", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("events"), ct));
 app.MapGet("/api/simulation", async (CancellationToken ct) =>
@@ -300,11 +306,7 @@ public sealed class DashboardSettings {
     public int SaveEverySeconds { get; set; } = 10;
     public int RetentionDays { get; set; } = 30; // configurable through 3 years
     public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
-    public List<WorkspaceDashboardConfig> Dashboards { get; set; } = [
-        new() { Id = "system", Name = "System dashboard" }
-    ];
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
-    public List<VirtualSensorConfig> VirtualSensors { get; set; } = [];
     public List<FanProfileConfig> FanProfiles { get; set; } = [];
     public bool FanControlLocked { get; set; } // UI editor lock only; not hardware authorization.
     // Advisory mapping metadata never authorizes a hardware command.
@@ -405,6 +407,14 @@ public sealed partial class HistoryStore {
             CREATE TABLE IF NOT EXISTS samples(sensor TEXT NOT NULL, ts INTEGER NOT NULL, value REAL NOT NULL, PRIMARY KEY(sensor, ts));
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, severity TEXT, sensor TEXT, message TEXT, value REAL);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+            CREATE TABLE IF NOT EXISTS accessory_power (
+                system TEXT NOT NULL, component TEXT NOT NULL,
+                ts INTEGER NOT NULL, watts REAL NOT NULL,
+                source TEXT NOT NULL, revision TEXT NOT NULL,
+                PRIMARY KEY(system,component,ts)
+            );
+            CREATE INDEX IF NOT EXISTS idx_accessory_power_export
+                ON accessory_power(ts,system,component);
             """;
         cmd.ExecuteNonQuery();
     }
@@ -432,6 +442,11 @@ public sealed partial class HistoryStore {
         if (config.ExcludedHistoryHardwareTypes.Contains(sensor.DeviceType, StringComparer.OrdinalIgnoreCase))
             return false;
         if (config.HistoryMode == "all") return true;
+        // Preserve real SSD/NVMe data channels for Pi storage dashboards.
+        // This remains a bounded archive/retry spool, not a second viewer.
+        if (config.HistoryMode == "balanced" && sensor.DeviceType == "Storage" &&
+            (sensor.Type is "Temperature" or "Load" or "Throughput" or "Data" or "Level"))
+            return true;
         if (config.HistoryMode == "in-use")
             return (used ?? WorkspaceLogic.ReferencedSensorIds(config)).Contains(sensor.Id);
         if (config.PinnedSensors.Contains(sensor.Id)) return true;
@@ -570,7 +585,7 @@ public sealed partial class HistoryStore {
     public void Cleanup(int retentionDays) {
         var before = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeMilliseconds();
         using var conn = Open(); using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before";
+        cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before; DELETE FROM accessory_power WHERE ts < $before";
         cmd.Parameters.AddWithValue("$before", before);
         using (var transaction = conn.BeginTransaction()) {
             cmd.Transaction = transaction;
@@ -628,13 +643,17 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 foreach (var hardware in _computer.Hardware)
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
-                var baseFrame = new SensorFrame(now, readings, null, devices);
-                readings.AddRange(WorkspaceLogic.VirtualReadings(baseFrame, cfg.VirtualSensors));
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
                     db.Record(frame, cfg);
+                    // Derived electrical history is observational only. A failed
+                    // optional computation/storage cannot interrupt fan control.
+                    try { db.RecordAccessoryPower(frame, cfg); }
+                    catch (Exception electricalError) {
+                        logger.LogWarning(electricalError, "Accessory power archive failed; control is unchanged.");
+                    }
                     CheckEvents(frame, cfg);
                     _lastSaved = now;
                 }

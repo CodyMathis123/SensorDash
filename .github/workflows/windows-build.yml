@@ -42,10 +42,6 @@ jobs:
           node --check src/SensorDash/wwwroot/workspace-locks.js
           node --check src/SensorDash/wwwroot/fan-feedback.js
           node --check src/SensorDash/wwwroot/cooling-insights.js
-          node --check src/SensorDash/wwwroot/cooling-timeline.js
-          node --check src/SensorDash/wwwroot/chart-gaps.js
-          node --check src/SensorDash/wwwroot/chart-time-axis.js
-          node --check src/SensorDash/wwwroot/history-insights.js
           node --check src/SensorDash/wwwroot/cooling-electrical.js
       - name: Test Settings alias and threshold pickers
         run: node scripts/test-settings-pickers.cjs
@@ -57,12 +53,6 @@ jobs:
         run: node scripts/test-workspace.cjs
       - name: Test cooling autosave and concurrent settings writes
         run: node scripts/test-cooling-autosave.cjs
-      - name: Test gap-aware charts and hover behavior
-        run: node scripts/test-chart-gaps.cjs
-      - name: Test multi-day calendar axes and date tooltips
-        run: node scripts/test-chart-time-axis.cjs
-      - name: Test overview peaks and storage insights
-        run: node scripts/test-history-insights.cjs
       - name: Validate packaged cooling preset catalog
         run: node scripts/test-cooling-presets.cjs
       - name: Test fan and pump electrical component modeling
@@ -108,8 +98,11 @@ jobs:
               $collector -notmatch 'DisabledCollectionDeviceIds') {
             throw 'Service collection must use the generic hardware/group switch'
           }
-          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-dashboard-lock') {
-            throw 'Sensor usage or dashboard locking missing'
+          if ($appJs -notmatch "'In use'" -or $workspace -notmatch 'toggle-cooling-lock') {
+            throw 'Sensor usage or cooling configuration locking missing'
+          }
+          if ($workspace -match 'toggle-dashboard-lock' -or $workspace -match 'renderVirtual') {
+            throw 'Retired desktop dashboards or virtual sensor UI must not ship'
           }
       - name: Verify experimental fan-control security boundary
         shell: pwsh
@@ -164,18 +157,26 @@ jobs:
               $ui -notmatch 'starter-radiators' -or $ui -notmatch 'starter-nvme') {
             throw 'Missing CPU/GPU MAX and NVMe fan profiles'
           }
-          if ($app -notmatch 'HISTORY_CACHE_LIMIT' -or $app -notmatch 'tipW' -or
-              $html -match 'Curve simulation only') {
-            throw 'Chart cache, hover tooltip, or live-control footer missing'
+          if ($app -match 'HISTORY_CACHE_LIMIT' -or $app -match 'function drawAll' -or
+              $html -match 'Curve simulation only' -or $html -match 'id="range"' -or
+              $app -notmatch 'fanOutputStatus') {
+            throw 'Retired chart cache is still bundled or live fan feedback was lost'
           }
-      - name: Check polling / rendering separation
+      - name: Check live streaming and exporter isolation
         shell: pwsh
         run: |
           $js = Get-Content 'src/SensorDash/wwwroot/app.js' -Raw
-          if ($js -notmatch 'CHART_PAINT_INTERVAL_MS=8000') { throw 'Missing throttled chart painting' }
-          if ($js -notmatch 'scheduleChartPaint\(\)') { throw 'Missing chart paint scheduling' }
-          if ($js -notmatch 'if\(document.hidden\|\|chartInUse\(\)\)') { throw 'Missing hover redraw guard' }
-          if ($js -notmatch 'flushChartAfterHover') { throw 'Missing deferred hover flush' }
+          $export = Get-Content 'src/SensorDash/TelemetryExport.cs' -Raw
+          $control = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
+          if ($js -notmatch 'scheduleLivePaint' -or $js -notmatch 'EventSource' -or
+              $js -match '/api/history' -or $js -match 'ChartGaps') {
+            throw 'Local UI must stream live measurements without duplicate historical charts'
+          }
+          if ($export -notmatch 'TelemetryExportRuntime.Fingerprint' -or
+              $export -notmatch 'TelemetryExportRuntime.Reloading' -or
+              $control -notmatch 'EndManualAfterGap') {
+            throw 'Exporter hot reload or interrupted manual PWM safeguards are missing'
+          }
       - name: Publish Windows application
         run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
       - name: Validate generic models and simulation engine
@@ -188,7 +189,7 @@ jobs:
             if (Test-Path $log) { Get-Content $log }
             throw "Workspace self-test failed: $($test.ExitCode)"
           }
-          Write-Host 'Validated virtual sensors, curves, generic hardware collection, cooling references, history rules and tray icons'
+          Write-Host 'Validated real sensors, curves, cooling references, local archive and tray icons'
       - name: Verify executable and assets
         shell: pwsh
         run: |
@@ -267,7 +268,7 @@ jobs:
             $driverScript = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/driver-status.js' -UseBasicParsing
             if ($driverScript.Content -notmatch 'DriverStatus') { throw 'Driver status UI was not embedded' }
             $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
-            if ($page.Content -notmatch 'Hardware workspaces') { throw 'Missing dashboard HTML' }
+            if ($page.Content -notmatch 'Local Hardware Control' -or $page.Content -match 'data-view="virtual"') { throw 'Missing local control-only HTML' }
             $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
             if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
           $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
@@ -288,8 +289,12 @@ jobs:
           if ($denied.StatusCode -ne 403) {
             throw 'Cross-origin or originless write requests must be rejected before UAC'
           }
-            if ($script.Content -notmatch 'chart-hover-overlay') { throw 'Missing isolated mouse overlay handling' }
-            if ($script.Content -notmatch 'hoverCtx.clearRect') { throw 'Missing hover overlay clearing' }
+            if ($script.Content -match 'chart-hover-overlay' -or
+                $script.Content -match 'hoverCtx.clearRect' -or
+                $script.Content -notmatch 'scheduleLivePaint' -or
+                $script.Content -notmatch 'telemetryConfigPanel') {
+              throw 'Obsolete history overlay present or local live/configuration UI absent'
+            }
             $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
             if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
             # Invoke-RestMethod deserializes the JSON array into a PowerShell
@@ -306,17 +311,12 @@ jobs:
             # Save real workspace configurations across the UI -> named pipe -> service.
             $settings.disabledCollectionGroups = @('Network')
             $settings.disabledCollectionDeviceIds = @()
-            $settings.dashboards = @(@{
-              id='ci-dashboard'; name='CI Workspace';
-              widgets=@(@{id='ci-widget';title='CPU history';kind='chart';sensorIds=@('/ci/temperature')})
-            })
             $settings.coolingSystems = @(@{
               id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
                 @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
               )
             })
             $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
-            $settings.virtualSensors = @(@{id='virtual:ci-max';name='CI Max';operation='max';sensorIds=@('/ci/temperature')})
             $settings.simulatedFanCurves = @(@{
               id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
               outputSensorId='';maxSampleAgeSeconds=30;
@@ -334,8 +334,37 @@ jobs:
             if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
               throw 'Generic collection family setting did not persist through service IPC'
             }
-            if ($persisted.dashboards[0].widgets[0].kind -ne 'chart' -or $persisted.simulatedFanCurves[0].id -ne 'ci-curve') {
-              throw 'Collector did not persist workspace and simulated curve configuration'
+            if ($persisted.simulatedFanCurves[0].id -ne 'ci-curve' -or
+                $persisted.PSObject.Properties.Name -contains 'virtualSensors' -or
+                $persisted.PSObject.Properties.Name -contains 'dashboards') {
+              throw 'Legacy virtual/dashboard settings survived or fan simulation was lost'
+            }
+            $telemetrySettings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($telemetrySettings.PSObject.Properties.Name -contains 'token' -or
+                $telemetrySettings.PSObject.Properties.Name -contains 'caCertificatePem') {
+              throw 'Collector exposed telemetry secret values in read-only configuration API'
+            }
+            $blockedTelemetry = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"","hostLabel":"ci-test"}' `
+              -SkipHttpErrorCheck
+            if ($blockedTelemetry.StatusCode -ne 403) {
+              throw 'Telemetry configuration without verified origin and action header must be rejected'
+            }
+            # A valid local browser action changes only exporter settings; it
+            # must not require a collector restart or expose token/CA contents.
+            $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
+              -TimeoutSec 8
+            $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($confirmedTelemetry.hostLabel -ne 'ci-desktop' -or
+                $confirmedTelemetry.endpoint -ne 'https://192.168.1.43:8429/ingest' -or
+                $confirmedTelemetry.restartRequired -or $confirmedTelemetry.token -or
+                $confirmedTelemetry.caCertificatePem) {
+              throw 'Local exporter configuration was not saved/redacted or incorrectly requires service restart'
+            }
+            if (!$allowedTelemetry.configured) {
+              throw 'Local exporter settings write was not acknowledged'
             }
             Start-Sleep -Seconds 2
             $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
@@ -343,7 +372,7 @@ jobs:
             if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
               throw 'Missing-input simulated curve must produce no hardware target'
             }
-            Write-Host 'Verified configurable cooling systems, dashboards, tray icons, virtual sensors and simulated curves'
+            Write-Host 'Verified cooling systems, tray icons, curve simulation and redacted telemetry settings'
 
             Write-Host 'Verified desktop + collector named pipe + browser shell'
           } finally {

@@ -51,20 +51,6 @@ public sealed class CoolingElectricalConfig
     public double? MeasuredLowWatts { get; set; }
     public double? MeasuredHighWatts { get; set; }
 }
-public sealed class WorkspaceDashboardConfig
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "New dashboard";
-    public bool Locked { get; set; } = false; // UI editing lock, not an authorization barrier
-    public List<WorkspaceWidgetConfig> Widgets { get; set; } = [];
-}
-public sealed class WorkspaceWidgetConfig
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
-    public string Title { get; set; } = "Sensor";
-    public string Kind { get; set; } = "metric"; // metric, chart, readings
-    public List<string> SensorIds { get; set; } = [];
-}
 public sealed class TrayWidgetConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -72,13 +58,6 @@ public sealed class TrayWidgetConfig
     public string Label { get; set; } = "";
     public string Color { get; set; } = "#62d5ce";
     public int Decimals { get; set; } = 0;
-}
-public sealed class VirtualSensorConfig
-{
-    public string Id { get; set; } = "virtual:" + Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "Virtual sensor";
-    public string Operation { get; set; } = "max"; // max, min, average, delta
-    public List<string> SensorIds { get; set; } = [];
 }
 // Generic physical-output profile. Drafts are editable via the normal settings
 // API but have NO hardware authority until explicitly approved via UAC. Approved
@@ -141,19 +120,12 @@ public static class WorkspaceLogic
         }
         Include(cfg.PinnedSensors);
         Include(cfg.HighThresholds?.Keys);
-        foreach(var dashboard in cfg.Dashboards ?? [])
-            foreach(var widget in dashboard.Widgets ?? [])Include(widget.SensorIds);
         foreach(var system in cfg.CoolingSystems ?? [])
             foreach(var part in system.Components ?? []) {
                 Include(part.SensorIds);
                 if(part.Electrical is { } e) Include([e.RpmSensorId,e.ControlSensorId,e.PowerSensorId]);
             }
         foreach(var tray in cfg.TrayWidgets ?? [])Include([tray.SensorId]);
-        foreach(var derived in cfg.VirtualSensors ?? [])
-        {
-            Include([derived.Id]);
-            Include(derived.SensorIds);
-        }
         foreach(var curve in cfg.SimulatedFanCurves ?? [])
             Include([curve.SourceSensorId]);
         foreach(var profile in cfg.FanProfiles ?? [])
@@ -231,19 +203,6 @@ public static class WorkspaceLogic
             return system;
         }).Where(c => c.Id.Length > 0 && c.Name.Length > 0).DistinctBy(c=>c.Id).ToList();
 
-        cfg.Dashboards = (cfg.Dashboards ?? []).Take(20).Select(dashboard => {
-            dashboard.Id = Short(dashboard.Id, 80);
-            dashboard.Name = Short(dashboard.Name);
-            dashboard.Widgets = (dashboard.Widgets ?? []).Take(30).Select(widget => {
-                widget.Id = Short(widget.Id, 80);
-                widget.Title = Short(widget.Title);
-                widget.Kind = widget.Kind is "metric" or "chart" or "readings" ? widget.Kind : "metric";
-                widget.SensorIds = Ids(widget.SensorIds, 12);
-                return widget;
-            }).Where(w => w.Id.Length > 0).DistinctBy(w=>w.Id).ToList();
-            return dashboard;
-        }).Where(d => d.Id.Length > 0 && d.Name.Length > 0).DistinctBy(d=>d.Id).ToList();
-
         cfg.TrayWidgets = (cfg.TrayWidgets ?? []).Where(w=>!string.IsNullOrWhiteSpace(w.SensorId))
             .Take(6).Select(w=>{
                 w.Id=Short(w.Id,80);
@@ -253,15 +212,6 @@ public static class WorkspaceLogic
                 w.Decimals=Math.Clamp(w.Decimals,0,1);
                 return w;
             }).Where(w=>w.Id.Length>0 && w.SensorId.Length>0).DistinctBy(w=>w.Id).ToList();
-
-        cfg.VirtualSensors = (cfg.VirtualSensors ?? []).Take(32).Select(v=>{
-            v.Id=Short(v.Id,80);
-            if(!v.Id.StartsWith("virtual:",StringComparison.Ordinal))v.Id="virtual:"+v.Id;
-            v.Name=Short(v.Name);
-            v.Operation=v.Operation is "max" or "min" or "average" or "delta" ? v.Operation : "max";
-            v.SensorIds=Ids(v.SensorIds,8);
-            return v;
-        }).Where(v=>v.Id.Length>8 && v.Name.Length>0).DistinctBy(v=>v.Id).ToList();
 
         cfg.FanProfiles = (cfg.FanProfiles ?? []).Take(20).Select(p=>{
             p.Id=Short(p.Id,80);p.Name=Short(p.Name);
@@ -287,33 +237,6 @@ public static class WorkspaceLogic
                 .OrderBy(p=>p.Temperature).DistinctBy(p=>p.Temperature).Take(16).ToList();
             return curve;
         }).Where(c=>c.Id.Length>0&&c.Name.Length>0 &&c.Points.Count>=2).DistinctBy(c=>c.Id).ToList();
-    }
-
-    public static List<SensorReading> VirtualReadings(SensorFrame frame, List<VirtualSensorConfig> definitions)
-    {
-        var catalog = frame.Sensors.ToDictionary(s=>s.Id,s=>s);
-        var output = new List<SensorReading>();
-        // One-pass calculation intentionally disallows virtual-to-virtual references.
-        // That keeps cycles and ordering out of this initial version.
-        foreach(var def in definitions)
-        {
-            var values = def.SensorIds
-                .Where(id => !id.StartsWith("virtual:",StringComparison.Ordinal))
-                .Select(id => catalog.GetValueOrDefault(id))
-                .Where(s => s?.Value is double v && double.IsFinite(v))
-                .ToArray();
-            if(values.Length==0 || (def.Operation=="delta"&&values.Length<2))continue;
-            var numeric=values.Select(s=>s!.Value!.Value).ToArray();
-            double result=def.Operation switch {
-                "min"=>numeric.Min(), "average"=>numeric.Average(),
-                "delta"=>numeric[0]-numeric[1], _=>numeric.Max()
-            };
-            var unitType=values[0]!.Type;
-            if(values.Any(s=>s!.Type!=unitType))continue;
-            output.Add(new SensorReading(def.Id, def.Name,"Virtual sensors","Virtual",unitType,result,
-                values.Min(s=>s!.ObservedAt) ?? frame.Timestamp));
-        }
-        return output;
     }
 
     public static List<SimulatedFanCurveReading> Evaluate(

@@ -1,6 +1,6 @@
 # Project and source map
 
-SensorDash is a Windows hardware telemetry application with a tray UI, browser dashboard, SQLite history and an elevated collector. It uses .NET 10 Windows/Windows Forms, LibreHardwareMonitor, Microsoft.Data.Sqlite and plain JavaScript/CSS. The web assets are embedded by `SensorDash.csproj`; new web modules must also be registered there.
+SensorDash is the local Windows hardware-control and telemetry-export companion to Grafana on the Pi. It retains the elevated collector, tray, local configuration UI and SQLite retry buffer, not duplicate general monitoring dashboards. See [ADR 0008](adr/0008-local-control-observability.md). It uses .NET 10 Windows/Windows Forms, LibreHardwareMonitor, Microsoft.Data.Sqlite and plain JavaScript/CSS. The web assets are embedded by `SensorDash.csproj`; new web modules must also be registered there.
 
 ## Source tree
 
@@ -36,3 +36,7 @@ Read the relevant source and tests for exact current behavior. This map describe
 `presets/cooling/*.json` contains bundled fan/pump specifications. `CoolingPresetCatalog.cs` serves embedded snapshots; [contribution guide](../presets/README.md), schema and `scripts/test-cooling-presets.cjs` define the data contract.
 
 `PawnIoStatus.cs` probes optional shared driver availability in the collector. `driver-status.js` presents actionable status without rebuilding active forms; see [hardware driver setup](hardware-drivers.md).
+
+New remote configuration and redacted status live in TelemetryConfiguration.cs and same-origin /api/telemetry-config; time-stamped event export and local spool-file sizes live in TelemetryExport.cs. Current sensor metadata, including device_type=Storage, lives in TelemetryMetadata.cs. Long historical analysis is owned by Grafana.
+
+**Controls-only cleanup:** redundant `/api/history*` and history IPC routes and the browser chart files (`chart-gaps.js`, `chart-time-axis.js`, `cooling-timeline.js`, `history-insights.js`) have been removed. The Windows process still archives records for the separate telemetry exporter. Pi exporter settings are dynamically observed; a change reopens only the outbound HTTPS client without a service restart. Timed manual commissioning is released on sleep/collection gaps; approved profiles retain their existing rearm policy.
