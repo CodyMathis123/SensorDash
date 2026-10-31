@@ -139,12 +139,13 @@ internal sealed class TelemetryExportWorker(
                 return;
             }
             options.Validate();
-            // Bootstrap the read cursor index before the fan worker starts.
-            database.EnsureTelemetryIndex();
             var token = File.ReadAllText(options.TokenFile).Trim();
             if (token.Length < 40 || token.Any(c => !Uri.IsHexDigit(c)))
                 throw new InvalidDataException("Telemetry token must contain at least 40 hexadecimal characters.");
             using var ca = X509CertificateLoader.LoadCertificateFromFile(options.CaCertificateFile);
+            // Only migrate/index the archive when the opt-in receiver credentials
+            // are present and valid; never burden fan-control startup otherwise.
+            database.EnsureTelemetryIndex();
             using var handler = new HttpClientHandler();
             handler.ServerCertificateCustomValidationCallback = (_, cert, _, errors) =>
             {
