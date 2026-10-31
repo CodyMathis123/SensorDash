@@ -16,9 +16,71 @@ internal sealed class TelemetryConfigurationStatus
     public string HostLabel { get; init; } = "";
     public bool TokenReady { get; init; }
     public bool CaReady { get; init; }
+    // The exporter reopens its own HTTPS session when settings change. It does
+    // not restart the Windows hardware-control collector.
     public bool RestartRequired { get; init; }
+    public string RuntimeState { get; init; } = "disabled";
+    public DateTimeOffset? LastDeliveredUtc { get; init; }
+    public string LastFailureClass { get; init; } = "";
+    public int ReloadCount { get; init; }
     public bool Configured { get; init; }
     public string Note { get; init; } = "Export status is configuration-only; confirm samples in Grafana.";
+}
+
+internal sealed record ExportRuntimeSnapshot(
+    string State, DateTimeOffset? LastDeliveredUtc, string LastFailureClass, int ReloadCount);
+
+// Reporting is strictly observational. These fields contain no token, CA,
+// URL, sensor identity, event message or fan-control command.
+internal static class TelemetryExportRuntime
+{
+    private static readonly object Gate = new();
+    private static string _state = "disabled";
+    private static DateTimeOffset? _lastDelivered;
+    private static string _lastFailure = "";
+    private static int _reloads;
+
+    internal static ExportRuntimeSnapshot Snapshot()
+    {
+        lock (Gate) return new(_state, _lastDelivered, _lastFailure, _reloads);
+    }
+    internal static void Disabled()
+    {
+        lock (Gate) { _state = "disabled"; _lastFailure = ""; }
+    }
+    internal static void Running()
+    {
+        lock (Gate) { _state = "running"; _lastFailure = ""; }
+    }
+    internal static void Delivered()
+    {
+        lock (Gate) { _lastDelivered = DateTimeOffset.UtcNow; _state = "running"; _lastFailure = ""; }
+    }
+    internal static void Failed(Exception e)
+    {
+        lock (Gate) { _state = "retrying"; _lastFailure = e.GetType().Name; }
+    }
+    internal static void Reloading()
+    {
+        lock (Gate) { _state = "reloading"; _lastFailure = ""; _reloads++; }
+    }
+
+    internal static string Fingerprint(params string[] paths)
+    {
+        // Check contents, not only NTFS write timestamps: an atomic file
+        // replacement or same-size token rotation must always be detected.
+        // Never log the fingerprint or secret contents.
+        using var hash = System.Security.Cryptography.SHA256.Create();
+        foreach (var path in paths)
+        {
+            var bytes = File.Exists(path) ? File.ReadAllBytes(path) : [];
+            hash.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            var delimiter = new byte[] { 0 };
+            hash.TransformBlock(delimiter, 0, delimiter.Length, null, 0);
+        }
+        hash.TransformFinalBlock([], 0, 0);
+        return Convert.ToHexString(hash.Hash!);
+    }
 }
 
 internal static class TelemetryConfiguration
@@ -69,8 +131,7 @@ internal static class TelemetryConfiguration
                 ? Path.Combine(directory, "telemetry-token.txt") : options.TokenFile;
             string caFile = string.IsNullOrWhiteSpace(options.CaCertificateFile)
                 ? Path.Combine(directory, "telemetry-ca.crt") : options.CaCertificateFile;
-            bool changedAfterStartup = File.Exists(path) &&
-                File.GetLastWriteTimeUtc(path) > System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            var runtime = TelemetryExportRuntime.Snapshot();
             return new TelemetryConfigurationStatus
             {
                 Configured = File.Exists(path),
@@ -79,7 +140,11 @@ internal static class TelemetryConfiguration
                 HostLabel = options.HostLabel,
                 TokenReady = File.Exists(tokenFile),
                 CaReady = File.Exists(caFile),
-                RestartRequired = changedAfterStartup,
+                RestartRequired = false,
+                RuntimeState = runtime.State,
+                LastDeliveredUtc = runtime.LastDeliveredUtc,
+                LastFailureClass = runtime.LastFailureClass,
+                ReloadCount = runtime.ReloadCount,
             };
         }
     }
@@ -203,6 +268,16 @@ internal static class TelemetryConfigurationSelfTest
                         sid != new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)))
                 throw new InvalidOperationException("Telemetry config: credential ACL is not restricted.");
             var active = TelemetryConfiguration.Save(candidate with { Enabled = true }, dir);
+            if (active.RestartRequired) throw new InvalidOperationException("Telemetry export must hot-reload.");
+            var oldFingerprint = TelemetryExportRuntime.Fingerprint(
+                Path.Combine(dir, "telemetry-export.json"),
+                Path.Combine(dir, "telemetry-token.txt"));
+            File.WriteAllText(Path.Combine(dir, "telemetry-token.txt"), new string('b', 64));
+            var freshFingerprint = TelemetryExportRuntime.Fingerprint(
+                Path.Combine(dir, "telemetry-export.json"),
+                Path.Combine(dir, "telemetry-token.txt"));
+            if (oldFingerprint == freshFingerprint)
+                throw new InvalidOperationException("Token rotation must trigger export reload.");
             if (!active.Enabled || !active.CaReady || !active.TokenReady)
                 throw new InvalidOperationException("Telemetry config: readiness reporting failed.");
         }
