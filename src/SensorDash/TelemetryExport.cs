@@ -195,8 +195,8 @@ internal sealed class TelemetryExportWorker(
                             var current = TelemetryMetadata.Build(latest, state.Settings, host);
                             if (!current.SetEquals(lastMetadata) || now - lastMetadataAt >= 120_000)
                             {
-                                var payload = TelemetryMetadata.Serialize(current, lastMetadata, now);
-                                foreach (var chunk in TelemetryMetadata.Chunks(payload))
+                                var metadataPayload = TelemetryMetadata.Serialize(current, lastMetadata, now);
+                                foreach (var chunk in TelemetryMetadata.Chunks(metadataPayload))
                                 {
                                     using var metadataRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
                                     metadataRequest.Headers.Authorization =
