@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 
-public sealed record PipeCommand(string Op, string[]? Ids = null, double? Hours = null, DashboardSettings? Settings = null);
+public sealed record PipeCommand(string Op, string[]? Ids = null, double? Hours = null, DashboardSettings? Settings = null, TelemetryConfigurationUpdate? Telemetry = null);
 public static class PipeProtocol
 {
     public const string Name = "SensorDash.Telemetry.v1";
@@ -94,6 +94,8 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                 {
                     "live" => state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Waiting for collector..."),
                     "settings" => state.Settings,
+                    "telemetrySettings" => TelemetryConfiguration.Snapshot(),
+                    "saveTelemetrySettings" when req.Telemetry != null => TelemetryConfiguration.Save(req.Telemetry),
                     "collectionGroups" => HardwareCollection.Groups,
                     "saveSettings" when req.Settings != null => Save(req.Settings),
                     "events" => db.ReadEvents(),

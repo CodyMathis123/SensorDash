@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -155,6 +155,30 @@ app.MapPut("/api/settings", async (HttpContext ctx) =>
             : await ProxyAsync(new PipeCommand("saveSettings", Settings: updated), ctx.RequestAborted);
     }
     catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
+});
+// Configuration changes are local to the Windows collector. No HTTP endpoint
+// ever returns the bearer token or certificate PEM. Never trust cross-origin
+// pages with service-owned secrets.
+app.MapGet("/api/telemetry-config", async (CancellationToken ct) =>
+    await ProxyAsync(new PipeCommand("telemetrySettings"), ct));
+app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
+{
+    if (ctx.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
+        ctx.Request.Headers["X-SensorDash-Action"].ToString() != "telemetry-config" ||
+        ctx.Request.ContentType is not string mime ||
+        !mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+        return Results.StatusCode(403);
+    if (ctx.Request.ContentLength is > 24_576)
+        return Results.StatusCode(413);
+    try
+    {
+        var update = await JsonSerializer.DeserializeAsync<TelemetryConfigurationUpdate>(
+            ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
+        return update is null
+            ? Results.BadRequest("Invalid telemetry configuration.")
+            : await ProxyAsync(new PipeCommand("saveTelemetrySettings", Telemetry: update), ctx.RequestAborted);
+    }
+    catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
 });
 app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken ct) =>
 {
