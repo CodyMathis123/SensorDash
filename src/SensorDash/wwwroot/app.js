@@ -157,6 +157,13 @@ function settingsCandidates(field){
   .sort((a,b)=>label(a).localeCompare(label(b)));
 }
 
+function telemetryRuntimeText(cfg){
+ const last=cfg?.lastDeliveredUtc?new Date(cfg.lastDeliveredUtc).toLocaleString():'No delivery yet';
+ return 'Exporter: '+(cfg?.runtimeState||'disabled')+
+  ' · last delivery: '+last+
+  (cfg?.lastFailureClass?' · retry reason: '+cfg.lastFailureClass:'')+
+  ' · session reloads: '+(cfg?.reloadCount||0);
+}
 function telemetryConfigPanel(){
  const cfg=S.telemetryConfig;
  if(!cfg)return panel('Pi telemetry export','Outbound HTTPS to the Pi',
@@ -179,15 +186,21 @@ function telemetryConfigPanel(){
   '<textarea id="telemetryCa" rows="3" spellcheck="false" placeholder="'+
   (cfg.caReady?'Installed — leave blank to keep':'Paste Pi-issued public CA certificate')+'"></textarea></div></div>'+
   '<p class="note">Status: '+(cfg.enabled?'Enabled':'Disabled')+' · token '+ready(cfg.tokenReady)+
-   ' · CA '+ready(cfg.caReady)+(cfg.restartRequired?' · Collector restart required':'')+'</p>'+
+   ' · CA '+ready(cfg.caReady)+'</p>'+
+   '<p class="note" id="telemetryRuntime">'+esc(telemetryRuntimeText(cfg))+'</p>'+
   '<p class="note">Secrets remain in ProgramData, are never returned to the browser and do not affect fan-control approval. '+
-  'Saving these settings never restarts the Windows service.</p>'+
+  'The outbound HTTPS exporter automatically reloads these settings without restarting the service or interrupting fan control.</p>'+
   '<button type="button" class="btn secondary" id="saveTelemetryConfig">Save exporter settings</button>');
 }
 async function loadTelemetryConfig(){
  try{
+  const before=S.telemetryConfig;
   S.telemetryConfig=await fetchJSON('/api/telemetry-config');
-  if(S.view==='settings')render();
+  if(S.view!=='settings')return;
+  if(!before){render();return;}
+  // Never replace the Settings form while an operator is typing a bearer.
+  const line=byId('telemetryRuntime');
+  if(line)line.textContent=telemetryRuntimeText(S.telemetryConfig);
  }catch(e){console.warn('Telemetry configuration unavailable:',e.message);}
 }
 async function saveTelemetryConfig(){
@@ -206,7 +219,7 @@ async function saveTelemetryConfig(){
   });
   if(!r.ok)throw new Error('HTTP '+r.status+'. Verify HTTPS URL and credentials.');
   S.telemetryConfig=await r.json();
-  toast('Telemetry saved. Restart the collector when it is safe to apply the change.');
+  toast('Exporter configuration saved. Outbound HTTPS reconnects automatically.');
   render();
  }catch(e){toast('Could not save exporter: '+e.message);}
 }
@@ -229,14 +242,14 @@ function settingsView(){
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
  panel('Collection intervals','Configure hardware sampling, logging and retention',
  '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
- ['saveEverySeconds','History save interval (sec)'],['retentionDays','History retention (days)']]
+ ['saveEverySeconds','Local recording interval (sec)'],['retentionDays','Local retry-buffer retention (days)']]
  .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="'+(['storagePollSeconds','saveEverySeconds'].includes(key)?5:1)+'" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" title="'+(key==='retentionDays'?'1–1,095 days. Older history is deleted.':key==='fastPollSeconds'?'1–30 seconds':'5–120 seconds')+'" value="'+cfg[key]+'"></div>').join('')+
  '</div>')+
  panel('Recorded sensors','Choose what to monitor and save',
- '<div class="w-history-controls"><label>History recording mode<select id="historyMode">'+
+ '<div class="w-history-controls"><label>Sensors recorded for Pi telemetry<select id="historyMode">'+
  [['balanced','Balanced · key temperatures, fans, power and activity'],
   ['in-use','In use · cooling, tray, curves, alerts and pins'],
-  ['all','All sensors · largest history database']].map(([val,text])=>
+  ['all','All sensors · higher local archive and Pi ingest load']].map(([val,text])=>
    '<option value="'+val+'" '+(cfg.historyMode===val?'selected':'')+'>'+esc(text)+'</option>').join('')+
  '</select></label>'+
  '</div>'+
@@ -257,7 +270,7 @@ function settingsView(){
    ).join(''):'<p class="note">No devices discovered. Family options remain available.</p>')+
  '</div>'+
  '<p class="note">Paused devices stop updating their readings.</p>'+
- '<h3 class="sensor-used-title">Exclude from history</h3>'+
+ '<h3 class="sensor-used-title">Exclude from local recording</h3>'+
  '<div class="w-history-types">'+types.map(t=>
   '<label class="collection-toggle"><input type="checkbox" data-history-exclude="'+esc(t)+'" '+
   ((cfg.excludedHistoryHardwareTypes||[]).includes(t)?'checked':'')+'>'+
@@ -608,7 +621,7 @@ async function bootstrap(){
    setInterval(loadSimulation,2000);
    setInterval(loadFanControl,3000);
    setInterval(()=>loadDiagnostics(false),30000);
-   setInterval(()=>{if(S.view==='settings')loadStatus(true)},30000);
+   setInterval(()=>{if(S.view==='settings'){loadStatus(true);void loadTelemetryConfig();}},30000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
    byId('content').innerHTML='<div class="help">Could not connect to the local API: '+esc(err.message)+'. Restart SensorDash.exe and refresh this page.</div>';
