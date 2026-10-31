@@ -61,6 +61,19 @@ public sealed class DashboardNetworkOptions
         return false;
     }
 
+    // DNS-rebinding defense: browsers on a trusted LAN must address the host
+    // by the actual local IP; arbitrary Host names are not accepted.
+    public static bool IsAllowedHost(string? host, IPAddress? interfaceAddress, IPAddress? clientAddress)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        if (IsLocalClient(clientAddress) &&
+            string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!IPAddress.TryParse(host, out var target) || interfaceAddress is null) return false;
+        if (target.IsIPv4MappedToIPv6) target = target.MapToIPv4();
+        if (interfaceAddress.IsIPv4MappedToIPv6) interfaceAddress = interfaceAddress.MapToIPv4();
+        return target.Equals(interfaceAddress);
+    }
+
     public static bool CanMutate(IPAddress? address) => IsLocalClient(address);
 }
 
@@ -86,6 +99,13 @@ public static class DashboardNetworkOptionsSelfTest
             "169.254.1.1", "1.1.1.1", "2001:4860:4860::8888" })
             Check(!DashboardNetworkOptions.IsTrustedClient(IPAddress.Parse(address)), "public blocked " + address);
         Check(!DashboardNetworkOptions.IsTrustedClient(null) && !DashboardNetworkOptions.CanMutate(null), "null denied");
+        var local=IPAddress.Parse("192.168.1.20");
+        var lanClient=IPAddress.Parse("192.168.1.11");
+        Check(DashboardNetworkOptions.IsAllowedHost("192.168.1.20",local,lanClient), "numeric LAN host allowed");
+        Check(!DashboardNetworkOptions.IsAllowedHost("attacker.example",local,lanClient), "DNS rebinding rejected");
+        Check(!DashboardNetworkOptions.IsAllowedHost("localhost",local,lanClient), "remote localhost rejected");
+        Check(!DashboardNetworkOptions.IsAllowedHost("192.168.1.21",local,lanClient), "other host IP rejected");
+        Check(DashboardNetworkOptions.IsAllowedHost("localhost",IPAddress.Loopback,IPAddress.Loopback), "local hostname allowed");
         var directory = Path.Combine(Path.GetTempPath(), "SensorDash-network-test-" + Guid.NewGuid().ToString("N"));
         try
         {
