@@ -42,10 +42,6 @@ jobs:
           node --check src/SensorDash/wwwroot/workspace-locks.js
           node --check src/SensorDash/wwwroot/fan-feedback.js
           node --check src/SensorDash/wwwroot/cooling-insights.js
-          node --check src/SensorDash/wwwroot/cooling-timeline.js
-          node --check src/SensorDash/wwwroot/chart-gaps.js
-          node --check src/SensorDash/wwwroot/chart-time-axis.js
-          node --check src/SensorDash/wwwroot/history-insights.js
           node --check src/SensorDash/wwwroot/cooling-electrical.js
       - name: Test Settings alias and threshold pickers
         run: node scripts/test-settings-pickers.cjs
@@ -57,12 +53,6 @@ jobs:
         run: node scripts/test-workspace.cjs
       - name: Test cooling autosave and concurrent settings writes
         run: node scripts/test-cooling-autosave.cjs
-      - name: Test gap-aware charts and hover behavior
-        run: node scripts/test-chart-gaps.cjs
-      - name: Test multi-day calendar axes and date tooltips
-        run: node scripts/test-chart-time-axis.cjs
-      - name: Test overview peaks and storage insights
-        run: node scripts/test-history-insights.cjs
       - name: Validate packaged cooling preset catalog
         run: node scripts/test-cooling-presets.cjs
       - name: Test fan and pump electrical component modeling

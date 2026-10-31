@@ -19,7 +19,7 @@ public static class CollectorClient
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(
-            request.Op is "historyStats" or "historyStorage" ? 35 : 6));
+            6));
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.Name, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(timeout.Token);
         using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
@@ -102,22 +102,6 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                     "simulation" => new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest },
                     "fanOutputs" => liveFan.Snapshot(state.Settings),
                     "fanDebug" => liveFan.DebugLog(),
-                    "history" => new
-                    {
-                        series = db.ReadHistory((req.Ids ?? []).Where(s => s.Length <= 256).Distinct().Take(12).ToArray(),
-                            Math.Clamp(req.Hours ?? 1, 0.1, 24 * 30))
-                    },
-                    "historyStats" => new {
-                        series=db.ReadStatistics((req.Ids??[])
-                            .Where(x=>x.Length is >0 and <=256).Distinct().Take(8).ToArray(),
-                            double.IsFinite(req.Hours??720)?Math.Clamp(req.Hours??720,0.1,26280):720,
-                            (state.Latest?.Sensors??[]).ToDictionary(s=>s.Id,s=>s.Type),
-                            state.Settings.SaveEverySeconds),
-                        accessories=db.ReadAccessoryStatistics(state.Settings,
-                            (state.Latest?.Sensors??[]).ToDictionary(s=>s.Id,s=>s.Type),
-                            double.IsFinite(req.Hours??720)?Math.Clamp(req.Hours??720,0.1,26280):720)
-                    },
-                    "historyStorage" => db.ReadStorage(state.Latest,state.Settings),
                     "diagnostics" => Diagnostics(),
                     "status" => new
                     {

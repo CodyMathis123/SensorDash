@@ -117,9 +117,6 @@ app.MapGet("/fan-control-debug.js", () => Resource("fan-control-debug.js", "text
 app.MapGet("/workspace-locks.js", () => Resource("workspace-locks.js", "text/javascript; charset=utf-8"));
 app.MapGet("/fan-feedback.js", () => Resource("fan-feedback.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-insights.js", () => Resource("cooling-insights.js", "text/javascript; charset=utf-8"));
-app.MapGet("/cooling-timeline.js", () => Resource("cooling-timeline.js", "text/javascript; charset=utf-8"));
-app.MapGet("/chart-gaps.js", () => Resource("chart-gaps.js", "text/javascript; charset=utf-8"));
-app.MapGet("/chart-time-axis.js", () => Resource("chart-time-axis.js", "text/javascript; charset=utf-8"));
 app.MapGet("/cooling-electrical.js", () => Resource("cooling-electrical.js", "text/javascript; charset=utf-8"));
 app.MapGet("/driver-status.js", () => Resource("driver-status.js", "text/javascript; charset=utf-8"));
 app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"));
@@ -179,23 +176,6 @@ app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
     }
     catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
 });
-app.MapGet("/api/history", async (string? ids, double? hours, CancellationToken ct) =>
-{
-    var sensors = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Distinct().Take(12).ToArray();
-    return await ProxyAsync(new PipeCommand("history", sensors, hours), ct);
-});
-// Separate from chart buckets: preserve real recorded spikes and observed power
-// intervals. Restricted to explicit sensor IDs, with no additional polling.
-app.MapGet("/api/history/stats", async (string? ids, double? hours, CancellationToken ct) =>
-{
-    var selected=(ids??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries)
-        .Where(id=>id.Length is >0 and <=256).Distinct().Take(8).ToArray();
-    var span=double.IsFinite(hours??720)?Math.Clamp(hours??720,0.1,26280):720;
-    return await ProxyAsync(new PipeCommand("historyStats",selected,span),ct);
-});
-app.MapGet("/api/history/storage", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("historyStorage"),ct));
 app.MapGet("/api/events", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("events"), ct));
 app.MapGet("/api/simulation", async (CancellationToken ct) =>
