@@ -44,7 +44,11 @@ Sensor aliases are intentionally **not** included on the raw measurement series,
 
 Grafana's new `SensorDash · Cooling Systems` view joins the raw sensor data with active component bindings without duplicating measurements. See the [cooling Grafana guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/pi4-home-infrastructure/docs/COOLING-GRAFANA.md).
 
-Derived fan/pump watts with measurement provenance and calculation revision remain **future work**. Cooling editor and electrical calibrations remain exclusively in SensorDash. If the Pi is unreachable, snapshots retry, but existing local history retention still limits raw backfill.
+**Fan and pump watts are now archived at capture time**, using the existing `AccessoryPowerModel.Estimate` C# function already used by SensorDash history. A new `accessory_power` table in the existing SQLite database records system/component IDs, watts, measurement source (`measured`, `calibrated`, `curve` or `rated`) and a deterministic 16-hex calibration fingerprint. **The electrical calculation does not multiply whole-group calibrated watts by fan count again.** Measurements with stale tachometer observations are not fabricated, and the new table is subject to the existing retention cleanup. Failures in this optional archive are logged without interrupting fan control. A separate `telemetry-accessory-cursor.json` ensures retry/backfill uses the original archived estimate, not whichever calibration is currently configured.
+
+The Pi receives `sensordash_accessory_power_value` and can join it to `sensordash_component_info_value` for human-readable names. A change to the fan quantity, calibration curve or measurement sensor creates a new `revision` label, whereas renaming the component does not. The new Grafana **Fan & Pump Electricity** dashboard shows measured-only, rated, calibrated and curve-derived wattage separately.
+
+**Gap-aware watt-hours and coverage are not yet exported.** Don't infer electricity consumption by connecting power samples across sleep/shutdown gaps or extrapolating rated wattage. The existing SensorDash historical C# integrator continues to own those calculations until a real parity comparison is complete. Cooling editor and electrical calibration stay exclusively in SensorDash. If the Pi is unreachable, snapshots retry, but existing local history retention still limits raw backfill.
 
 ## Diagnosis
 
