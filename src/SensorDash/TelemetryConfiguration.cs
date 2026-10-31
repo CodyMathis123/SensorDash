@@ -1,9 +1,10 @@
 using System.Text.Json;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 
 // A display-safe configuration surface. Collector stores credentials on disk
 // and does not send tokens or certificate bytes back to the desktop web UI.
-public sealed record TelemetryConfigurationUpdate(bool Enabled, string Endpoint, string HostLabel);
+public sealed record TelemetryConfigurationUpdate(bool Enabled, string Endpoint, string HostLabel, string? Token = null, string? CaCertificatePem = null);
 
 internal sealed class TelemetryConfigurationStatus
 {
@@ -62,6 +63,29 @@ internal static class TelemetryConfiguration
             throw new InvalidDataException("Use a short host label containing letters, numbers, dots, dashes or underscores.");
         if (endpoint.Length == 0 && requested.Enabled)
             throw new InvalidDataException("An HTTPS collector endpoint is required to enable export.");
+        // Raw credentials are accepted only on explicit save, over the local
+        // same-origin management endpoint. GET never returns their bytes.
+        var newToken = (requested.Token ?? "").Trim();
+        var newCa = (requested.CaCertificatePem ?? "").Trim();
+        if (newToken.Length > 0 && !Regex.IsMatch(newToken, @"^[A-Fa-f0-9]{40,128}$"))
+            throw new InvalidDataException("Telemetry bearer must contain 40–128 hexadecimal characters.");
+        if (newCa.Length > 0)
+        {
+            if (newCa.Length > 16_384 || !newCa.StartsWith("-----BEGIN CERTIFICATE-----", StringComparison.Ordinal) ||
+                !newCa.EndsWith("-----END CERTIFICATE-----", StringComparison.Ordinal))
+                throw new InvalidDataException("Paste a PEM-encoded CA certificate (not a private key).");
+            try
+            {
+                using var candidate = X509Certificate2.CreateFromPem(newCa);
+                var caConstraints = candidate.Extensions.OfType<X509BasicConstraintsExtension>().FirstOrDefault();
+                if (caConstraints?.CertificateAuthority != true)
+                    throw new InvalidDataException("The certificate must be a CA certificate.");
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                throw new InvalidDataException("The CA certificate could not be parsed.");
+            }
+        }
         lock (Gate)
         {
             Directory.CreateDirectory(directory);
@@ -77,6 +101,18 @@ internal static class TelemetryConfiguration
             if (string.IsNullOrWhiteSpace(existing.CaCertificateFile))
                 existing.CaCertificateFile = Path.Combine(directory, "telemetry-ca.crt");
             if (endpoint.Length > 0) existing.Validate();
+            if (newToken.Length > 0)
+            {
+                var nextToken = existing.TokenFile + ".tmp";
+                File.WriteAllText(nextToken, newToken + Environment.NewLine);
+                File.Move(nextToken, existing.TokenFile, overwrite: true);
+            }
+            if (newCa.Length > 0)
+            {
+                var nextCa = existing.CaCertificateFile + ".tmp";
+                File.WriteAllText(nextCa, newCa + Environment.NewLine);
+                File.Move(nextCa, existing.CaCertificateFile, overwrite: true);
+            }
             if (existing.Enabled && (!File.Exists(existing.TokenFile) || !File.Exists(existing.CaCertificateFile)))
                 throw new InvalidDataException("Install the Pi-issued telemetry token and CA certificate before enabling export.");
             var temp = path + ".tmp";
@@ -122,6 +158,11 @@ internal static class TelemetryConfigurationSelfTest
             } catch (InvalidDataException) { }
             File.WriteAllText(Path.Combine(dir, "telemetry-token.txt"), "test-token-placeholder");
             File.WriteAllText(Path.Combine(dir, "telemetry-ca.crt"), "test-cert-placeholder");
+            var actualSecret = "a".PadRight(64, 'a');
+            var withToken = TelemetryConfiguration.Save(candidate with { Token = actualSecret }, dir);
+            if (withToken.Enabled || !withToken.TokenReady ||
+                JsonSerializer.Serialize(withToken, JsonSerializerOptions.Web).Contains(actualSecret, StringComparison.Ordinal))
+                throw new InvalidOperationException("Telemetry config: secret leaked or missing.");
             var active = TelemetryConfiguration.Save(candidate with { Enabled = true }, dir);
             if (!active.Enabled || !active.CaReady || !active.TokenReady)
                 throw new InvalidOperationException("Telemetry config: readiness reporting failed.");
