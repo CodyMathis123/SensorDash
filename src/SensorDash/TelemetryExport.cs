@@ -130,6 +130,7 @@ internal sealed class TelemetryExportWorker(
         var settingsFile = Path.Combine(directory, "telemetry-export.json");
         var cursorFile = Path.Combine(directory, "telemetry-export-cursor.json");
         var metadataFile = Path.Combine(directory, "telemetry-export-metadata.json");
+        var accessoryCursorFile = Path.Combine(directory, "telemetry-accessory-cursor.json");
         TelemetryExportOptions options;
         try
         {
@@ -176,6 +177,15 @@ internal sealed class TelemetryExportWorker(
                 cursor = new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff");
                 SaveCursor(cursorFile, cursor);
             }
+            // A second cursor tracks derived accessory watts independently.
+            // On first activation there is no surprise historical backfill.
+            var accessoryCursor = File.Exists(accessoryCursorFile)
+                ? JsonSerializer.Deserialize<AccessoryCursor>(
+                    File.ReadAllText(accessoryCursorFile), JsonSerializerOptions.Web)
+                    ?? throw new InvalidDataException("Invalid accessory telemetry cursor.")
+                : new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\\uffff", "\\uffff");
+            if (!File.Exists(accessoryCursorFile))
+                SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
             // The last server-acknowledged catalog is kept separate from the
             // data cursor: edits to aliases or cooling mappings may remove
             // previously published tag sets, which require explicit 0 tombstones.
@@ -226,23 +236,39 @@ internal sealed class TelemetryExportWorker(
                         }
                     }
                     var rows = database.ReadTelemetryBatch(cursor);
-                    if (rows.Count == 0)
+                    if (rows.Count > 0)
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(7), stop);
-                        continue;
+                        var types = (state.Latest?.Sensors ?? [])
+                            .ToDictionary(s => s.Id, s => s.Type, StringComparer.Ordinal);
+                        var payload = TelemetryLineProtocol.Serialize(rows, host, types);
+                        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                        request.Content = new StringContent(payload, Encoding.UTF8, "text/plain");
+                        using var response = await client.SendAsync(request, stop);
+                        response.EnsureSuccessStatusCode();
+                        var last = rows[^1];
+                        cursor = new TelemetryCursor(last.TimestampMs, last.SensorId);
+                        SaveCursor(cursorFile, cursor);
                     }
-                    var types = (state.Latest?.Sensors ?? [])
-                        .ToDictionary(s => s.Id, s => s.Type, StringComparer.Ordinal);
-                    var payload = TelemetryLineProtocol.Serialize(rows, host, types);
-                    using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                    request.Content = new StringContent(payload, Encoding.UTF8, "text/plain");
-                    using var response = await client.SendAsync(request, stop);
-                    response.EnsureSuccessStatusCode();
-                    var last = rows[^1];
-                    cursor = new TelemetryCursor(last.TimestampMs, last.SensorId);
-                    SaveCursor(cursorFile, cursor);
-                    await Task.Delay(TimeSpan.FromMilliseconds(rows.Count >= 384 ? 500 : 3000), stop);
+                    // Archive-time estimates are never recalculated from the
+                    // current calibration during retries or sleep resumes.
+                    var power = database.ReadAccessoryPowerBatch(
+                        accessoryCursor.TimestampMs, accessoryCursor.System, accessoryCursor.Component);
+                    if (power.Count > 0)
+                    {
+                        using var powerRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                        powerRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                        powerRequest.Content = new StringContent(
+                            AccessoryPowerExportProtocol.Serialize(power, host), Encoding.UTF8, "text/plain");
+                        using var powerResponse = await client.SendAsync(powerRequest, stop);
+                        powerResponse.EnsureSuccessStatusCode();
+                        var last = power[^1];
+                        accessoryCursor = new AccessoryCursor(last.TimestampMs, last.System, last.Component);
+                        SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
+                    }
+                    await Task.Delay(TimeSpan.FromMilliseconds(
+                        rows.Count >= 384 || power.Count >= 256 ? 500 :
+                        rows.Count > 0 || power.Count > 0 ? 3000 : 7000), stop);
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
                 catch (Exception e)
@@ -257,6 +283,13 @@ internal sealed class TelemetryExportWorker(
         {
             logger.LogError(exception, "Telemetry exporter could not initialize; local control and history remain available.");
         }
+    }
+
+    internal static void SaveAccessoryCursor(string path, AccessoryCursor cursor)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(cursor, JsonSerializerOptions.Web));
+        File.Move(tmp, path, true);
     }
 
     internal static void SaveCursor(string path, TelemetryCursor cursor)
