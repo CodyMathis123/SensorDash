@@ -104,6 +104,7 @@ app.Use(async (context, next) =>
 {
     var remoteAddress = context.Connection.RemoteIpAddress;
     if (!DashboardNetworkOptions.IsTrustedClient(remoteAddress) ||
+        !DashboardNetworkOptions.IsAllowedHost(context.Request.Host.Host, context.Connection.LocalIpAddress, remoteAddress) ||
         (!DashboardNetworkOptions.CanMutate(remoteAddress) &&
          !HttpMethods.IsGet(context.Request.Method) &&
          !HttpMethods.IsHead(context.Request.Method)))
