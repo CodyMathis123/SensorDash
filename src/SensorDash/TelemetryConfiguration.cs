@@ -70,16 +70,14 @@ internal static class TelemetryExportRuntime
         // Check contents, not only NTFS write timestamps: an atomic file
         // replacement or same-size token rotation must always be detected.
         // Never log the fingerprint or secret contents.
-        using var hash = System.Security.Cryptography.SHA256.Create();
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
         foreach (var path in paths)
         {
-            var bytes = File.Exists(path) ? File.ReadAllBytes(path) : [];
-            hash.TransformBlock(bytes, 0, bytes.Length, null, 0);
-            var delimiter = new byte[] { 0 };
-            hash.TransformBlock(delimiter, 0, delimiter.Length, null, 0);
+            hash.AppendData(File.Exists(path) ? File.ReadAllBytes(path) : Array.Empty<byte>());
+            hash.AppendData(new byte[] { 0 });
         }
-        hash.TransformFinalBlock([], 0, 0);
-        return Convert.ToHexString(hash.Hash!);
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 }
 
