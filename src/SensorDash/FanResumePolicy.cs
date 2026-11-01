@@ -5,6 +5,16 @@ internal static class FanResumePolicy
 {
     internal static readonly TimeSpan GapThreshold = TimeSpan.FromSeconds(20);
 
+    // Invalidate the *hardware connection* on a sleep-sized gap, not just
+    // the cached PWM duty. LibreHardwareMonitor can keep a seemingly valid
+    // Software mode while its underlying Super I/O handle no longer drives
+    // the physical header. Reopening Computer recreates its device handles,
+    // just like a collector service restart does.
+    internal static bool NeedsHardwareReopen(DateTimeOffset? previous,
+        DateTimeOffset now) =>
+        previous.HasValue && (now - previous.Value > GapThreshold ||
+                             now - previous.Value < TimeSpan.FromSeconds(-2));
+
     // Timed manual commissioning never survives an interrupted collection.
     // Persistent profiles are separately rearmed using the same gap detection.
     internal static bool EndManualAfterGap(DateTimeOffset? previous,
@@ -14,8 +24,6 @@ internal static class FanResumePolicy
     internal static bool NeedsRearm(DateTimeOffset? previous, DateTimeOffset now,
         bool hasApprovedProfiles)
     {
-        if(!hasApprovedProfiles || !previous.HasValue)return false;
-        var gap=now-previous.Value;
-        return gap > GapThreshold || gap < TimeSpan.FromSeconds(-2);
+        return hasApprovedProfiles && NeedsHardwareReopen(previous, now);
     }
 }
