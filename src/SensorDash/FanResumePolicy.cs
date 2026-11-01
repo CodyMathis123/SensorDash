@@ -15,6 +15,13 @@ internal static class FanResumePolicy
         previous.HasValue && (now - previous.Value > GapThreshold ||
                              now - previous.Value < TimeSpan.FromSeconds(-2));
 
+    // A native Windows resume event is authoritative even when a quick
+    // suspend/wake interrupts fewer than 20 seconds of collection. A large
+    // polling gap is retained as a fallback when no OS signal arrives.
+    internal static bool ShouldReopenHardware(DateTimeOffset? previous,
+        DateTimeOffset now, bool windowsResumeNotified) =>
+        windowsResumeNotified || NeedsHardwareReopen(previous, now);
+
     // Timed manual commissioning never survives an interrupted collection.
     // Persistent profiles are separately rearmed using the same gap detection.
     internal static bool EndManualAfterGap(DateTimeOffset? previous,
