@@ -13,6 +13,8 @@ const bridge=read('src/SensorDash/ServiceBridge.cs');
 const writer=read('src/SensorDash/FanPwmChannels.cs');
 const persistent=read('src/SensorDash/PersistentFanProfiles.cs');
 const trace=read('src/SensorDash/FanControlTrace.cs');
+const nativeEvents=read('src/SensorDash/WindowsPowerResumeNotifications.cs');
+const policy=read('src/SensorDash/FanResumePolicy.cs');
 const now=new Date().toISOString();
 const visible={textContent:''};
 const actions=[],toasts=[];
