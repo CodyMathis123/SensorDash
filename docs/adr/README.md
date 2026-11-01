@@ -11,3 +11,4 @@ Use ADRs for durable decisions affecting architecture, dependencies, persistence
 | [0005](0005-cooling-preset-catalog.md) | Accepted | Reviewed JSON cooling presets packaged with the application |
 | [0007](0007-remote-telemetry-boundary.md) | Superseded for local UI by 0008 | Opt-in outbound-only telemetry, stable IDs, bounded cursors and schema evolution |
 | [0008](0008-local-control-observability.md) | Implemented on feature branch; physical verification pending | Windows controls and authoritative cooling configuration, Pi historical visualization |
+| [0009](0009-history-family-cadence.md) | Implemented on feature branch; Windows CI pending | Independent Storage/Network archive intervals; keep thermal history and Pi export unchanged |
