@@ -31,6 +31,17 @@ internal static class FanResumeSelfTest
         Check(!FanResumePolicy.NeedsRearm(now,now.AddSeconds(2),true),"Normal poll");
         Check(!FanResumePolicy.NeedsRearm(now,now.AddMinutes(3),false),
             "No rearm without an approved profile");
+        // A fast sleep and wake can last only 2–5 seconds, below the old
+        // 20-second polling threshold. Windows' actual resume event must
+        // trigger reinitialization even when normal polling looks continuous.
+        Check(!FanResumePolicy.ShouldReopenHardware(now,now.AddSeconds(3),false),
+            "Normal short interval must not reinitialize live hardware");
+        Check(FanResumePolicy.ShouldReopenHardware(now,now.AddSeconds(3),true),
+            "Short Windows sleep/resume must reopen stale hardware handles");
+        Check(FanResumePolicy.ShouldReopenHardware(now,now.AddSeconds(65),false),
+            "Long gap fallback still reopens hardware without OS notification");
+        Check(!FanResumePolicy.ShouldReopenHardware(null,now,false),
+            "First collector iteration is not a resume");
         Check(FanResumePolicy.NeedsRearm(now,now.AddSeconds(30),true),
             "Large gap implies resume or collection stall");
         Check(FanResumePolicy.NeedsRearm(now,now.AddSeconds(-5),true),
