@@ -13,6 +13,7 @@ SensorDash is the local Windows hardware-control and telemetry-export companion 
 | `src/SensorDash/FanProfilePlanner.cs`, `FanCurveMath.cs`, `PersistentFanProfiles.cs` | Planning, interpolation and durable approved profiles |
 | `src/SensorDash/WorkspaceModels.cs` | Workspace/cooling configuration models |
 | `src/SensorDash/HistoryStatistics.cs`, `CoolingEventRecorder.cs` | History aggregation and cooling events |
+| `src/SensorDash/HistoryRecordingPolicy.cs`, `HistoryRecordingSelfTest.cs` | Per-family archive cadence without altering collection, PWM, or exporter replay |
 | `src/SensorDash/*SelfTest.cs` | Hardware-free backend regression checks |
 | `src/SensorDash/wwwroot/app.js` | Compact local control UI, navigation, sensor status and telemetry/export settings |
 | `src/SensorDash/wwwroot/workspace.js` | Workspace editors and serialized settings persistence |

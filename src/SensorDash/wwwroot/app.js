@@ -240,11 +240,18 @@ function settingsView(){
    .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
- panel('Collection intervals','Configure hardware sampling, logging and retention',
- '<div class="form-grid">'+[['fastPollSeconds','Core sensor refresh (sec)'],['storagePollSeconds','Storage refresh (sec)'],
- ['saveEverySeconds','Local recording interval (sec)'],['retentionDays','Local retry-buffer retention (days)']]
- .map(([key,title])=>'<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="'+(['storagePollSeconds','saveEverySeconds'].includes(key)?5:1)+'" max="'+(key==='retentionDays'?'1095':key==='fastPollSeconds'?'30':'120')+'" title="'+(key==='retentionDays'?'1–1,095 days. Older history is deleted.':key==='fastPollSeconds'?'1–30 seconds':'5–120 seconds')+'" value="'+cfg[key]+'"></div>').join('')+
- '</div>')+
+ panel('Collection and history intervals','Live polling is independent from what is archived for Grafana',
+ '<div class="form-grid">'+[
+  ['fastPollSeconds','Core sensor refresh (sec)',1,30,'Controls live polling when fan control is inactive.'],
+  ['storagePollSeconds','Storage hardware refresh (sec)',5,120,'How often drive sensors are read; separate from archival.'],
+  ['saveEverySeconds','Important sensor history (sec)',5,120,'CPU, GPU, cooling, alerts, pinned sensors and default history.'],
+  ['storageHistorySeconds','Storage history (sec)',5,3600,'Drive telemetry not used by cooling, alerts or pins. Default: 60 seconds.'],
+  ['networkHistorySeconds','Network history (sec)',5,3600,'Network telemetry not used by cooling, alerts or pins. Default: 60 seconds.'],
+  ['retentionDays','Local retry-buffer retention (days)',1,1095,'Only the Windows SQLite retry buffer; Pi retention is independent.']
+ ].map(([key,title,min,max,tip])=>
+   '<div class="field"><label for="'+key+'">'+title+'</label><input id="'+key+'" type="number" min="'+min+'" max="'+max+'" title="'+esc(tip)+'" value="'+(cfg[key]??(key==='storageHistorySeconds'||key==='networkHistorySeconds'?60:''))+'"></div>'
+ ).join('')+
+ '</div><p class="note">Storage and Network history can be slower than live collection. Pins and sensors referenced by cooling, thresholds, tray widgets or curves keep the important-sensor cadence. Actual recording cannot be faster than the important-sensor interval. Existing Pi history is retained.</p>')+
  panel('Recorded sensors','Choose what to monitor and save',
  '<div class="w-history-controls"><label>Sensors recorded for Pi telemetry<select id="historyMode">'+
  [['balanced','Balanced · key temperatures, fans, power and activity'],
@@ -470,7 +477,7 @@ async function changeThreshold(id,remove=false){
 async function saveSettings(update=null,message='Settings saved'){
  const cfg=structuredClone(S.settings);
  cfg.aliases=cfg.aliases||{};cfg.highThresholds=cfg.highThresholds||{};
- for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
+ for(const key of ['fastPollSeconds','storagePollSeconds','saveEverySeconds','storageHistorySeconds','networkHistorySeconds','retentionDays'])cfg[key]=Number(byId(key).value);
  cfg.historyMode=byId('historyMode')?.value||'balanced';
  cfg.disabledCollectionGroups=[...document.querySelectorAll('[data-collect-group]:not(:checked)')]
    .map(el=>el.dataset.collectGroup);

@@ -410,7 +410,28 @@ jobs:
           path: ${{ runner.temp }}/sensordash-baseline
       - name: Verify MSI upgrade, repair, downgrade rejection and uninstall
         shell: pwsh
+        # Bound the WHOLE step. Individual msiexec operations have a 3-minute
+        # heartbeat watchdog, but a PowerShell/Windows Installer host hang can
+        # otherwise consume the entire 20-minute Windows build.
+        timeout-minutes: 8
         run: ./scripts/Test-MsiUpgrade.ps1
+      - name: Report MSI servicing diagnostics on failure
+        if: failure()
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          Write-Host 'MSI servicing failed or timed out; reporting disposable CI runner state'
+          Get-Service -Name msiserver,SensorDashCollector -ErrorAction SilentlyContinue |
+            Select-Object Name,Status | Format-Table | Out-String | Write-Host
+          Get-Process -Name msiexec,SensorDash -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,CPU,Responding | Format-Table | Out-String | Write-Host
+          $dir=Join-Path $env:RUNNER_TEMP 'sensordash-upgrade-test'
+          if (Test-Path $dir) {
+            Get-ChildItem $dir -Filter '*.log' | ForEach-Object {
+              Write-Host "### $($_.Name) ($($_.Length) bytes)"
+              Get-Content $_.FullName -Tail 40 -ErrorAction SilentlyContinue
+            }
+          }
       - name: Upload installer diagnostics
         if: always()
         uses: actions/upload-artifact@v7

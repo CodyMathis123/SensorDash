@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const nodes=Object.fromEntries(['fastPollSeconds','storagePollSeconds','saveEverySeconds','retentionDays','historyMode','refresh'].map(id=>[id,{value:id==='historyMode'?'balanced':'30',addEventListener(){}}]));
+const nodes=Object.fromEntries(['fastPollSeconds','storagePollSeconds','saveEverySeconds','storageHistorySeconds','networkHistorySeconds','retentionDays','historyMode','refresh'].map(id=>[id,{value:id==='historyMode'?'balanced':'30',addEventListener(){}}]));
 const fields=[];const writes=[];
 const context={structuredClone,console,setInterval(){},setTimeout(){},clearTimeout(){},
  document:{addEventListener(){},getElementById:id=>nodes[id]||null,querySelectorAll:selector=>fields.filter(f=>selector===f.selector)},
@@ -20,12 +20,20 @@ let html=app.settingsView();
 assert.match(html,/id="addAlias"/);assert.match(html,/Fan &lt;2&gt;/);
 const options=id=>html.split('id="'+id+'"')[1].split('</select>')[0];
 assert.doesNotMatch(options('newAliasId'),/value="cpu"/);assert.doesNotMatch(options('newThresholdId'),/value="cpu"/);
-assert.match(html,/Balanced · key temperatures/);assert.match(html,/In use · cooling/);assert.match(html,/All sensors · higher local archive and Pi ingest load/);
+assert.match(html,/Balanced · key temperatures/);
+assert.match(html,/id="storageHistorySeconds"/);
+assert.match(html,/id="networkHistorySeconds"/);
+assert.match(html,/Storage and Network history can be slower/);
+assert.match(html,/Pins and sensors referenced by cooling/);
+nodes.storageHistorySeconds.value='75';
+nodes.networkHistorySeconds.value='120';assert.match(html,/In use · cooling/);assert.match(html,/All sensors · higher local archive and Pi ingest load/);
 fields.push({selector:'[data-alias]',dataset:{alias:'cpu'},value:'Edited processor'});
 fields.push({selector:'[data-threshold]',dataset:{threshold:'cpu'},value:'80'});
 (async()=>{
  await app.addAlias('fan');assert.equal(writes.length,1);
- assert.equal(S.settings.aliases.fan,'Fan <2>');assert.equal(S.settings.aliases.cpu,'Edited processor');
+ assert.equal(S.settings.aliases.fan,'Fan <2>');
+ assert.equal(S.settings.storageHistorySeconds,75,'Storage history cadence must survive settings IPC');
+ assert.equal(S.settings.networkHistorySeconds,120,'Network history cadence must survive settings IPC');assert.equal(S.settings.aliases.cpu,'Edited processor');
  assert.equal(S.settings.highThresholds.cpu,80,'Adding an alias preserves pending threshold edits');
  await app.addAlias('fan');assert.equal(writes.length,1,'Duplicate adds do not write or overwrite');
  await app.addAlias('missing');assert.equal(writes.length,1);

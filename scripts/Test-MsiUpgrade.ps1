@@ -8,21 +8,45 @@ $scratch = Join-Path $env:RUNNER_TEMP 'sensordash-upgrade-test'
 New-Item -ItemType Directory -Force $scratch | Out-Null
 function Install-Msi($package, $operation, $label, $expectFailure = $false) {
     $log = Join-Path $scratch "$label.log"
-    Write-Host "Starting $label"
-    $p = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList "$operation `"$package`" /qn /norestart /L*v `"$log`"" -PassThru
-    if (!$p.WaitForExit(180000)) {
-        Get-Content $log -Tail 100
-        throw "$label exceeded three minutes; inspect the MSI log."
+    Write-Host ("[{0:u}] Starting {1}" -f (Get-Date).ToUniversalTime(), $label)
+    # PowerShell Start-Process can obscure startup stalls. Launch directly so
+    # every argument is passed separately and we get a real bounded process
+    # handle even when msiexec or Restart Manager is unresponsive.
+    $start = [System.Diagnostics.ProcessStartInfo]::new('msiexec.exe')
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    foreach ($argument in @($operation, $package, '/qn', '/norestart', '/L*v', $log)) {
+        [void]$start.ArgumentList.Add([string]$argument)
     }
-    $p.Refresh()
-    if ($expectFailure) {
-        if ($p.ExitCode -ne 1603 -or !(Select-String -Path $log -SimpleMatch 'A newer version of SensorDash is already installed.')) {
-            Get-Content $log -Tail 80
-            throw "Downgrade was not rejected by the upgrade rule: $($p.ExitCode)"
+    $p = [System.Diagnostics.Process]::Start($start)
+    if (!$p) { throw "Unable to launch $label msiexec" }
+    try {
+        Write-Host "Launched $label msiexec PID $($p.Id); verbose log: $log"
+        $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+        while (!$p.WaitForExit(10000)) {
+            Write-Host ("[{0:u}] {1} still active after {2:n0}s (PID {3})" -f
+                (Get-Date).ToUniversalTime(), $label, $elapsed.Elapsed.TotalSeconds, $p.Id)
+            if ($elapsed.Elapsed.TotalSeconds -ge 180) {
+                Write-Host "Last MSI log entries for stuck $label (if available):"
+                if (Test-Path $log) { Get-Content $log -Tail 80 -ErrorAction Continue }
+                throw "$label exceeded three minutes; MSI upgrade/servicing is hung"
+            }
         }
-    } elseif ($p.ExitCode -ne 0) {
-        Get-Content $log -Tail 80
-        throw "$label failed: $($p.ExitCode)"
+        $p.Refresh()
+        Write-Host ("[{0:u}] {1} returned exit code {2} after {3:n0}s" -f
+            (Get-Date).ToUniversalTime(), $label, $p.ExitCode, $elapsed.Elapsed.TotalSeconds)
+        if ($expectFailure) {
+            if ($p.ExitCode -ne 1603 -or !(Select-String -Path $log -SimpleMatch 'A newer version of SensorDash is already installed.')) {
+                Get-Content $log -Tail 80
+                throw "Downgrade was not rejected by the upgrade rule: $($p.ExitCode)"
+            }
+        } elseif ($p.ExitCode -ne 0) {
+            Get-Content $log -Tail 80
+            throw "$label failed: $($p.ExitCode)"
+        }
+    }
+    finally {
+        $p.Dispose()
     }
 }
 function Products {
