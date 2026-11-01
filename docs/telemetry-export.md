@@ -44,7 +44,7 @@ The follow-up build registers the **elevated collector** with the Windows suspen
 For manual validation after installing the new CI MSI:
 1. Confirm motherboard firmware fan fallback is safe, service is running, and actual radiator/NVMe RPM matches the active curve. The DDC remains tach-only.
 2. Sleep briefly and resume promptly, then compare requested duty and **measured RPM** (not just the stored profile state). Repeat for a much longer sleep.
-3. Open **Fan Control → Show recent log** or inspect the local protected `%ProgramData%\SensorDash\logs\fan-control.log` for `[HW-REOPEN]`, indicating the collection thread did a new hardware open after a Windows resume signal or a long gap. Check normal one-second polling does *not* repeatedly reopen.
+3. Open **Fan Control → Show recent log** or inspect the local protected `%ProgramData%\SensorDash\logs\fan-control.log` for `[HW-RESET]` followed by `[HW-REOPEN] reason=windows-resume` (a native wake signal) or `reason=polling-gap` (the long-gap fallback), indicating the collection thread reinitialized LHM without stopping the service. Check normal one-second polling does *not* repeatedly reopen.
 4. Compare with `SensorDashCollector` Windows service logs: registration should report native resume notifications active, or a warning that gap-only fallback remains. If short wake still fails, capture the before/after fan log and hardware status before restarting the service.
 5. Keep this as a **live Windows hardware acceptance gate**; synthetic policy tests and MSI build success cannot prove the motherboard's real PWM resumed.
 
