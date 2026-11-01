@@ -23,6 +23,8 @@ The receiver's strict allowlist accepts only:
 
 No private IP endpoint, domain-level DNS history, telemetry bearer, private CA key, arbitrary events, remote control messages, or arbitrary dynamic Influx tags are exported.
 
+Storage and Network now have separate local historical recording intervals (60 seconds by default), configured under SensorDash Settings. The 10-second important-sensor history continues for CPU/GPU/cooling and any pinned or referenced sensor, even if it belongs to Storage or Network. The Storage hardware polling interval is independent. Cached, unchanged storage observations do not create additional archived samples, and the Pi receives only committed SQLite rows. This changes future history volume, not existing Pi retention or fan-control polling.
+
 The worker persists separate cursors for raw samples, accessory watts and events. A successful receiver acknowledgement must occur before a cursor advances. Incomplete writes retry and a Pi outage never changes PWM. On first activation, archived numeric samples start from the newest retained sample rather than silently uploading the entire old database; events use their own bounded cursor.
 
 **Historical limitations:** no watt-hours are inferred through Windows sleep/shutdown gaps. Estimated accessory watts are source/revision-labeled and must not be conflated with a physical wall-power sensor. Current sample counts aren't precise per-sensor database sizes because VictoriaMetrics storage is compressed/shared. Missing coolant or flow probes remain genuinely absent.
