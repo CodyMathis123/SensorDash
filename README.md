@@ -16,6 +16,18 @@ The Windows interface has **Cooling Systems, Fan Control, Tray Readouts, Sensor 
 
 **Safety boundary:** No browser/Pi/Grafana endpoint can directly authorize, modify or release physical PWM. A locally approved fan profile is the only persistent control path. The Laing DDC pump remains tachometer-only; a fan pump mapping forbids manual PWM commissioning. Firmware restoration is best-effort on clean shutdown and interrupted manual tests; no software can guarantee recovery from sudden power loss.
 
+## Paired HomeAway end-to-end test
+
+The **complete feature checkout for this repository** is `chore/sensordash-telemetry-docs`. It includes the controls-only + HTTPS-export PR #13 and its documentation cleanup PR #14; use it with HomeAway's `chore/docs-and-legacy-cleanup` branch for the complete Pi/Grafana/Authelia/PC-control stack. Neither `Production` branch yet contains the whole migration.
+
+For a fresh Windows checkout:
+
+```powershell
+git clone -b chore/sensordash-telemetry-docs https://github.com/CodyMathis123/SensorDash.git
+```
+
+Before installing on the actual fan-controlling PC, review the [single two-repo integration and rollback guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/chore/docs-and-legacy-cleanup/docs/INTEGRATION-TEST.md), deploy the matching Pi receiver schema first, and use the validated CI-produced MSI from [PR #14](https://github.com/CodyMathis123/SensorDash/pull/14) rather than an old Production installer. SensorDash PR #12 (LAN/mobile Windows dashboard) is **not part of this pairing**: it targets the older Windows history UI and must be reviewed separately, not merged blindly.
+
 ## Getting started
 
 Build from the repository root on Windows with the .NET 10 SDK:
@@ -44,6 +56,10 @@ The outbound telemetry worker does **not** poll hardware a second time. It async
 Go to **Settings → Pi telemetry export** to configure the receiver, computer label, optional token and CA. The sender detects changes to the configuration/credential file contents and reopens **only its HTTPS session**; the privileged hardware collector keeps running without restart. The UI reports last delivery, current exporter state, retries and configuration reloads. It never restarts the fan controller.
 
 See [telemetry setup](docs/telemetry-export.md) and [control/observability ownership ADR](docs/adr/0008-local-control-observability.md).
+
+## Feature delivery status
+
+This controls-only + outbound telemetry design is implemented in [SensorDash PR #13](https://github.com/CodyMathis123/SensorDash/pull/13); it is **not yet the released `Production` MSI**. The separate [LAN/mobile dashboard PR #12](https://github.com/CodyMathis123/SensorDash/pull/12) targets the previous browser dashboard and requires a deliberate compatibility review with the controls-only UX before any merge. Do not treat the two as independent toggles or install both builds interchangeably. On Windows, use the CI-produced MSI only after its current revision passes validation; live fan/wake safety checks still belong to the operator.
 
 ## Development and rollout
 

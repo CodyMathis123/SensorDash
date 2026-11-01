@@ -58,6 +58,12 @@ public sealed class FanControlRuntime
         get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
 
+    // Called by the collection thread after a fresh LHM Computer.Open()
+    // following sleep. Records the recovery without creating a new fan
+    // authorization. Persistent profiles take over on the next Tick().
+    public void RecordHardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger) =>
+        _trace.HardwareReopened(gap, now, trigger);
+
     public object DebugLog() => _trace.ReadRecent();
     
     public object Snapshot(DashboardSettings? settings = null)
@@ -286,10 +292,17 @@ public sealed class FanControlRuntime
         }
     }
 
-    // Must be called before the Computer is reinitialized/closed or service exits.
-    public void ReleaseBeforeClose(Computer? computer, string reason)
+    // Both paths release physical control on the hardware thread; only
+    // collector shutdown/change is logged as STOP. Sleep reinit is HW-RESET.
+    public void ReleaseBeforeClose(Computer? computer, string reason) =>
+        ReleaseForHardwareClose(computer, reason, "STOP");
+
+    public void ReleaseBeforeHardwareReopen(Computer? computer, string reason) =>
+        ReleaseForHardwareClose(computer, reason, "HW-RESET");
+
+    private void ReleaseForHardwareClose(Computer? computer, string reason, string eventKind)
     {
-        _trace.Event("STOP",reason);
+        _trace.Event(eventKind,reason);
         _lastHardwareTick = null;
         Dictionary<string, IControl> channels;
         try { channels = computer == null ? [] : FindControls(computer); }

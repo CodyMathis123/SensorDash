@@ -611,16 +611,49 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     private Computer? _computer;
     private readonly PawnIoMonitor _pawnIo = new();
     private string? _activeCollectionSignature;
+    private DateTimeOffset? _lastCollectionStart;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
     private int _lastRetentionDays;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        // Native OS notification catches quick sleep/wake cycles which are too
+        // short for the old >20s polling-gap heuristic. Register once for the
+        // lifetime of the elevated collector; all reopens happen on this thread.
+        using var resumeNotifications = new WindowsPowerResumeNotifications(logger);
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
             var driver = _pawnIo.Read(cfg);
             try {
+                var now = DateTimeOffset.UtcNow;
                 var collectionSignature = HardwareCollection.Signature(cfg);
+                // Rewriting a cached PWM value alone is not reliable after
+                // S3 sleep: the old LHM Super I/O device object may retain
+                // Software mode but no longer own the physical output.
+                // Recreate the hardware connection on a sleep-sized gap,
+                // just as stopping/restarting the collector would, while
+                // preserving ONLY previously approved persistent profiles.
+                // All hardware Close/Open operations stay on this single
+                // collection thread. Temporary manual tests are released.
+                var resumeGap = _lastCollectionStart.HasValue
+                    ? now - _lastCollectionStart.Value : TimeSpan.Zero;
+                var windowsResume = resumeNotifications.ConsumePending();
+                var reopenForResume = _computer != null &&
+                    FanResumePolicy.ShouldReopenHardware(_lastCollectionStart, now, windowsResume);
+                _lastCollectionStart = now;
+                if (reopenForResume) {
+                    logger.LogWarning("Reopening LHM after {Reason}; collection gap={GapSeconds:0.0}s.",
+                        windowsResume ? "Windows resume notification" : "long polling gap",
+                        resumeGap.TotalSeconds);
+                    controls.ReleaseBeforeHardwareReopen(_computer,
+                        "Resume-sized collection gap; restoring firmware before hardware reinitialization.");
+                    try { _computer!.Close(); }
+                    catch (Exception closeError) {
+                        logger.LogWarning(closeError, "LHM hardware close after sleep/resume was not clean.");
+                    }
+                    _computer = null;
+                    _activeCollectionSignature = null;
+                }
                 if (_computer != null && _activeCollectionSignature != collectionSignature) {
                     // LHM's Computer family flags are applied during discovery.
                     // Reopen only when those flags change, not when users toggle
@@ -633,8 +666,10 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     _computer = HardwareCollection.CreateComputer(cfg);
                     _computer.Open();
                     _activeCollectionSignature = collectionSignature;
+                    if (reopenForResume)
+                        controls.RecordHardwareReopened(resumeGap, now,
+                            windowsResume ? "windows-resume" : "polling-gap");
                 }
-                var now = DateTimeOffset.UtcNow;
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
                 var readings = new List<SensorReading>();

@@ -29,6 +29,15 @@ internal sealed class FanControlTrace
             string.Join(",",channels),now);
     }
 
+    internal void HardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger)
+    {
+        Interlocked.Increment(ref _resumeRearms);
+        Event("HW-REOPEN", "reason=" + trigger + " gap=" +
+            gap.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) +
+            "s; reopened LibreHardwareMonitor hardware. Previously approved " +
+            "persistent profiles will be evaluated and applied again on this poll.",now);
+    }
+
     internal object ReadRecent(int maxLines=250)
     {
         try

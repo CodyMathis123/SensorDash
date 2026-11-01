@@ -2,7 +2,7 @@ name: Windows MSI build
 # Validate PRs before merging, then verify Production after merge.
 on:
   pull_request:
-    branches: [Production]
+    branches: [Production, feature/telemetry-grafana-export]
   push:
     branches: [Production]
   workflow_dispatch:
