@@ -16,6 +16,18 @@ The Windows interface has **Cooling Systems, Fan Control, Tray Readouts, Sensor 
 
 **Safety boundary:** No browser/Pi/Grafana endpoint can directly authorize, modify or release physical PWM. A locally approved fan profile is the only persistent control path. The Laing DDC pump remains tachometer-only; a fan pump mapping forbids manual PWM commissioning. Firmware restoration is best-effort on clean shutdown and interrupted manual tests; no software can guarantee recovery from sudden power loss.
 
+## Paired HomeAway end-to-end test
+
+The **complete feature checkout for this repository** is `chore/sensordash-telemetry-docs`. It includes the controls-only + HTTPS-export PR #13 and its documentation cleanup PR #14; use it with HomeAway's `chore/docs-and-legacy-cleanup` branch for the complete Pi/Grafana/Authelia/PC-control stack. Neither `Production` branch yet contains the whole migration.
+
+For a fresh Windows checkout:
+
+```powershell
+git clone -b chore/sensordash-telemetry-docs https://github.com/CodyMathis123/SensorDash.git
+```
+
+Before installing on the actual fan-controlling PC, review the [single two-repo integration and rollback guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/chore/docs-and-legacy-cleanup/docs/INTEGRATION-TEST.md), deploy the matching Pi receiver schema first, and use the validated CI-produced MSI from [PR #14](https://github.com/CodyMathis123/SensorDash/pull/14) rather than an old Production installer. SensorDash PR #12 (LAN/mobile Windows dashboard) is **not part of this pairing**: it targets the older Windows history UI and must be reviewed separately, not merged blindly.
+
 ## Getting started
 
 Build from the repository root on Windows with the .NET 10 SDK:
