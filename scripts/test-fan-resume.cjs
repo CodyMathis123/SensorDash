@@ -48,6 +48,15 @@ const button=kind=>{
  assert.ok(program.includes('FanResumeSelfTest.Run()'));
  assert.ok(bridge.includes('"fanDebug" => liveFan.DebugLog()'));
  assert.ok(persistent.includes('FanResumePolicy.NeedsRearm'));
+ assert.ok(program.includes('WindowsPowerResumeNotifications(logger)'));
+ assert.ok(program.includes('resumeNotifications.ConsumePending()'));
+ assert.ok(program.includes('FanResumePolicy.ShouldReopenHardware'));
+ assert.ok(program.includes('controls.ReleaseBeforeClose(_computer,'));
+ assert.ok(program.includes('_computer.Open()'));
+ assert.ok(nativeEvents.includes('RegisterSuspendResumeNotification'));
+ assert.ok(nativeEvents.includes('PbtResumeAutomatic'));
+ assert.ok(nativeEvents.includes('Interlocked.Exchange(ref _pending, 1)'));
+ assert.ok(policy.includes('windowsResumeNotified || NeedsHardwareReopen'));
  assert.ok(persistent.includes('_writer.ForceRearm'));
  assert.ok(writer.includes('internal void ForceRearm('));
  assert.ok(trace.includes('MaxFileBytes=2*1024*1024'));
