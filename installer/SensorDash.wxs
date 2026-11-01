@@ -9,11 +9,16 @@
     <!-- PawnIO is a shared, separately serviced driver. The collector reports
          missing/outdated/inaccessible support in the UI; never remove it here. -->
     <Property Id="ARPCOMMENTS" Value="Local hardware telemetry. Some CPU and motherboard sensors need the separately installed PawnIO driver; check Hardware driver in SensorDash Settings." />
-    <!-- StopServices executes before deferred application closure, preserving
-         the collector's normal output-release path. Also covers tray-only hosts. -->
+    <!-- Ask the desktop to exit in the immediate phase (before the file
+         replacement); the elevated deferred phase still runs AFTER
+         StopServices and can terminate only SensorDash.exe if it does not
+         respond within ten seconds. The collector service is handled by
+         ServiceControl, not by forcibly killing that service. -->
     <util:CloseApplication Id="CloseSensorDash" Target="SensorDash.exe"
+                           CloseMessage="yes" EndSessionMessage="yes"
                            ElevatedCloseMessage="yes" ElevatedEndSessionMessage="yes"
-                           Timeout="10" RebootPrompt="no" TerminateProcess="0" />
+                           PromptToContinue="no" Timeout="10"
+                           RebootPrompt="no" TerminateProcess="0" />
     <InstallExecuteSequence>
       <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" After="StopServices" />
     </InstallExecuteSequence>
