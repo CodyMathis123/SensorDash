@@ -98,6 +98,12 @@ internal static class FanResumeSelfTest
             var lines=JsonSerializer.Serialize(trace.ReadRecent());
             Check(lines.Contains("REARM")&&lines.Contains("PWM"),
                 "Text trace includes resume and sampled fan state");
+            trace.HardwareReopened(TimeSpan.FromSeconds(9.7),now.AddSeconds(66),"windows-resume");
+            var hardwareTrace=JsonSerializer.Serialize(trace.ReadRecent());
+            Check(hardwareTrace.Contains("HW-REOPEN") &&
+                  hardwareTrace.Contains("reason=windows-resume gap=9.7s"),
+                  "Short wake has a distinct tagged hardware reopening event");
+            Check(trace.ResumeRearms==2,"Only real rearm/reopen events advance counter");
 
             // A duplicate/other controller cannot receive a new authorization
             // merely because the resume policy was triggered.
