@@ -58,6 +58,12 @@ public sealed class FanControlRuntime
         get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
 
+    // Called by the collection thread after a fresh LHM Computer.Open()
+    // following sleep. Records the recovery without creating a new fan
+    // authorization. Persistent profiles take over on the next Tick().
+    public void RecordHardwareReopened(TimeSpan gap, DateTimeOffset now) =>
+        _trace.HardwareReopened(gap, now);
+
     public object DebugLog() => _trace.ReadRecent();
     
     public object Snapshot(DashboardSettings? settings = null)
