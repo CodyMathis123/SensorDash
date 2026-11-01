@@ -50,3 +50,11 @@ For manual validation after installing the new CI MSI:
 
 
 See [HomeAway telemetry guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/homeaway-auth-pc-control/docs/TELEMETRY.md), [ADR 0008](adr/0008-local-control-observability.md).
+
+### CI validation cadence
+
+Windows MSI/fan-control validation is required after code, configuration,
+test or workflow changes. Markdown-only documentation commits do not rebuild
+the MSI and can be reviewed without waiting for Windows CI. A fresh manual
+workflow run remains available if documentation changes alter deployment
+instructions that merit an end-to-end recheck.
