@@ -6,7 +6,7 @@ SensorDash is the local Windows hardware-control and telemetry-export companion 
 
 | Location | Responsibility |
 | --- | --- |
-| `src/SensorDash/Program.cs` | Application/service startup, API and telemetry/history integration |
+| `src/SensorDash/Program.cs` | Windows service/dashboard startup, local APIs, settings, history-spool and export integration |
 | `src/SensorDash/HardwareCollection.cs` | Hardware collection selection |
 | `src/SensorDash/ServiceBridge.cs`, `AdminFanControl.cs` | Collector communication and administrator control boundary |
 | `src/SensorDash/FanControlRuntime.cs`, `FanPwmChannels.cs` | Hardware control execution and channel adapters |
@@ -14,11 +14,11 @@ SensorDash is the local Windows hardware-control and telemetry-export companion 
 | `src/SensorDash/WorkspaceModels.cs` | Workspace/cooling configuration models |
 | `src/SensorDash/HistoryStatistics.cs`, `CoolingEventRecorder.cs` | History aggregation and cooling events |
 | `src/SensorDash/*SelfTest.cs` | Hardware-free backend regression checks |
-| `src/SensorDash/wwwroot/app.js` | Browser state, navigation, telemetry and chart orchestration |
+| `src/SensorDash/wwwroot/app.js` | Compact local control UI, navigation, sensor status and telemetry/export settings |
 | `src/SensorDash/wwwroot/workspace.js` | Workspace editors and serialized settings persistence |
-| `src/SensorDash/wwwroot/cooling-*.js` | Cooling analysis, electrical estimates and timeline |
+| `src/SensorDash/wwwroot/cooling-electrical.js`, `cooling-insights.js` | Local cooling/electrical configuration and live feedback; no history charts |
 | `src/SensorDash/wwwroot/fan-*.js` | Commissioning, feedback, approval UX and diagnostics |
-| `src/SensorDash/wwwroot/chart-*.js`, `history-insights.js` | History presentation and calculation helpers |
+| `src/SensorDash/TelemetryConfiguration.cs`, `TelemetryExport.cs`, `TelemetryMetadata.cs` | Outbound read-only measurements, config reload, catalog metadata, bounded retries |
 | `scripts/` | Node regressions and build/packaging helpers |
 | `tools/SensorDashIconCarrier/` | Windows icon resource helper |
 | `.github/workflows/windows-build.yml` | Windows build, self-tests, packaging and installer validation |
@@ -28,7 +28,7 @@ SensorDash is the local Windows hardware-control and telemetry-export companion 
 
 The browser edits configuration drafts. Approved fan profiles are separate collector-owned snapshots, persisted under `%ProgramData%\SensorDash`; changing a draft does not authorize a live output. Layout locks are editing conveniences, not security controls. Preserve saved user settings and history across upgrades.
 
-Read the relevant source and tests for exact current behavior. This map describes responsibilities, not an exhaustive generated file inventory. Product history and installation guidance remain in the root README.
+Read the relevant source and tests for exact current behavior. This map describes responsibilities, not an exhaustive generated file inventory. Operator setup is in the root README and [telemetry export guide](telemetry-export.md); release identity and architecture rationale live in [ADRs](adr/README.md).
 
 `AccessoryPowerHistory.cs` computes gap-aware fan/pump energy from recorded measurements and configuration. [UI guidance](ui-guidelines.md) defines concise copy and accessible controls.
 `CoolingElectricalConfig.PowerCurve` stores per-unit speed/power points; see [power curves](power-curves.md) for source data and interpolation rules.

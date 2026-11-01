@@ -45,6 +45,10 @@ Go to **Settings → Pi telemetry export** to configure the receiver, computer l
 
 See [telemetry setup](docs/telemetry-export.md) and [control/observability ownership ADR](docs/adr/0008-local-control-observability.md).
 
+## Feature delivery status
+
+This controls-only + outbound telemetry design is implemented in [SensorDash PR #13](https://github.com/CodyMathis123/SensorDash/pull/13); it is **not yet the released `Production` MSI**. The separate [LAN/mobile dashboard PR #12](https://github.com/CodyMathis123/SensorDash/pull/12) targets the previous browser dashboard and requires a deliberate compatibility review with the controls-only UX before any merge. Do not treat the two as independent toggles or install both builds interchangeably. On Windows, use the CI-produced MSI only after its current revision passes validation; live fan/wake safety checks still belong to the operator.
+
 ## Development and rollout
 
 - [Project architecture](docs/project.md), [development/CI](docs/development.md) and [hardware drivers](docs/hardware-drivers.md).

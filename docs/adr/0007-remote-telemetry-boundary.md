@@ -1,5 +1,7 @@
 # 0007: Opt-in, outbound-only historical telemetry export
 
+> **Historical migration decision.** This ADR records the initial staged exporter design; the current controls-only UI and authoritative ownership contract are in [ADR 0008](0008-local-control-observability.md). Earlier milestone limitations below are retained as history, not statements of the latest implemented feature.
+
 - Date: 2026-10-31
 - Status: Experimental / first migration milestone
 
