@@ -645,7 +645,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     logger.LogWarning("Reopening LHM after {Reason}; collection gap={GapSeconds:0.0}s.",
                         windowsResume ? "Windows resume notification" : "long polling gap",
                         resumeGap.TotalSeconds);
-                    controls.ReleaseBeforeClose(_computer,
+                    controls.ReleaseBeforeHardwareReopen(_computer,
                         "Resume-sized collection gap; restoring firmware before hardware reinitialization.");
                     try { _computer!.Close(); }
                     catch (Exception closeError) {
@@ -667,7 +667,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     _computer.Open();
                     _activeCollectionSignature = collectionSignature;
                     if (reopenForResume)
-                        controls.RecordHardwareReopened(resumeGap, now);
+                        controls.RecordHardwareReopened(resumeGap, now,
+                            windowsResume ? "windows-resume" : "polling-gap");
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
