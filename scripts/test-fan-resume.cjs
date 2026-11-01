@@ -51,6 +51,9 @@ const button=kind=>{
  assert.ok(program.includes('WindowsPowerResumeNotifications(logger)'));
  assert.ok(program.includes('resumeNotifications.ConsumePending()'));
  assert.ok(program.includes('FanResumePolicy.ShouldReopenHardware'));
+ assert.ok(program.includes('controls.ReleaseBeforeHardwareReopen(_computer,'));
+ assert.ok(program.includes('windowsResume ? "windows-resume" : "polling-gap"'));
+ assert.ok(trace.includes('"HW-REOPEN", "reason=" + trigger'));
  assert.ok(program.includes('controls.ReleaseBeforeClose(_computer,'));
  assert.ok(program.includes('_computer.Open()'));
  assert.ok(nativeEvents.includes('RegisterSuspendResumeNotification'));
