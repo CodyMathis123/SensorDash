@@ -1,10 +1,23 @@
 name: Windows MSI build
 # Validate PRs before merging, then verify Production after merge.
 on:
+  # Run the PR merge-ref build when opened/reopened/marked ready. Do not
+  # subscribe to synchronize: GitHub compares the *whole PR diff* for paths,
+  # causing every follow-up Markdown edit to rebuild the MSI.
   pull_request:
+    types: [opened, reopened, ready_for_review]
     branches: [Production, feature/telemetry-grafana-export]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  # Code-bearing pushes to integration branches are independently validated,
+  # including native Windows MSI, release identity, UI tests and fan controls.
+  # Documentation-only pushes trigger no expensive Windows build.
   push:
-    branches: [Production]
+    branches: [Production, 'feature/**', 'fix/**', 'chore/**']
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
 permissions:
   contents: read
