@@ -611,6 +611,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     private Computer? _computer;
     private readonly PawnIoMonitor _pawnIo = new();
     private string? _activeCollectionSignature;
+    private DateTimeOffset? _lastCollectionStart;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
@@ -620,7 +621,32 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
             var cfg = state.Settings;
             var driver = _pawnIo.Read(cfg);
             try {
+                var now = DateTimeOffset.UtcNow;
                 var collectionSignature = HardwareCollection.Signature(cfg);
+                // Rewriting a cached PWM value alone is not reliable after
+                // S3 sleep: the old LHM Super I/O device object may retain
+                // Software mode but no longer own the physical output.
+                // Recreate the hardware connection on a sleep-sized gap,
+                // just as stopping/restarting the collector would, while
+                // preserving ONLY previously approved persistent profiles.
+                // All hardware Close/Open operations stay on this single
+                // collection thread. Temporary manual tests are released.
+                var resumeGap = _lastCollectionStart.HasValue
+                    ? now - _lastCollectionStart.Value : TimeSpan.Zero;
+                var reopenForResume = _computer != null &&
+                    FanResumePolicy.NeedsHardwareReopen(_lastCollectionStart, now);
+                _lastCollectionStart = now;
+                if (reopenForResume) {
+                    logger.LogWarning("Collector gap of {GapSeconds:0.0}s: reopening LHM hardware after possible sleep/resume.", resumeGap.TotalSeconds);
+                    controls.ReleaseBeforeClose(_computer,
+                        "Resume-sized collection gap; restoring firmware before hardware reinitialization.");
+                    try { _computer!.Close(); }
+                    catch (Exception closeError) {
+                        logger.LogWarning(closeError, "LHM hardware close after sleep/resume was not clean.");
+                    }
+                    _computer = null;
+                    _activeCollectionSignature = null;
+                }
                 if (_computer != null && _activeCollectionSignature != collectionSignature) {
                     // LHM's Computer family flags are applied during discovery.
                     // Reopen only when those flags change, not when users toggle
@@ -633,8 +659,9 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     _computer = HardwareCollection.CreateComputer(cfg);
                     _computer.Open();
                     _activeCollectionSignature = collectionSignature;
+                    if (reopenForResume)
+                        controls.RecordHardwareReopened(resumeGap, now);
                 }
-                var now = DateTimeOffset.UtcNow;
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
                 var readings = new List<SensorReading>();
