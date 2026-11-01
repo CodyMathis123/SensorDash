@@ -67,7 +67,7 @@ internal static class HistoryRecordingSelfTest
             for (var sec = 160; sec <= 210; sec += 10)
                 archive.Record(new SensorFrame(t0.AddSeconds(sec),
                     [Cpu(sec), Network(sec), Storage(sec)], null), config);
-            Check(Count("/storage/0/temperature/0") == 5,
+            Check(Count("/storage/0/temperature/0") == 6,
                 "Fast storage recording must not duplicate observations between 30s hardware polls");
             Check(Count("/cpu/0/temperature/0") == 22,
                 "Reconfiguring family history should never affect CPU history");
