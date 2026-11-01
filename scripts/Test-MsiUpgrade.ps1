@@ -15,9 +15,17 @@ function Install-Msi($package, $operation, $label, $expectFailure = $false) {
     $start = [System.Diagnostics.ProcessStartInfo]::new('msiexec.exe')
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
-    foreach ($argument in @($operation, $package, '/qn', '/norestart', '/L*v', $log)) {
+    # The test deliberately keeps the desktop process running. Disable MSI
+    # Restart Manager so unattended CI cannot wait for a FilesInUse shutdown
+    # response before WiX's CloseApplication action runs. The MSI itself still
+    # must close that process (and StopServices still controls the collector).
+    # This is CI-only: do not force-stop any app on a real owner's machine.
+    foreach ($argument in @($operation, $package, '/qn', '/norestart',
+                           'MSIRESTARTMANAGERCONTROL=Disable',
+                           'REBOOT=ReallySuppress', '/L*v', $log)) {
         [void]$start.ArgumentList.Add([string]$argument)
     }
+    Write-Host "CI MSI servicing: Windows Installer Restart Manager disabled; WiX CloseApplication remains responsible for closing the running SensorDash desktop."
     $p = [System.Diagnostics.Process]::Start($start)
     if (!$p) { throw "Unable to launch $label msiexec" }
     try {
@@ -60,7 +68,16 @@ function Start-Desktop($path) {
     return $desktop
 }
 function Assert-Closed($desktop) {
-    if (!$desktop.WaitForExit(15000)) { throw 'MSI left the desktop dashboard running.' }
+    # Retain the running-desktop regression: this is checked only AFTER
+    # msiexec finishes, never pre-kill the test process before servicing.
+    try {
+        if (!$desktop.WaitForExit(15000)) {
+            throw 'MSI failed to close the running desktop dashboard.'
+        }
+        Write-Host "PASS: installer closed running desktop process PID $($desktop.Id)"
+    } finally {
+        $desktop.Dispose()
+    }
 }
 if ((Products).Count) { throw 'Runner already has SensorDash installed.' }
 $baseline = Join-Path $env:RUNNER_TEMP 'sensordash-baseline'
