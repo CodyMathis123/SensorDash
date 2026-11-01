@@ -35,4 +35,18 @@ The worker persists separate cursors for raw samples, accessory watts and events
 - **Still seeing old configuration:** the exporter re-fingerprints config/token/CA before each batch and constructs a fresh TLS/HTTP session on change. Wait for the next sender iteration or check its retry status; **do not restart a working fan-controlling service solely for telemetry settings**.
 - **Windows upgrade:** back up `%ProgramData%\SensorDash` with an SQLite-consistent copy and preserve the existing approved fan profiles. Validate physical fan safety before any supervised service restart/install.
 
+### Quick sleep/wake fan recovery validation (Windows integration gate)
+
+A real hardware regression was observed on the 0.8.324 MSI: after a **short sleep and immediate wake**, approved profiles remained listed but physical PWM control was not reapplied until `SensorDashCollector` restarted. Long sleeps often worked. The old recovery only treated a collector polling gap **greater than 20 seconds** as a resume; quick sleep/wake can be shorter.
+
+The follow-up build registers the **elevated collector** with the Windows suspend/resume notification API. On `PBT_APMRESUMEAUTOMATIC` it queues a one-shot recovery; the hardware polling thread closes and reopens the LibreHardwareMonitor `Computer` and reapplies **already approved** persistent profiles. The longer-than-20-second gap mechanism remains a fallback if native events are unavailable. The callback does not write PWM, approve profiles, use the Pi, or start new manual commissioning sessions.
+
+For manual validation after installing the new CI MSI:
+1. Confirm motherboard firmware fan fallback is safe, service is running, and actual radiator/NVMe RPM matches the active curve. The DDC remains tach-only.
+2. Sleep briefly and resume promptly, then compare requested duty and **measured RPM** (not just the stored profile state). Repeat for a much longer sleep.
+3. Open **Fan Control → Show recent log** or inspect the local protected `%ProgramData%\SensorDash\logs\fan-control.log` for `[HW-REOPEN]`, indicating the collection thread did a new hardware open after a Windows resume signal or a long gap. Check normal one-second polling does *not* repeatedly reopen.
+4. Compare with `SensorDashCollector` Windows service logs: registration should report native resume notifications active, or a warning that gap-only fallback remains. If short wake still fails, capture the before/after fan log and hardware status before restarting the service.
+5. Keep this as a **live Windows hardware acceptance gate**; synthetic policy tests and MSI build success cannot prove the motherboard's real PWM resumed.
+
+
 See [HomeAway telemetry guide](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/homeaway-auth-pc-control/docs/TELEMETRY.md), [ADR 0008](adr/0008-local-control-observability.md).
