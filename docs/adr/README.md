@@ -9,3 +9,5 @@ Use ADRs for durable decisions affecting architecture, dependencies, persistence
 | [0003](0003-ci-msi-versions.md) | Accepted | Increasing CI build versions and previous-Production upgrade tests; supersedes allocation/testing portions of 0002 |
 | [0004](0004-history-reclamation-and-accessory-estimates.md) | Accepted | Retention space reclamation and accessory power history |
 | [0005](0005-cooling-preset-catalog.md) | Accepted | Reviewed JSON cooling presets packaged with the application |
+| [0007](0007-remote-telemetry-boundary.md) | Superseded for local UI by 0008 | Opt-in outbound-only telemetry, stable IDs, bounded cursors and schema evolution |
+| [0008](0008-local-control-observability.md) | Implemented on feature branch; physical verification pending | Windows controls and authoritative cooling configuration, Pi historical visualization |

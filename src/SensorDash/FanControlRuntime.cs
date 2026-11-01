@@ -31,6 +31,7 @@ public sealed class FanControlRuntime
     private Pending? _pending;
     private Session? _session;
     private bool _firstWritePending;
+    private DateTimeOffset? _lastHardwareTick;
     private FanControlStatus _status = new("off", "", "", "", null, null,
         "Firmware/default fan control is in charge.");
 
@@ -56,6 +57,12 @@ public sealed class FanControlRuntime
     {
         get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
     }
+
+    // Called by the collection thread after a fresh LHM Computer.Open()
+    // following sleep. Records the recovery without creating a new fan
+    // authorization. Persistent profiles take over on the next Tick().
+    public void RecordHardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger) =>
+        _trace.HardwareReopened(gap, now, trigger);
 
     public object DebugLog() => _trace.ReadRecent();
     
@@ -159,6 +166,15 @@ public sealed class FanControlRuntime
     {
         // Called only from the hardware collection thread.
         var controls = FindControls(computer);
+        // Timed commissioning is NOT a persistent fan profile. A sleep/
+        // collector stall invalidates that short manual session; restore BIOS
+        // rather than silently resuming a manual PWM override hours later.
+        if (FanResumePolicy.EndManualAfterGap(_lastHardwareTick, now, _session != null))
+        {
+            _trace.Event("MANUAL-GAP", "Timed manual test was interrupted; restoring firmware ownership.", now);
+            Release(controls, "Manual test interrupted by sleep/collector gap; restored firmware defaults.");
+        }
+        _lastHardwareTick = now;
         var listing = new List<FanOutputInfo>();
         void Visit(IHardware hardware)
         {
@@ -276,10 +292,18 @@ public sealed class FanControlRuntime
         }
     }
 
-    // Must be called before the Computer is reinitialized/closed or service exits.
-    public void ReleaseBeforeClose(Computer? computer, string reason)
+    // Both paths release physical control on the hardware thread; only
+    // collector shutdown/change is logged as STOP. Sleep reinit is HW-RESET.
+    public void ReleaseBeforeClose(Computer? computer, string reason) =>
+        ReleaseForHardwareClose(computer, reason, "STOP");
+
+    public void ReleaseBeforeHardwareReopen(Computer? computer, string reason) =>
+        ReleaseForHardwareClose(computer, reason, "HW-RESET");
+
+    private void ReleaseForHardwareClose(Computer? computer, string reason, string eventKind)
     {
-        _trace.Event("STOP",reason);
+        _trace.Event(eventKind,reason);
+        _lastHardwareTick = null;
         Dictionary<string, IControl> channels;
         try { channels = computer == null ? [] : FindControls(computer); }
         catch { channels = []; }

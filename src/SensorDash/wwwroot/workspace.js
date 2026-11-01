@@ -39,7 +39,7 @@ const SDWorkspace = (() => {
  const unit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Voltage:'V',Flow:'L/h',Clock:'MHz',Throughput:'B/s',Data:'GiB'}[t]||'');
  const defaultSensors=(S,group,n=4)=>S.sensors.filter(s=>
      s.value!=null &&(group==='all'||s.type===group)
-     &&s.deviceType!=='Virtual').slice(0,n);
+     ).slice(0,n);
  const isHidden=(S,s)=>{
   const cfg=S.settings||{};
   return !!(cfg.hiddenSensorIds||[]).includes(s.id)
@@ -62,16 +62,11 @@ const SDWorkspace = (() => {
    entries.push({label:what,page,...where});
    index.set(id,entries);
   };
-  for(const d of cfg.dashboards||[])
-   for(const w of d.widgets||[])for(const id of w.sensorIds||[])
-    add(id,'Dashboard: '+d.name+' / '+w.title,'dashboards',{dashboardId:d.id,widgetId:w.id});
   for(const system of cfg.coolingSystems||[])
    for(const part of system.components||[])for(const id of part.sensorIds||[])
     add(id,'Cooling: '+system.name+' / '+part.name,'cooling',
       {systemId:system.id,componentId:part.id});
   for(const w of cfg.trayWidgets||[])add(w.sensorId,'Tray: '+(w.label||'Sensor readout'),'tray');
-  for(const v of cfg.virtualSensors||[])
-   for(const id of v.sensorIds||[])add(id,'Virtual sensor: '+v.name,'virtual');
   for(const c of cfg.simulatedFanCurves||[]){
    add(c.sourceSensorId,'Curve input: '+c.name,'curves');
    // Physical RPM feedback follows the PWM mapping, never a curve-level sensor.
@@ -104,102 +99,6 @@ const SDWorkspace = (() => {
  };
  const heading=(title,desc)=>'<div class="w-intro"><p>'+safe(desc)+'</p></div>';
  const nothing=(label)=>'<div class="empty">'+safe(label)+'</div>';
- const renderOverview=(S,h)=>{
-   const sensorSets=[
-     ['Temperature',S.sensors.filter(s=>s.type==='Temperature'&&s.value!=null&&!isHidden(S,s)&&s.deviceType!=='Virtual')],
-     ['Fan',S.sensors.filter(s=>s.type==='Fan'&&s.value!=null&&!isHidden(S,s))],
-     ['Power',S.sensors.filter(s=>s.type==='Power'&&s.value!=null&&!isHidden(S,s))]
-   ];
-   const prefer=(expr,relevant)=>relevant.filter(s=>expr.test(s.name)).slice(0,1);
-   const cpu=sensorSets[0][1].filter(s=>/cpu|ryzen|intel core|processor/i.test(s.device));
-   const gpu=sensorSets[0][1].filter(s=>/gpu|radeon|geforce/i.test(s.device));
-   const storage=sensorSets[0][1].filter(s=>/Storage/i.test(s.deviceType)||/nvme|ssd|drive/i.test(s.device));
-   const featured=[
-     ...prefer(/Tctl\/Tdie|CPU Package|CPU Core|CPU Die|Package/i,cpu),
-     ...prefer(/GPU Hot Spot|GPU Core|GPU Temperature/i,gpu),
-     ...prefer(/Composite|Drive Temperature/i,storage)
-   ];
-   // Generic "Temperature #1" is a genuine LHM label, but makes a poor
-   // default gauge. Prefer descriptive sensor names; Explorer retains all raw
-   // readings and allows renaming them.
-   const descriptive=s=>!/^(Temperature|Fan|Control|Power|Load)\s*#\d+$/i.test(s.name||'');
-   for(const group of sensorSets)for(const reading of group[1].filter(descriptive))
-     if(featured.length<4&&!featured.some(f=>f.id===reading.id))featured.push(reading);
-   if(!featured.length){
-     // Show a fallback with its hardware context when no descriptive sensors
-     // exist, instead of silently presenting an empty dashboard.
-     const fallback=sensorSets[0][1][0]||sensorSets[1][1][0]||sensorSets[2][1][0];
-     if(fallback)featured.push(fallback);
-   }
-   const count=k=>S.sensors.filter(s=>s.type===k&&!isHidden(S,s)).length;
-   const metricBody=featured.slice(0,4).map(s=>
-     h.metric(displayName(S,s),s,
-       '#62d5ce',s.device,unit(s.type),icon[s.type]||'◈')).join('');
-   const charts=featured.filter(s=>s.type==='Temperature');
-   const trends=charts.length ? h.chart(charts,'°C') : nothing('Temperature sensors will appear when discovered.');
-   return (metricBody?'<div class="metrics">'+metricBody+'</div>':'')+
-      card('Recorded peaks and component power','Raw-sample maxima, power averages and observed energy intervals',
-        HistoryInsights.markup(S))+
-      card('Cooling electrical budget','Nameplate fan and pump ratings, with optional calibrated or directly measured load',
-        CoolingElectrical.overview(S))+
-      '<div class="two-col">'+h.panel('Temperature history','Detected physical temperature sensors',trends)+
-      h.panel('Hardware catalog','Discovered from the elevated collector',
-      ['Temperature','Fan','Control','Power','Flow','Load'].map(t=>
-       '<div class="stat-row"><label>'+t+'</label><strong>'+count(t)+'</strong></div>').join(''))+
-      '</div>'+
-      card('Build your workspace','Use sensor IDs, not hardcoded hardware names',
-      '<div class="w-grid">'+[
-        ['dashboards','▦','Dashboards','Create views with metric cards, history charts and readings.'],
-        ['cooling','◉','Cooling systems','Model any number of air, liquid or custom systems.'],
-        ['curves','⌁','Fan Control','Configure persistent, authorized fan profiles and preview temperature curves.'],
-        ['tray','▣','Tray readouts','Add independent live notification-area sensor icons.']
-      ].map(([v,ico,title,desc])=>'<button class="w-feature" data-view="'+v+'"><strong>'+ico+' '+title+'</strong><span>'+desc+'</span></button>').join('')+'</div>');
- };
- const renderDashboards=(S,h)=>{
-   const all=S.settings?.dashboards||[];
-   const chosen=all.find(d=>d.id===S.workspaceDashboardId)||all[0];
-   if(chosen)S.workspaceDashboardId=chosen.id;
-   const editing=!chosen?.locked;
-   const tabBar='<div class="w-tabs">'+all.map(d=>button('switch-dashboard',d.name,
-      'data-id="'+attr(d.id)+'"',chosen?.id!==d.id)).join('')+
-      button('add-dashboard','+ Blank dashboard')+'</div>'+
-   '<div class="w-actions">'+button('add-dashboard','Thermal template','data-template="thermal"')+
-   button('add-dashboard','Cooling telemetry template','data-template="cooling"')+
-   button('add-dashboard','Storage template','data-template="storage"')+'</div>';
-   if(!chosen)return tabBar+card('Start your first dashboard','Hardware-neutral metric/chart building blocks',nothing('Add a dashboard to begin.'));
-   const widgets=chosen.widgets||[];
-   const shown=widgets.map(w=>{
-     const sensors=w.sensorIds.map(id=>S.byId.get(id)).filter(Boolean);
-     let body='';
-     if(w.kind==='chart')body=h.chart(sensors, sensors.length && sensors.every(s=>s.type===sensors[0].type)?unit(sensors[0].type):'',false,'dashboard:'+chosen.id);
-     else if(w.kind==='readings')body=sensors.map(s=>'<div class="stat-row"><label>'+safe(S.settings?.aliases?.[s.id]||s.name)+'</label><strong data-live-reading="'+attr(s.id)+'" data-live-format="unit" data-live-unit="'+attr(unit(s.type))+'">'+value(s)+' '+unit(s.type)+'</strong></div>').join('');
-     else body=sensors.slice(0,1).map(s=>h.metric(S.settings?.aliases?.[s.id]||s.name,s,
-            '#62d5ce',s.device,unit(s.type),icon[s.type]||'◈')).join('');
-     const scope='dashboard:'+chosen.id+':'+w.id;
-     return '<div class="w-widget"><div class="w-widget-head"><div><strong>'+safe(w.title)+'</strong><span>'+safe(w.kind)+'</span></div>'+
-       (editing?button('remove-widget','Remove','data-id="'+attr(chosen.id)+'" data-child="'+attr(w.id)+'"'):'')+'</div>'+
-       (body||nothing('Select a sensor for this widget'))+
-       (editing?'<div class="w-widget-editor"><label>Title<input value="'+attr(w.title)+'" data-widget-title="'+attr(w.id)+'"></label>'+
-       '<label>Kind<select data-widget-kind="'+attr(w.id)+'">'+opts(['metric','chart','readings'],w.kind)+'</select></label></div>'+
-       selectors(S,w.sensorIds,scope)+
-       '<div class="w-add-input">'+select(S,'',()=>true,'Choose a sensor','data-add-to="'+attr(scope)+'"')+
-       button('add-sensor','+ Sensor','data-scope="'+attr(scope)+'"')+'</div>':'')+'</div>';
-   }).join('');
-   return tabBar+card(chosen.name,chosen.locked?'Viewing mode · Editing is locked':'Edit mode · Customize this dashboard',
-     '<div class="w-dashboard-toolbar">'+
-     button('toggle-dashboard-lock',chosen.locked?'🔓 Unlock layout':'🔒 Lock layout',
-       'data-id="'+attr(chosen.id)+'"',chosen.locked)+
-     (editing?textfield('dashboard-name',chosen.id,chosen.name,'Dashboard name')+
-       button('save-editor','Save dashboard')+
-       (all.length>1?button('remove-dashboard','Delete dashboard','data-id="'+attr(chosen.id)+'"'):''):
-       '<span class="note">Widget controls are hidden. Unlock to make changes.</span>')+'</div>')+
-     (widgets.length?'<div class="w-widget-grid">'+shown+'</div>':
-       card('Empty dashboard',editing?'Add a widget below':'Unlock the layout to add widgets',
-            nothing('No widgets have been configured yet.')))+
-     (editing?'<div class="w-actions">'+button('add-widget','+ Metric','data-kind="metric" data-id="'+attr(chosen.id)+'"')+
-       button('add-widget','+ Chart','data-kind="chart" data-id="'+attr(chosen.id)+'"')+
-       button('add-widget','+ Readings','data-kind="readings" data-id="'+attr(chosen.id)+'"')+'</div>':'');
- };
  // A cooling system is a derived telemetry workspace, not just an inventory.
  // It never invents radiator temperatures, heat dissipation or cooling capacity.
  const coolingReadings=(S,sys)=>{
@@ -237,34 +136,15 @@ const SDWorkspace = (() => {
        ['heat-power','Heat-source power',sampledPower?value(sampledPower)+' W':heat.length?heat.length+' power readings':'—',
          heat.length===1?displayName(S,sampledPower):heat.length?'Multiple readings; shown individually':'Assign source power readings'],
        ['fan-count','RPM sensors',fans.length?fans.length+' readings':'—',
-         fans.length?'Fan and pump tachometers plotted below':'Assign fan or pump RPM'],
+         fans.length?'Live fan and pump tachometers':'Assign fan or pump RPM'],
        ['pump-count','Circulation',flows.length===1?value(flows[0])+' '+unit('Flow'):
            flows.length?flows.length+' flow readings':pumps.length?pumps.length+' pump'+(pumps.length===1?'':'s'):'—',
-         flows.length===1?displayName(S,flows[0]):flows.length?'Flow sensors plotted individually':
+         flows.length===1?displayName(S,flows[0]):flows.length?'Flow sensors are charted in Grafana':
            pumps.length?'Pump configured; add a flow sensor for rate':'Optional pump/flow meter']
      ];
      const summary='<div class="w-cooling-summary">'+summaries.map(([key,name,val,description])=>
        '<div class="w-cooling-stat"><span>'+safe(name)+'</span><strong data-cooling-value="'+attr(sys.id)+'|'+key+'">'+safe(val)+'</strong><small>'+safe(description)+'</small></div>'
      ).join('')+'</div>';
-     const powerDetails=heat.length>1?
-       '':'';
-     const chartGroups=[
-       ['Temperature','Temperature history','Temperature probes and component temperatures'],
-       ['Power','Power history','Component power readings (not a measurement of heat rejected)'],
-       ['Fan','Fan RPM history','Cooling fan and pump tachometers'],
-       ['Control','Control duty history','Reported duty percentages, monitoring only'],
-       ['Flow','Flow history','Circulation flow sensor history']
-     ];
-     const charts=chartGroups.map(([type,title,description])=>{
-       const series=telemetry.byType(type);
-       if(!series.length)return '';
-       const limit=series.slice(0,8);
-       return h.panel(title,description+(series.length>8?' · '+limit.length+'/'+series.length+' sensors shown':''),
-         h.chart(limit,unit(type),false,sys.id));
-     }).filter(Boolean);
-     const chartsHtml=charts.length?
-       '<div class="w-cooling-charts">'+charts.join('')+'</div>':
-       nothing('Assign sensors to components and their automatic charts will appear here.');
      const components=(sys.components||[]).map(c=>{
        const scope='component:'+sys.id+':'+c.id;
        const preferred=typesByComponent[c.kind];
@@ -294,12 +174,8 @@ const SDWorkspace = (() => {
      }).join('');
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
-       CoolingInsights.overview(S,sys)+summary+powerDetails+
+       CoolingInsights.overview(S,sys)+summary+
        CoolingElectrical.summaryCard(S,sys)+
-       CoolingInsights.analysis(S,sys)+
-       '<div class="cooling-timeline-intro"><strong>Synchronized thermal timeline</strong>'+
-       '<p class="note">Hover a chart to compare readings at the same time.</p></div>'+
-       chartsHtml+CoolingInsights.activity(S,sys)+
        '<details class="cooling-config-fold" data-cooling-config="'+attr(sys.id)+'" '+
        (S.coolingConfigOpen?.[sys.id]?'open':'')+'><summary><span>Cooling system components</span>'+
        '<small>'+safe((sys.components||[]).length)+' configured · '+(editing?'Click to edit':'Read-only configuration')+'</small></summary>'+
@@ -312,17 +188,15 @@ const SDWorkspace = (() => {
        '<label>Type<select data-system-kind="'+attr(sys.id)+'">'+opts(['liquid','air','custom'],sys.kind)+'</select></label>'+
        '<span class="note" role="status" aria-live="polite" data-cooling-save>'+safe(saveState(S).status)+'</span>'+
        button('retry-cooling-save','Retry save','data-cooling-retry '+(saveState(S).failed?'':'hidden'))+
-       button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+
-       button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>':
-         WorkspaceLocks.readonly('Cooling system')+
-         '<div class="w-actions">'+button('cooling-to-dashboard','Create dashboard','data-id="'+attr(sys.id)+'"')+'</div>')+
-       (components||nothing('Add a component below to associate sensors.'))+
+              button('remove-system','Delete system','data-id="'+attr(sys.id)+'"')+'</div>':
+         WorkspaceLocks.readonly('Cooling system'))+
+        (components||nothing('Add a component below to associate sensors.'))+
        (editing?'<div class="w-actions"><label>Component role<select data-new-kind="'+attr(sys.id)+'">'+
         componentOptions('heat-source')+'</select></label>'+
        button('add-component','+ Component','data-id="'+attr(sys.id)+'"')+'</div>':'')+'</div></details>');
    }).join('');
    return heading('Cooling systems correlate temperatures, power, fan RPM, reported duty and optional flow. '+
-     'Charts are generated automatically from the assigned sensors; no particular CPU, GPU or loop topology is assumed.')+
+     'Grafana handles history; this local editor owns cooling assignments and live sensor context.')+
      starter+systemHtml;
  };
  const renderTray=(S)=>{
@@ -651,31 +525,6 @@ const SDWorkspace = (() => {
         'Resume recovery, commands, RPM feedback and errors',
         FanControlDebug.render(S),false);
  };
- const renderVirtual=(S)=>{
-   const virtual=S.settings?.virtualSensors||[];
-   return card('Virtual sensors','Combine real sensor readings into Max, Min, Average, or Delta',
-     '<p class="note">Combine sensor readings into a calculated sensor.</p>'+
-     virtual.map(v=>{
-       const scope='virtual:'+v.id;
-       return '<div class="w-component"><div class="w-actions"><label>Name<input data-virtual-name="'+attr(v.id)+'" value="'+attr(v.name)+'"></label>'+
-         '<label>Operator<select data-virtual-op="'+attr(v.id)+'">'+opts(['max','min','average','delta'],v.operation)+'</select></label>'+
-         button('remove-virtual','Delete','data-id="'+attr(v.id)+'"')+'</div>'+
-         selectors(S,v.sensorIds,scope)+
-         '<div class="w-add-input">'+select(S,'',s=>s.deviceType!=='Virtual','Choose physical sensor','data-add-to="'+attr(scope)+'"')+
-         button('add-sensor','+ Input','data-scope="'+attr(scope)+'"')+'</div></div>';
-     }).join('')+button('add-virtual','+ Virtual sensor','',false)+button('save-editor','Save changes'));
- };
- const renderStorage=(S)=>{
-   const storage=S.sensors.filter(s=>s.deviceType==='Storage');
-   const diag=S.diagnostics;
-   return card('Storage hardware','Storage sensors appear in the same catalog as every other device',
-
-     (storage.length?storage.map(s=>'<div class="stat-row"><label>'+
-       safe(S.settings?.aliases?.[s.id]||(s.name+' · '+s.device))+'</label>'+
-       '<strong data-live-reading="'+attr(s.id)+'" data-live-format="unit" data-live-unit="'+attr(unit(s.type))+'">'+value(s)+' '+unit(s.type)+'</strong></div>').join(''):nothing('No storage sensors discovered'))+
-     '<div class="note">Collector access: '+(diag?.isAdministrator?'Elevated':'Unknown')+
-     ' · '+(diag?.storagePollSeconds||'—')+' sec storage poll · '+(diag?.storageSensorCount??0)+' storage readings</div>');
- };
  const saves=new WeakMap();
  const saveState=S=>{
    if(!saves.has(S))saves.set(S,{tail:Promise.resolve(),timer:null,status:'Changes save automatically',failed:false,dirty:false});
@@ -796,14 +645,6 @@ const SDWorkspace = (() => {
  function syncInputs(S){
    syncCoolingInputs(S);
    const d=S.settings;
-   for(const e of document.querySelectorAll('[data-field="dashboard-name"]')){
-     const o=d.dashboards.find(c=>c.id===e.dataset.object);if(o)o.name=e.value;
-   }
-   for(const e of document.querySelectorAll('[data-widget-title],[data-widget-kind]')){
-     const id=e.dataset.widgetTitle||e.dataset.widgetKind;
-     const o=d.dashboards.flatMap(c=>c.widgets).find(w=>w.id===id);
-     if(o)o[e.dataset.widgetTitle?'title':'kind']=e.value;
-   }
    for(const e of document.querySelectorAll('[data-tray-sensor],[data-tray-label],[data-tray-color],[data-tray-decimals]')){
      const id=e.dataset.traySensor||e.dataset.trayLabel||e.dataset.trayColor||e.dataset.trayDecimals;
      const o=d.trayWidgets.find(w=>w.id===id);
@@ -837,12 +678,7 @@ const SDWorkspace = (() => {
      const curve=d.simulatedFanCurves.find(c=>c.id===table.dataset.curveTable);
      if(curve)curve.points=readCurvePointRows(table);
    }
-   for(const e of document.querySelectorAll('[data-virtual-name],[data-virtual-op]')){
-     const id=e.dataset.virtualName||e.dataset.virtualOp;
-     const o=d.virtualSensors.find(v=>v.id===id);
-     if(o)o[e.dataset.virtualName?'name':'operation']=e.value;
    }
- }
  async function handle(e,S,h){
    const el=e.target.closest('[data-work]');if(!el)return false;
    e.preventDefault();e.stopPropagation();
@@ -989,48 +825,6 @@ const SDWorkspace = (() => {
        }
        await persist(S,h);return true;
      }
-     if(action==='switch-dashboard'){S.workspaceDashboardId=id;h.render();return true;}
-     if(action==='toggle-dashboard-lock'){
-       const board=cfg.dashboards.find(d=>d.id===id);
-       if(board){board.locked=!board.locked;await persist(S,h);}
-       return true;
-     }
-     // Lock is a layout/editor guard. It isn't an access-control mechanism.
-     if(['add-widget','remove-widget','remove-dashboard'].includes(action)){
-       const board=cfg.dashboards.find(d=>d.id===id);
-       if(board?.locked){h.toast('Unlock the dashboard before editing.');return true;}
-     }
-     if(['add-sensor','remove-sensor'].includes(action)&&scope?.startsWith('dashboard:')){
-       const board=cfg.dashboards.find(d=>d.id===scope.split(':')[1]);
-       if(board?.locked){h.toast('Unlock the dashboard before editing.');return true;}
-     }
-     if(action==='add-dashboard'){
-       const template=el.dataset.template||'blank';
-       const newWidget=(title,kind,ids)=>({id:uid(),title,kind,sensorIds:ids});
-       const physical=S.sensors.filter(sensor=>sensor.deviceType!=='Virtual'&&!isHidden(S,sensor));
-       const sources=template==='thermal'?physical.filter(sensor=>sensor.type==='Temperature')
-         :template==='cooling'?physical.filter(sensor=>['Fan','Control','Flow'].includes(sensor.type))
-         :template==='storage'?physical.filter(sensor=>sensor.deviceType==='Storage'):[];
-       const suggested=sources.slice(0,6).map(sensor=>sensor.id);
-       const d={id:uid(),name:template==='thermal'?'Thermal overview':template==='cooling'?'Cooling telemetry':
-         template==='storage'?'Storage telemetry':'New dashboard',
-         widgets:template==='blank'?[]:[
-          newWidget('Live readings','readings',suggested),
-          newWidget('History','chart',suggested.filter(id=>S.byId.get(id)?.type===S.byId.get(suggested[0])?.type).slice(0,4))
-         ]};
-       cfg.dashboards.push(d);S.workspaceDashboardId=d.id;
-     }
-     if(action==='remove-dashboard'){
-       if(!confirm('Delete this dashboard?'))return true;
-       cfg.dashboards=cfg.dashboards.filter(d=>d.id!==id);S.workspaceDashboardId=cfg.dashboards[0]?.id;
-     }
-     if(action==='add-widget'){
-       cfg.dashboards.find(d=>d.id===id)?.widgets.push({id:uid(),kind:el.dataset.kind||'metric',
-          title:el.dataset.kind==='chart'?'Sensor history':'Sensor',sensorIds:[]});
-     }
-     if(action==='remove-widget'){
-       const d=cfg.dashboards.find(d=>d.id===id);if(d)d.widgets=d.widgets.filter(w=>w.id!==el.dataset.child);
-     }
      if(action==='add-system'){
        const kind=el.dataset.kind||'custom';
        const preset=kind==='liquid'?['heat-source','fan-group','pump','temperature-probe']:
@@ -1041,26 +835,6 @@ const SDWorkspace = (() => {
      if(action==='remove-system'){
        if(!confirm('Delete this cooling system?'))return true;
        cfg.coolingSystems=cfg.coolingSystems.filter(c=>c.id!==id);
-     }
-     if(action==='cooling-to-dashboard'){
-       const sys=cfg.coolingSystems.find(c=>c.id===id);
-       if(!sys)return true;
-       const data=coolingReadings(S,sys);
-       if(!data.all.length){h.toast('Assign some sensors to the system first.');return true;}
-       const createWidget=(title,kind,sensorIds)=>({id:uid(),title,kind,sensorIds:sensorIds.slice(0,12)});
-       const widgets=[createWidget('Current readings','readings',data.all.map(s=>s.id))];
-       for(const [type,title] of [
-         ['Temperature','Temperature history'],['Power','Power history'],
-         ['Fan','RPM history'],['Control','Duty history'],['Flow','Flow history']]){
-         const readings=data.byType(type);
-         if(readings.length)widgets.push(createWidget(title,'chart',readings.slice(0,8).map(s=>s.id)));
-       }
-       const dashboard={id:uid(),name:sys.name+' · Cooling overview',widgets,locked:false};
-       cfg.dashboards.push(dashboard);
-       S.workspaceDashboardId=dashboard.id;
-       await persist(S,h);
-       S.view='dashboards';history.replaceState(null,'','#dashboards');h.render();
-       return true;
      }
      if(action==='add-component'){
        const parent=cfg.coolingSystems.find(c=>c.id===id);
@@ -1082,15 +856,11 @@ const SDWorkspace = (() => {
          points:[{temperature:30,percent:25},{temperature:50,percent:55},{temperature:75,percent:100}]});
      }
      if(action==='remove-curve')cfg.simulatedFanCurves=cfg.simulatedFanCurves.filter(c=>c.id!==id);
-     if(action==='add-virtual'){
-       cfg.virtualSensors.push({id:'virtual:'+uid(),name:'Maximum temperature',operation:'max',sensorIds:[]});
-     }
-     if(action==='remove-virtual')cfg.virtualSensors=cfg.virtualSensors.filter(v=>v.id!==id);
      if(action==='add-sensor'||action==='remove-sensor'){
        const [entity,root,child]=scope.split(':');
-       const obj=entity==='dashboard'?cfg.dashboards.find(d=>d.id===root)?.widgets.find(w=>w.id===child)
-         :entity==='component'?cfg.coolingSystems.find(c=>c.id===root)?.components.find(c=>c.id===child)
-         :cfg.virtualSensors.find(v=>v.id===scope.slice('virtual:'.length));
+       const obj=entity==='component'
+         ?cfg.coolingSystems.find(c=>c.id===root)?.components.find(c=>c.id===child)
+         :null;
        if(obj){
          if(action==='remove-sensor')obj.sensorIds=obj.sensorIds.filter(x=>x!==el.dataset.sensor);
          else {
@@ -1104,14 +874,10 @@ const SDWorkspace = (() => {
    return true;
  }
  const render=(S,view,h)=>{
-   if(view==='overview')return renderOverview(S,h);
-   if(view==='dashboards')return renderDashboards(S,h);
-   if(view==='cooling')return renderCooling(S,h);
+      if(view==='cooling')return renderCooling(S,h);
    if(view==='tray')return renderTray(S);
    if(view==='curves')return renderCurves(S);
-   if(view==='virtual')return renderVirtual(S);
-   if(view==='storage')return renderStorage(S);
-   return nothing('View unavailable');
+      return nothing('View unavailable');
  };
  const paintCooling=(S)=>{
    // Update only the visible summary numbers, never rebuild a chart or form
