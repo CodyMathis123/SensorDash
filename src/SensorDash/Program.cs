@@ -304,6 +304,10 @@ public sealed class DashboardSettings {
     public int FastPollSeconds { get; set; } = 2;
     public int StoragePollSeconds { get; set; } = 10;
     public int SaveEverySeconds { get; set; } = 10;
+    // Per-family history only. These do NOT change hardware poll frequency.
+    // Important/pinned sensors always retain SaveEverySeconds cadence.
+    public int StorageHistorySeconds { get; set; } = 60;
+    public int NetworkHistorySeconds { get; set; } = 60;
     public int RetentionDays { get; set; } = 30; // configurable through 3 years
     public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
@@ -350,6 +354,8 @@ public sealed class DashboardState {
         requested.FastPollSeconds = Math.Clamp(requested.FastPollSeconds, 1, 30);
         requested.StoragePollSeconds = Math.Clamp(requested.StoragePollSeconds, 5, 120);
         requested.SaveEverySeconds = Math.Clamp(requested.SaveEverySeconds, 5, 120);
+        requested.StorageHistorySeconds = Math.Clamp(requested.StorageHistorySeconds, 5, 3600);
+        requested.NetworkHistorySeconds = Math.Clamp(requested.NetworkHistorySeconds, 5, 3600);
         requested.RetentionDays = Math.Clamp(requested.RetentionDays, 1, 1095);
         requested.Aliases ??= new();
         requested.PinnedSensors ??= [];
@@ -383,6 +389,9 @@ public sealed record MonitorEvent(long T, string Severity, string Sensor, string
 public sealed partial class HistoryStore {
     private readonly string _connectionString;
     private readonly string _path;
+    // Collector is the sole history writer. Commit markers only after the SQL
+    // transaction succeeds, so disk failures cannot cause missing future data.
+    private readonly Dictionary<string, (long Written, long? Observed)> _lastArchived = new(StringComparer.Ordinal);
     public HistoryStore(string path) {
         _path=path;
         _connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = true }.ToString();
@@ -420,7 +429,10 @@ public sealed partial class HistoryStore {
     }
     private SqliteConnection Open() { var c = new SqliteConnection(_connectionString); c.Open(); return c; }
     public void Record(SensorFrame frame, DashboardSettings settings) {
-        var used = settings.HistoryMode == "in-use" ? WorkspaceLogic.ReferencedSensorIds(settings) : null;
+        var referenced = WorkspaceLogic.ReferencedSensorIds(settings);
+        var used = settings.HistoryMode == "in-use" ? referenced : null;
+        var timestamp = frame.Timestamp.ToUnixTimeMilliseconds();
+        var staged = new Dictionary<string, (long Written, long? Observed)>(StringComparer.Ordinal);
         using var connection = Open();
         using var tx = connection.BeginTransaction();
         using var cmd = connection.CreateCommand();
@@ -429,13 +441,24 @@ public sealed partial class HistoryStore {
         var id = cmd.Parameters.Add("$id", SqliteType.Text);
         var ts = cmd.Parameters.Add("$ts", SqliteType.Integer);
         var val = cmd.Parameters.Add("$v", SqliteType.Real);
-        ts.Value = frame.Timestamp.ToUnixTimeMilliseconds();
+        ts.Value = timestamp;
         foreach (var sensor in frame.Sensors) {
             if (sensor.Value is not double v || !double.IsFinite(v) ||
                 !ShouldRecord(sensor, settings, used)) continue;
-            id.Value = sensor.Id; val.Value = v; cmd.ExecuteNonQuery();
+            var previous = _lastArchived.GetValueOrDefault(sensor.Id);
+            // Last-written == 0 denotes an unseen sensor (Unix timestamps are
+            // never zero for the live Windows collector).
+            if (!HistoryRecordingPolicy.IsDue(sensor, settings, referenced, timestamp,
+                    previous.Written == 0 ? null : previous.Written, previous.Observed))
+                continue;
+            id.Value = sensor.Id;
+            val.Value = v;
+            cmd.ExecuteNonQuery();
+            staged[sensor.Id] = (timestamp, sensor.ObservedAt?.ToUnixTimeMilliseconds());
         }
         tx.Commit();
+        foreach (var (sensorId, observed) in staged)
+            _lastArchived[sensorId] = observed;
     }
 
     internal static bool ShouldRecord(SensorReading sensor, DashboardSettings config, HashSet<string>? used = null) {
