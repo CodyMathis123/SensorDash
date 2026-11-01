@@ -617,6 +617,10 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
     private int _lastRetentionDays;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        // Native OS notification catches quick sleep/wake cycles which are too
+        // short for the old >20s polling-gap heuristic. Register once for the
+        // lifetime of the elevated collector; all reopens happen on this thread.
+        using var resumeNotifications = new WindowsPowerResumeNotifications(logger);
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
             var driver = _pawnIo.Read(cfg);
@@ -633,11 +637,14 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 // collection thread. Temporary manual tests are released.
                 var resumeGap = _lastCollectionStart.HasValue
                     ? now - _lastCollectionStart.Value : TimeSpan.Zero;
+                var windowsResume = resumeNotifications.ConsumePending();
                 var reopenForResume = _computer != null &&
-                    FanResumePolicy.NeedsHardwareReopen(_lastCollectionStart, now);
+                    FanResumePolicy.ShouldReopenHardware(_lastCollectionStart, now, windowsResume);
                 _lastCollectionStart = now;
                 if (reopenForResume) {
-                    logger.LogWarning("Collector gap of {GapSeconds:0.0}s: reopening LHM hardware after possible sleep/resume.", resumeGap.TotalSeconds);
+                    logger.LogWarning("Reopening LHM after {Reason}; collection gap={GapSeconds:0.0}s.",
+                        windowsResume ? "Windows resume notification" : "long polling gap",
+                        resumeGap.TotalSeconds);
                     controls.ReleaseBeforeClose(_computer,
                         "Resume-sized collection gap; restoring firmware before hardware reinitialization.");
                     try { _computer!.Close(); }
