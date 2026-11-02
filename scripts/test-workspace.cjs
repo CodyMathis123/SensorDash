@@ -155,7 +155,7 @@ const h={
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
  assert.ok(curvesView.includes('Temporary fan speed')&&
-   curvesView.includes('Advanced setup & diagnostics'),
+   curvesView.includes('Advanced setup &amp; diagnostics'),
    'Quick fan sliders should replace commissioning as the primary workflow');
  const priorFanControl=S.fanControl;
  S.fanControl={
