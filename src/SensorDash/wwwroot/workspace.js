@@ -337,12 +337,11 @@ const SDWorkspace = (() => {
       '<p class="note">'+safe(map?.kind!=='fan'?'Identify this output as a fan in Advanced setup.':
        'Writable output is unavailable.')+'</p>')+'</div>');
   }
-  return card('Temporary fan speed','Quick adjustments, automatic control stays configured',
-   '<p class="note">Move a slider, then Apply (Windows approval). Dragging does not command the hardware. '+
+  return '<p class="note">Move a slider, then Apply (Windows approval). Dragging does not command the hardware. '+
    'Overrides expire in five minutes, clear on restart/sleep and yield to temperature failsafes. '+
    'Pump channels never appear.</p>'+
    (rows.join('')||'<p class="note">Enable a fan profile to see sliders here.</p>')+
-   ((live.overrides||[]).length?'<div class="w-actions">'+button('quick-reset-all','Return all to curves')+'</div>':''));
+   ((live.overrides||[]).length?'<div class="w-actions">'+button('quick-reset-all','Return all to curves')+'</div>':'');
  };
  const quickInput=(e,S)=>{
   const slider=e.target.closest('[data-quick-slider]');
@@ -554,7 +553,12 @@ const SDWorkspace = (() => {
    const controls='<div class="w-fan-lock-toolbar">'+WorkspaceLocks.action('toggle-fan-lock',!editing)+
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
-   return controls+quickFans(S)+renderProfiles(S)+
+   const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
+   return controls+renderProfiles(S)+
+      FanControlUx.section(S,'quick','Temporary fan speed',
+        overrideCount?overrideCount+' active override'+(overrideCount===1?'':'s')+
+          ' · expand to return to curves':'On-demand adjustments · closed by default',
+        quickFans(S),false)+
       FanControlUx.section(S,'curves','Temperature curves',
         curves.length+' curve(s) · expand to edit',curveContent,false)+
       FanControlUx.section(S,'advanced','Advanced setup & diagnostics','Only for hardware changes or troubleshooting',FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
