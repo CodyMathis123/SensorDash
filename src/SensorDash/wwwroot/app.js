@@ -173,11 +173,15 @@ function telemetryConfigPanel(){
   '<div class="form-grid">'+
   '<div class="field"><label for="telemetryEndpoint">HTTPS ingest URL</label>'+
   '<input id="telemetryEndpoint" type="url" value="'+esc(cfg.endpoint||'')+
-  '" placeholder="https://192.168.1.43:8429/ingest"></div>'+
+  '" placeholder="https://metrics.homeawayfromhome.house/ingest"></div>'+
   '<div class="field"><label for="telemetryHost">Computer label</label>'+
   '<input id="telemetryHost" value="'+esc(cfg.hostLabel||'main-desktop')+'"></div></div>'+
   '<label class="collection-toggle"><input type="checkbox" id="telemetryEnabled" '+
   (cfg.enabled?'checked':'')+'>Export recorded telemetry to the Pi</label>'+
+  '<label class="collection-toggle"><input type="checkbox" id="telemetrySystemTrust" '+
+  (cfg.useSystemTrust?'checked':'')+'>Use Windows certificate trust for the HomeAway metrics hostname</label>'+
+  '<p class="note">Enable only for https://metrics.homeawayfromhome.house/ingest. '+
+  'Leave off for the old Pi-IP endpoint, which uses its private CA.</p>'+
   '<div class="form-grid">'+
   '<div class="field"><label for="telemetryToken">Bearer token · optional replacement</label>'+
   '<input id="telemetryToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="'+
@@ -186,7 +190,7 @@ function telemetryConfigPanel(){
   '<textarea id="telemetryCa" rows="3" spellcheck="false" placeholder="'+
   (cfg.caReady?'Installed — leave blank to keep':'Paste Pi-issued public CA certificate')+'"></textarea></div></div>'+
   '<p class="note">Status: '+(cfg.enabled?'Enabled':'Disabled')+' · token '+ready(cfg.tokenReady)+
-   ' · CA '+ready(cfg.caReady)+'</p>'+
+   ' · TLS '+(cfg.useSystemTrust?'Windows certificate store':'Pi private CA '+ready(cfg.caReady))+'</p>'+
    '<p class="note" id="telemetryRuntime">'+esc(telemetryRuntimeText(cfg))+'</p>'+
   '<p class="note">Secrets remain in ProgramData, are never returned to the browser and do not affect fan-control approval. '+
   'The outbound HTTPS exporter automatically reloads these settings without restarting the service or interrupting fan control.</p>'+
@@ -210,7 +214,8 @@ async function saveTelemetryConfig(){
   endpoint:byId('telemetryEndpoint').value.trim(),
   hostLabel:byId('telemetryHost').value.trim(),
   token:byId('telemetryToken').value.trim()||null,
-  caCertificatePem:byId('telemetryCa').value.trim()||null
+  caCertificatePem:byId('telemetryCa').value.trim()||null,
+  useSystemTrust:byId('telemetrySystemTrust').checked
  };
  try{
   const r=await fetch('/api/telemetry-config',{

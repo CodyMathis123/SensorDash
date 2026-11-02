@@ -15,6 +15,7 @@ internal sealed class TelemetryExportOptions
     public string Endpoint { get; set; } = "";
     public string TokenFile { get; set; } = "";
     public string CaCertificateFile { get; set; } = "";
+    public bool UseSystemTrust { get; set; }
     public string HostLabel { get; set; } = "";
 
     public static TelemetryExportOptions Load(string path)
@@ -31,8 +32,15 @@ internal sealed class TelemetryExportOptions
             uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
             throw new InvalidDataException("Telemetry endpoint must be https://host:port/ingest.");
         if (!Path.IsPathFullyQualified(TokenFile) ||
-            !Path.IsPathFullyQualified(CaCertificateFile))
-            throw new InvalidDataException("Telemetry token and CA certificate paths must be absolute.");
+            (!UseSystemTrust && !Path.IsPathFullyQualified(CaCertificateFile)))
+            throw new InvalidDataException("Telemetry token and private CA certificate paths must be absolute.");
+        // Standard OS trust is supported only for the known private HomeAway
+        // gateway. Never use it to send a bearer token to arbitrary domains.
+        if (UseSystemTrust && (!uri.IsDefaultPort ||
+            !string.Equals(uri.DnsSafeHost,"metrics.homeawayfromhome.house",
+                StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException(
+                "Windows certificate trust is available only for https://metrics.homeawayfromhome.house/ingest.");
     }
 }
 
@@ -208,21 +216,28 @@ internal sealed class TelemetryExportWorker(
             var token = File.ReadAllText(options.TokenFile).Trim();
             if (token.Length < 40 || token.Any(c => !Uri.IsHexDigit(c)))
                 throw new InvalidDataException("Telemetry token must contain at least 40 hexadecimal characters.");
-            using var ca = X509CertificateLoader.LoadCertificateFromFile(options.CaCertificateFile);
+            using var ca = options.UseSystemTrust ? null :
+                X509CertificateLoader.LoadCertificateFromFile(options.CaCertificateFile);
             // Only migrate/index the archive when the opt-in receiver credentials
             // are present and valid; never burden fan-control startup otherwise.
             database.EnsureTelemetryIndex();
             using var handler = new HttpClientHandler();
-            handler.ServerCertificateCustomValidationCallback = (_, cert, _, errors) =>
+            if (!options.UseSystemTrust)
             {
-                if (cert == null || (errors & (SslPolicyErrors.RemoteCertificateNotAvailable |
-                    SslPolicyErrors.RemoteCertificateNameMismatch)) != 0) return false;
-                using var verifier = new X509Chain();
-                verifier.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                verifier.ChainPolicy.CustomTrustStore.Add(ca);
-                verifier.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                return verifier.Build(cert);
-            };
+                // The legacy Pi/IP route remains pinned to its dedicated CA.
+                // Public Let's Encrypt hostnames use default Windows chain,
+                // hostname and revocation verification (no custom callback).
+                handler.ServerCertificateCustomValidationCallback = (_, cert, _, errors) =>
+                {
+                    if (cert == null || (errors & (SslPolicyErrors.RemoteCertificateNotAvailable |
+                        SslPolicyErrors.RemoteCertificateNameMismatch)) != 0) return false;
+                    using var verifier = new X509Chain();
+                    verifier.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    verifier.ChainPolicy.CustomTrustStore.Add(ca!);
+                    verifier.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                    return verifier.Build(cert);
+                };
+            }
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(12) };
             var host = string.IsNullOrWhiteSpace(options.HostLabel)
                 ? Environment.MachineName : options.HostLabel;
@@ -445,6 +460,30 @@ internal static class TelemetryExportSelfTest
             TokenFile = config.TokenFile, CaCertificateFile = config.CaCertificateFile };
         try { bad.Validate(); throw new InvalidOperationException("Accepted insecure endpoint."); }
         catch (InvalidDataException) { }
+        // Public certificate trust is explicit and strictly confined to the
+        // private HomeAway metrics hostname; the Pi-IP path remains CA pinned.
+        var trusted = new TelemetryExportOptions {
+            Enabled = true,
+            Endpoint = "https://metrics.homeawayfromhome.house/ingest",
+            TokenFile = config.TokenFile, UseSystemTrust = true
+        };
+        trusted.Validate();
+        foreach (var url in new[] {
+            "https://192.168.1.43:8429/ingest",
+            "https://metrics.homeawayfromhome.house:8443/ingest",
+            "https://attacker.example/ingest",
+            "https://metrics.homeawayfromhome.house/anything",
+            "http://metrics.homeawayfromhome.house/ingest"
+        })
+        {
+            var rejected = false;
+            try { (new TelemetryExportOptions {
+                Endpoint=url,TokenFile=config.TokenFile,UseSystemTrust=true
+            }).Validate(); }
+            catch (InvalidDataException) { rejected=true; }
+            Require(rejected,"system trust must refuse unknown endpoint: "+url);
+        }
+        Require(!config.UseSystemTrust,"legacy CA-pinned endpoint remains the default");
         Require(TelemetryLineProtocol.Label("core sensor,=\n", 30) == "core_sensor___",
             "unsafe label characters");
         var lines = TelemetryLineProtocol.Serialize(
