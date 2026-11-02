@@ -80,6 +80,12 @@ public sealed class FanControlRuntime
 
     public object Request(FanCommand? command, DashboardSettings settings)
     {
+        if(command!=null && command.Action is "override" or "reset-override" or "reset-overrides")
+        {
+            IReadOnlyList<FanOutputInfo> known;
+            lock(_sync) known=_outputs.ToArray();
+            return _profiles.RequestOverride(command,settings,known);
+        }
         if(command!=null && command.Action is "start-profile" or "stop-profile" or "stop-all")
         {
             IReadOnlyList<FanOutputInfo> known;

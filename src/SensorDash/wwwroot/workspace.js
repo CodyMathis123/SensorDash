@@ -308,6 +308,52 @@ const SDWorkspace = (() => {
   updateCurvePreview(table,S);
   return true;
  };
+ const quickFans=S=>{
+  const live=S.fanControl?.persistent||{},maps=new Map((S.settings?.fanChannelMappings||[]).map(x=>[x.channelId,x]));
+  const outputs=new Map((S.fanControl?.outputs||[]).map(x=>[x.id,x]));
+  const seen=new Set(),rows=[];
+  for(const profile of live.profiles||[])for(const id of profile.channelIds||[]){
+   if(seen.has(id))continue;seen.add(id);
+   const map=maps.get(id),output=outputs.get(id);
+   if(map?.kind==='pump')continue;
+   const override=(live.overrides||[]).find(x=>x.channelId===id);
+   const min=Math.ceil(Math.max(10,profile.minimumPercent||0,output?.minimum||0));
+   const max=Math.floor(Math.min(100,output?.maximum??100));
+   const enabled=map?.kind==='fan'&&output?.writable&&min<=max;
+   const report=(live.readings||[]).find(x=>x.id===profile.id);
+   const base=override?.percent??report?.targetPercent??min;
+   const draft=S.quickFanDrafts?.[id]??base;
+   const pct=Math.round(Math.max(min,Math.min(max,draft)));
+   const name=map?.label||output?.name||id;
+   rows.push('<div class="w-fan-quick-row"><div class="w-fan-quick-head"><strong>'+safe(name)+'</strong>'+
+    '<span class="note">'+(override?'Temporary '+override.percent+'% · until '+safe(new Date(override.expires).toLocaleTimeString()):
+    'Following automatic fan curve')+'</span></div>'+
+    '<p class="note">'+safe(profile.name)+'</p>'+
+    (enabled?'<div class="w-fan-quick-controls"><input type="range" data-quick-slider="'+attr(id)+
+      '" min="'+min+'" max="'+max+'" value="'+pct+'" step="1" aria-label="'+attr(name)+' temporary speed">'+
+      '<output data-quick-value="'+attr(id)+'">'+pct+'%</output></div>'+
+      '<div class="w-actions">'+button('quick-apply','Apply for 5 minutes','data-id="'+attr(id)+'"',false)+
+      (override?button('quick-reset','Return to fan curve','data-id="'+attr(id)+'"'):'')+'</div>':
+      '<p class="note">'+safe(map?.kind!=='fan'?'Identify this output as a fan in Advanced setup.':
+       'Writable output is unavailable.')+'</p>')+'</div>');
+  }
+  return card('Temporary fan speed','Quick adjustments, automatic control stays configured',
+   '<p class="note">Move a slider, then Apply (Windows approval). Dragging does not command the hardware. '+
+   'Overrides expire in five minutes, clear on restart/sleep and yield to temperature failsafes. '+
+   'Pump channels never appear.</p>'+
+   (rows.join('')||'<p class="note">Enable a fan profile to see sliders here.</p>')+
+   ((live.overrides||[]).length?'<div class="w-actions">'+button('quick-reset-all','Return all to curves')+'</div>':''));
+ };
+ const quickInput=(e,S)=>{
+  const slider=e.target.closest('[data-quick-slider]');
+  if(!slider)return false;
+  S.quickFanDrafts=S.quickFanDrafts||{};
+  S.quickFanDrafts[slider.dataset.quickSlider]=Number(slider.value);
+  const output=[...document.querySelectorAll('[data-quick-value]')]
+   .find(n=>n.dataset.quickValue===slider.dataset.quickSlider);
+  if(output)output.textContent=slider.value+'%';
+  return true;
+ };
  const renderLiveFanControl=(S)=>{
   const data=S.fanControl||{};
   const state=data.status||{};
@@ -508,10 +554,10 @@ const SDWorkspace = (() => {
    const controls='<div class="w-fan-lock-toolbar">'+WorkspaceLocks.action('toggle-fan-lock',!editing)+
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
-   return controls+renderProfiles(S)+
+   return controls+quickFans(S)+renderProfiles(S)+
       FanControlUx.section(S,'curves','Temperature curves',
         curves.length+' curve(s) · expand to edit',curveContent,false)+
-      FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
+      FanControlUx.section(S,'advanced','Advanced setup & diagnostics','Only for hardware changes or troubleshooting',FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
         'Hardware identification and measured RPM response',
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):''):
           WorkspaceLocks.readonly('Commissioning')+
@@ -523,7 +569,7 @@ const SDWorkspace = (() => {
           '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false)+
       FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
         'Resume recovery, commands, RPM feedback and errors',
-        FanControlDebug.render(S),false);
+        FanControlDebug.render(S),false),false);
  };
  const saves=new WeakMap();
  const saveState=S=>{
@@ -710,7 +756,29 @@ const SDWorkspace = (() => {
        ['add-component','remove-component','remove-system','add-sensor','remove-sensor'].includes(action)){
        h.toast('Unlock the cooling system before editing.');return true;
      }
-     if(action==='fan-authorize'||action==='fan-release'){
+     if(['quick-apply','quick-reset','quick-reset-all'].includes(action)){
+       const channel=id||'',slider=[...document.querySelectorAll('[data-quick-slider]')]
+        .find(n=>n.dataset.quickSlider===channel);
+       const percent=Number(slider?.value);
+       if(action==='quick-apply'&&(!slider||!Number.isFinite(percent)||
+         !(S.settings?.fanChannelMappings||[]).some(m=>m.channelId===channel&&m.kind==='fan'))){
+        h.toast('Identify and enable this fan first.');return true;
+       }
+       const command={action:action==='quick-apply'?'override':
+        action==='quick-reset'?'reset-override':'reset-overrides',
+        channelId:action==='quick-reset-all'?'':channel,
+        percent:action==='quick-apply'?percent:100,
+        durationSeconds:action==='quick-apply'?300:30,
+        confirmExclusiveOwnership:action==='quick-apply'};
+       const response=await fetch('/api/fan-control/authorize',{
+        method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
+        body:JSON.stringify(command)});
+       if(!response.ok){h.toast('Override unavailable: '+(await response.text()).slice(0,150));return true;}
+       if(S.quickFanDrafts)delete S.quickFanDrafts[channel];
+       h.toast('Approve Windows elevation to '+(action==='quick-apply'?'set temporary fan speed.':'restore the fan curve.'));
+       return true;
+      }
+      if(action==='fan-authorize'||action==='fan-release'){
        const release=action==='fan-release';
        const channel=document.getElementById('liveFanChannel')?.value||'';
        const mode=document.getElementById('liveFanMode')?.value||'manual';
@@ -943,5 +1011,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,quickInput,isHidden,displayName,usageIndex};
 })();

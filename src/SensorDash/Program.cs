@@ -200,11 +200,12 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
             context.Request.Body,JsonSerializerOptions.Web,context.RequestAborted);
     }
     catch(JsonException){return Results.BadRequest("Invalid control request.");}
-    if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all") ||
+    if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all" or "override" or "reset-override" or "reset-overrides") ||
        command.ChannelId.Length>256 || command.CurveId.Length>80 ||
-       command.DurationSeconds is < 15 or > FanControlRuntime.MaxSessionSeconds ||
+       command.DurationSeconds is < 15 or > PersistentFanProfiles.MaxOverrideSeconds ||
+       (command.Action!="override" && command.DurationSeconds>FanControlRuntime.MaxSessionSeconds) ||
        !double.IsFinite(command.Percent) ||
-       ((command.Action=="arm" || command.Action=="start-profile") &&
+       ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override") &&
            !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
     try

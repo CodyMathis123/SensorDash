@@ -124,6 +124,92 @@ internal static class FanControlSelfTest
         profiles.Tick(output,Frame(now.AddSeconds(8),40,40),now.AddSeconds(8));
         Assert(fan.Writes>1,"controller recovers after synthetic write fault");
 
+        // Temporary override is non-persistent and never alters approved curves.
+        var quick=new PersistentFanProfiles(folder.FullName);
+        var quickFan=new FakePwm();
+        var quickOutputs=new Dictionary<string,IFanPwmChannel>{{"pwm1",quickFan}};
+        var clock=DateTimeOffset.UtcNow;
+        var overrideCommand=new FanCommand("override",ChannelId:"pwm1",Percent:35,
+            DurationSeconds:300,ConfirmExclusiveOwnership:true);
+        Assert(!Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "unidentified output must never be overridden");
+        settings.FanChannelMappings=[new FanChannelMapping {
+            ChannelId="pwm1",Label="Radiator fan bank",Kind="pump"
+        }];
+        Assert(!Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "identified pump must never be overridden");
+        settings.FanChannelMappings[0].Kind="fan";
+        Assert(!Accepted(quick.RequestOverride(overrideCommand with {Percent=5},settings,known)),
+            "manual override cannot drop below the approved profile minimum");
+        Assert(!Accepted(quick.RequestOverride(overrideCommand with {Percent=double.NaN},settings,known)),
+            "nonfinite manual override must be rejected");
+        Assert(!Accepted(quick.RequestOverride(overrideCommand with {ConfirmExclusiveOwnership=false},settings,known)),
+            "temporary override requires privileged explicit approval");
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "identified fan on approved profile accepts temporary override");
+        Assert(JsonSerializer.Serialize(quick.Snapshot()).Contains("overrides"),
+            "override must be surfaced to monitoring");
+        Assert(!JsonSerializer.Serialize(new PersistentFanProfiles(folder.FullName).Snapshot())
+            .Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "temporary override must never persist to disk");
+        quick.Tick(quickOutputs,Frame(clock,50,70),clock);
+        Close(35,quickFan.SoftwareValue,"temporary duty must override the active curve");
+        Assert(Accepted(quick.RequestOverride(new FanCommand("reset-override",ChannelId:"pwm1"),
+            settings,known)),"explicit reset accepted");
+        quick.Tick(quickOutputs,Frame(clock.AddSeconds(1),50,70),clock.AddSeconds(1));
+        Close(70,quickFan.SoftwareValue,"reset returns to the automatic curve");
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "reapply temporary override");
+        quick.Tick(quickOutputs,Frame(clock.AddSeconds(2),50,null),clock.AddSeconds(2));
+        Close(100,quickFan.SoftwareValue,"missing temperature overrides and cancels manual duty");
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "failsafe must clear temporary override rather than leave it suspended");
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "reapply override after failsafe");
+        quick.Tick(quickOutputs,Frame(clock.AddSeconds(3),80,40),clock.AddSeconds(3));
+        Close(100,quickFan.SoftwareValue,"high automatic cooling demand overrides manual duty");
+        Assert(Accepted(quick.RequestOverride(overrideCommand with {Percent=100},settings,known)),
+            "manual full-speed boost is valid even under high demand");
+        quick.Tick(quickOutputs,Frame(clock.AddSeconds(4),80,40),clock.AddSeconds(4));
+        Close(100,quickFan.SoftwareValue,"full-speed manual boost stays at maximum");
+        Assert(JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":100"),
+            "manual boost at or above automatic demand is not cancelled");
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "reapply override for restart/sleep test");
+        quick.Tick(quickOutputs,Frame(clock.AddMinutes(4),50,70),clock.AddMinutes(4));
+        Close(70,quickFan.SoftwareValue,"sleep-sized gap restores approved automatic profile");
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "sleep must invalidate in-memory override");
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "reapply override for all-reset test");
+        Assert(Accepted(quick.RequestOverride(new FanCommand("reset-overrides"),settings,known)),
+            "return all fan channels to automatic control");
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "all-reset must clear every active override");
+        // Changing the saved physical mapping revokes a live override on the
+        // collector tick; a pump must never retain a convenience PWM command.
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "override before pump reclassification");
+        settings.FanChannelMappings[0].Kind="pump";
+        quick.Tick(quickOutputs,Frame(DateTimeOffset.UtcNow,50,70),
+            DateTimeOffset.UtcNow,settings);
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "reclassifying an active channel as pump immediately revokes override");
+        settings.FanChannelMappings[0].Kind="fan";
+        // Timeout: collection remains live between polls, so expiry itself
+        // rather than sleep-gap handling must remove the temporary command.
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "override for timeout");
+        var timeoutStart=DateTimeOffset.UtcNow;
+        for(var sec=0;sec<=320;sec+=10)
+        {
+            var stamp=timeoutStart.AddSeconds(sec);
+            quick.Tick(quickOutputs,Frame(stamp,50,70),stamp);
+        }
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "temporary override must expire after five minutes");
+        Close(70,quickFan.SoftwareValue,"automatic profile continues after override timeout");
+
         // Explicit stop relinquishes the channel on the next collector tick.
         var active=new PersistentFanProfiles(folder.FullName);
         Assert(Accepted(active.Request(new FanCommand("stop-profile",ProfileId:"shared"),
