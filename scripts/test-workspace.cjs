@@ -156,7 +156,14 @@ const h={
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
  assert.ok(curvesView.includes('Temporary fan speed')&&
    curvesView.includes('Advanced setup &amp; diagnostics'),
-   'Quick fan sliders should replace commissioning as the primary workflow');
+   'Quick fan sliders and advanced commissioning stay available');
+ assert.ok(curvesView.includes('data-fan-fold="quick"')&&
+   /data-fan-fold="quick"\s*><summary>/.test(curvesView)&&
+   curvesView.indexOf('data-fan-fold="profiles"') <
+     curvesView.indexOf('data-fan-fold="quick"')&&
+   curvesView.indexOf('data-fan-fold="quick"') <
+     curvesView.indexOf('data-fan-fold="curves"'),
+   'Temporary fan controls should default closed below automatic profiles');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
@@ -175,6 +182,13 @@ const h={
  quick=workspace.render(S,'curves',h);
  assert.ok(quick.includes('Return to fan curve')&&quick.includes('Return all to curves'),
    'Active overrides need local and global return actions');
+ assert.ok(quick.includes('1 active override')&&
+   /data-fan-fold="quick"\s*><summary>/.test(quick),
+   'Collapsed heading must report active override count without opening controls');
+ S.fanExpanded={quick:true};
+ assert.ok(workspace.render(S,'curves',h).includes('data-fan-fold="quick" open'),
+   'Expanding temporary controls should persist across re-render');
+ delete S.fanExpanded;
  S.settings.fanChannelMappings[0].kind='pump';
  assert.ok(!workspace.render(S,'curves',h).includes('data-quick-slider="pwm1"'),
    'Pumps must not appear in temporary speed controls');
