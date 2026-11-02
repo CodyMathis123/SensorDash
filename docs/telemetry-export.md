@@ -1,5 +1,33 @@
 # SensorDash outbound telemetry → HomeAway Grafana
 
+## Canonical HomeAway HTTPS endpoint
+
+For HomeAway deployments with the canonical metrics gateway route enabled,
+use **https://metrics.homeawayfromhome.house/ingest** from Windows SensorDash.
+
+1. First deploy and verify the gateway route on the Pi using the companion
+   HomeAwayFromHome telemetry proxy change. The Pi's old :8429 port remains
+   available during migration; do not switch Windows before the proxy returns
+   HTTP 401 to an anonymous POST and Grafana login still works.
+2. In SensorDash -> Settings -> Pi telemetry export, change the endpoint to
+   https://metrics.homeawayfromhome.house/ingest and check
+   **Use Windows certificate trust**.
+3. Leave the optional token/CA replacement fields blank to retain the existing
+   bearer and Pi private CA files, then Save. The exporter hot-reloads, without
+   restarting fan control.
+4. Confirm a recent last-delivered timestamp in SensorDash and new data in
+   Grafana. The Windows system must resolve the private metrics hostname to
+   the Pi via LAN/VPN DNS, and must trust its valid Let's Encrypt certificate.
+
+The Windows trust option is intentionally permitted **only** for that exact
+HTTPS metrics host and the default port 443. It uses the Windows certificate
+chain and hostname checks rather than disabling TLS validation.
+
+To roll back, restore the previously configured
+https://PI_LAN_IP:8429/ingest URL and **uncheck** Windows certificate trust.
+The old receiver and private CA remain installed during this staged cutover.
+
+
 **Architecture:** the local Windows collector remains responsible for hardware, while a separate bounded worker reads already-recorded SQLite rows and POSTs to the Pi over authenticated TLS. The Pi can display metrics but has **no** endpoint for fan commands, sensor aliases, cooling topology edits or local collection policies.
 
 ## Windows UI configuration

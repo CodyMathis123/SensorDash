@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 // A display-safe configuration surface. Collector stores credentials on disk
 // and does not send tokens or certificate bytes back to the desktop web UI.
-public sealed record TelemetryConfigurationUpdate(bool Enabled, string Endpoint, string HostLabel, string? Token = null, string? CaCertificatePem = null);
+public sealed record TelemetryConfigurationUpdate(bool Enabled, string Endpoint, string HostLabel, string? Token = null, string? CaCertificatePem = null, bool UseSystemTrust = false);
 
 internal sealed class TelemetryConfigurationStatus
 {
@@ -16,6 +16,7 @@ internal sealed class TelemetryConfigurationStatus
     public string HostLabel { get; init; } = "";
     public bool TokenReady { get; init; }
     public bool CaReady { get; init; }
+    public bool UseSystemTrust { get; init; }
     // The exporter reopens its own HTTPS session when settings change. It does
     // not restart the Windows hardware-control collector.
     public bool RestartRequired { get; init; }
@@ -138,6 +139,7 @@ internal static class TelemetryConfiguration
                 HostLabel = options.HostLabel,
                 TokenReady = File.Exists(tokenFile),
                 CaReady = File.Exists(caFile),
+                UseSystemTrust = options.UseSystemTrust,
                 RestartRequired = false,
                 RuntimeState = runtime.State,
                 LastDeliveredUtc = runtime.LastDeliveredUtc,
@@ -190,6 +192,7 @@ internal static class TelemetryConfiguration
             existing.Enabled = requested.Enabled;
             existing.Endpoint = endpoint;
             existing.HostLabel = host;
+            existing.UseSystemTrust = requested.UseSystemTrust;
             // Preserve existing machine-local credential locations. Never accept
             // token bytes, CA material, or file paths from an HTTP request.
             if (string.IsNullOrWhiteSpace(existing.TokenFile))
@@ -205,8 +208,9 @@ internal static class TelemetryConfiguration
             {
                 WriteProtectedCredential(existing.CaCertificateFile, newCa + Environment.NewLine);
             }
-            if (existing.Enabled && (!File.Exists(existing.TokenFile) || !File.Exists(existing.CaCertificateFile)))
-                throw new InvalidDataException("Install the Pi-issued telemetry token and CA certificate before enabling export.");
+            if (existing.Enabled && (!File.Exists(existing.TokenFile) ||
+                (!existing.UseSystemTrust && !File.Exists(existing.CaCertificateFile))))
+                throw new InvalidDataException("Install the Pi-issued telemetry token and, for the legacy IP route, its private CA certificate before enabling export.");
             var temp = path + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(existing,
                 new JsonSerializerOptions(JsonSerializerOptions.Web) { WriteIndented = true }));
@@ -267,6 +271,31 @@ internal static class TelemetryConfigurationSelfTest
                 throw new InvalidOperationException("Telemetry config: credential ACL is not restricted.");
             var active = TelemetryConfiguration.Save(candidate with { Enabled = true }, dir);
             if (active.RestartRequired) throw new InvalidOperationException("Telemetry export must hot-reload.");
+            // System trust must not require or overwrite the Pi private CA.
+            // Switching back must restore the original verified CA-pin behavior.
+            var metricsEndpoint = "https://metrics.homeawayfromhome.house/ingest";
+            var systemTrusted = TelemetryConfiguration.Save(candidate with {
+                Enabled=true, Endpoint=metricsEndpoint, UseSystemTrust=true
+            },dir);
+            if (!systemTrusted.UseSystemTrust || systemTrusted.Endpoint!=metricsEndpoint ||
+                !systemTrusted.TokenReady)
+                throw new InvalidOperationException("System trust setup failed.");
+            File.Delete(Path.Combine(dir, "telemetry-ca.crt"));
+            systemTrusted = TelemetryConfiguration.Save(candidate with {
+                Enabled=true, Endpoint=metricsEndpoint, UseSystemTrust=true
+            },dir);
+            if (!systemTrusted.Enabled || systemTrusted.CaReady)
+                throw new InvalidOperationException("System trust incorrectly depends on private CA.");
+            bool rejectedPrivate = false;
+            try { TelemetryConfiguration.Save(candidate with {Enabled=true},dir); }
+            catch (InvalidDataException) { rejectedPrivate=true; }
+            if (!rejectedPrivate)
+                throw new InvalidOperationException("Legacy private endpoint accepted missing CA.");
+            File.WriteAllText(Path.Combine(dir, "telemetry-ca.crt"), "test-cert-placeholder");
+            var reverted = TelemetryConfiguration.Save(candidate with {Enabled=true},dir);
+            if (reverted.UseSystemTrust || reverted.Endpoint!=candidate.Endpoint ||
+                !reverted.CaReady)
+                throw new InvalidOperationException("Private-CA rollback failed.");
             var oldFingerprint = TelemetryExportRuntime.Fingerprint(
                 Path.Combine(dir, "telemetry-export.json"),
                 Path.Combine(dir, "telemetry-token.txt"));
