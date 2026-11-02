@@ -168,6 +168,12 @@ internal static class FanControlSelfTest
             "reapply override after failsafe");
         quick.Tick(quickOutputs,Frame(clock.AddSeconds(3),80,40),clock.AddSeconds(3));
         Close(100,quickFan.SoftwareValue,"high automatic cooling demand overrides manual duty");
+        Assert(Accepted(quick.RequestOverride(overrideCommand with {Percent=100},settings,known)),
+            "manual full-speed boost is valid even under high demand");
+        quick.Tick(quickOutputs,Frame(clock.AddSeconds(4),80,40),clock.AddSeconds(4));
+        Close(100,quickFan.SoftwareValue,"full-speed manual boost stays at maximum");
+        Assert(JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":100"),
+            "manual boost at or above automatic demand is not cancelled");
         Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
             "reapply override for restart/sleep test");
         quick.Tick(quickOutputs,Frame(clock.AddMinutes(4),50,70),clock.AddMinutes(4));
@@ -180,6 +186,16 @@ internal static class FanControlSelfTest
             "return all fan channels to automatic control");
         Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
             "all-reset must clear every active override");
+        // Changing the saved physical mapping revokes a live override on the
+        // collector tick; a pump must never retain a convenience PWM command.
+        Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),
+            "override before pump reclassification");
+        settings.FanChannelMappings[0].Kind="pump";
+        quick.Tick(quickOutputs,Frame(DateTimeOffset.UtcNow,50,70),
+            DateTimeOffset.UtcNow,settings);
+        Assert(!JsonSerializer.Serialize(quick.Snapshot()).Contains("\"channelId\":\"pwm1\",\"percent\":35"),
+            "reclassifying an active channel as pump immediately revokes override");
+        settings.FanChannelMappings[0].Kind="fan";
         // Timeout: collection remains live between polls, so expiry itself
         // rather than sleep-gap handling must remove the temporary command.
         Assert(Accepted(quick.RequestOverride(overrideCommand,settings,known)),

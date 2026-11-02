@@ -288,15 +288,20 @@ public sealed class PersistentFanProfiles
             var problems=new List<string>();
             foreach(var id in profile.ChannelIds)
             {
-                // Temperature sensor failure always wins over a convenience override.
-                // A sensor failure or high automatic cooling demand cancels the override rather than allowing it to
-                // silently resume at an unsafe low duty after a transient fault.
-                if((demand.Failsafe || demand.Percent>=80) && overrides.Remove(id))
+                // Sensor failures or high cooling demand outrank a lower temporary duty.
+                // An intentional 100% fan boost remains allowed during high demand.
+                // Reclassifying an output as a pump or unknown immediately revokes it.
+                var manual=overrides.TryGetValue(id,out var entry) ? entry : null;
+                if(manual!=null && (demand.Failsafe ||
+                    (demand.Percent>=80 && manual.Percent<demand.Percent) ||
+                    (settings!=null && !settings.FanChannelMappings.Any(m=>
+                        m.ChannelId==id && m.Kind=="fan"))))
                 {
+                    overrides.Remove(id);
                     lock(_sync)_overrides.Remove(id);
                     _writer.ResetProfile([id]);
+                    manual=null;
                 }
-                var manual=overrides.TryGetValue(id,out var entry) ? entry : null;
                 var applied=manual==null?demand:
                     new FanDutyDecision(manual.Percent,false,"Temporary manual override");
                 if(!controls.TryGetValue(id,out var channel))
