@@ -425,14 +425,17 @@ async function loadFanControl(){
   const data=await fetchJSON('/api/fan-control');
   const signature=JSON.stringify({
     outputs:(data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]),
-    enabled:(data.persistent?.profiles||[]).map(p=>[p.id,p.needsReapproval,p.reviewReasons]).sort((a,b)=>a[0].localeCompare(b[0]))
+    enabled:(data.persistent?.profiles||[]).map(p=>[p.id,p.needsReapproval,p.reviewReasons]).sort((a,b)=>a[0].localeCompare(b[0])),
+    overrides:(data.persistent?.overrides||[]).map(o=>[o.channelId,o.percent,o.expires])
   });
   const changed=signature!==S.fanOutputSignature;
   S.fanControl=data;
   S.fanOutputSignature=signature;
   const enabled=data.persistent?.profiles?.length||0;
   const footer=byId('fanOutputStatus');
-  if(footer)footer.textContent=enabled?enabled+' enabled fan profile'+(enabled===1?'':'s'):
+  if(footer)footer.textContent=(data.persistent?.overrides||[]).length?
+    (data.persistent.overrides.length+' temporary fan override(s)'):
+    enabled?enabled+' enabled fan profile'+(enabled===1?'':'s'):
     data.status?.state==='active'?'Manual test active':'Firmware/default';
   if(changed&&S.view==='curves')render();
   else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
@@ -580,6 +583,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
 
 });
 document.addEventListener('input',e=>{
+ if(SDWorkspace.quickInput(e,S))return;
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  // Curve editor adds another blank key/value row once both numeric cells

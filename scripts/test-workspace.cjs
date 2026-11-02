@@ -154,6 +154,32 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(curvesView.includes('Temporary fan speed')&&
+   curvesView.includes('Advanced setup & diagnostics'),
+   'Quick fan sliders should replace commissioning as the primary workflow');
+ const priorFanControl=S.fanControl;
+ S.fanControl={
+   status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
+   persistent:{profiles:[{id:'shared',name:'Shared radiators',channelIds:['pwm1'],minimumPercent:20}],
+     readings:[{id:'shared',targetPercent:45}],overrides:[]}
+ };
+ S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub'}];
+ let quick=workspace.render(S,'curves',h);
+ assert.ok(quick.includes('data-quick-slider="pwm1"')&&
+   quick.includes('min="20" max="100"')&&
+   quick.includes('Apply for 5 minutes'),
+   'Approved fan channel must expose its own bounded slider');
+ assert.ok(!quick.includes('Return to fan curve'),
+   'Automatic mode should not show a redundant reset button');
+ S.fanControl.persistent.overrides=[{channelId:'pwm1',percent:36,expires:'2026-11-02T12:00:00Z'}];
+ quick=workspace.render(S,'curves',h);
+ assert.ok(quick.includes('Return to fan curve')&&quick.includes('Return all to curves'),
+   'Active overrides need local and global return actions');
+ S.settings.fanChannelMappings[0].kind='pump';
+ assert.ok(!workspace.render(S,'curves',h).includes('data-quick-slider="pwm1"'),
+   'Pumps must not appear in temporary speed controls');
+ S.settings.fanChannelMappings=[];
+ S.fanControl=priorFanControl;
  assert.ok(curvesView.includes('data-fan-fold="profiles"')&&curvesView.includes('data-fan-fold="curves"')&&
   curvesView.includes('data-fan-fold="commissioning"')&&curvesView.includes('data-fan-fold="manual"'),
   'Fan control must be grouped into collapsible sections');

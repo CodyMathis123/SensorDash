@@ -15,6 +15,11 @@ public sealed class PersistentFanProfiles
     private readonly HashSet<string> _pendingProfileResets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingOutputResets = new(StringComparer.Ordinal);
     private List<FanProfileReadout> _latest = [];
+    internal const int MaxOverrideSeconds = 300;
+    private sealed record TemporaryOverride(string ChannelId, double Percent,
+        DateTimeOffset Expires);
+    // Deliberately in-memory only: never restored after service restart or sleep.
+    private readonly Dictionary<string,TemporaryOverride> _overrides = new(StringComparer.Ordinal);
 
     public PersistentFanProfiles(string dataDirectory) : this(dataDirectory,null) { }
 
@@ -68,12 +73,64 @@ public sealed class PersistentFanProfiles
     {
         lock(_sync) return new {
             profiles = _approved.Values.Select(p=>new {id=p.Id,name=p.Name,
-                channelIds=p.ChannelIds.ToArray(),
+                channelIds=p.ChannelIds.ToArray(), minimumPercent=p.MinimumPercent,
                 curveNames=p.Curves.Select(c=>c.Name).ToArray(),
                 needsReapproval=FanProfileReview.Compare(p,settings).NeedsReapproval,
                 reviewReasons=FanProfileReview.Compare(p,settings).Reasons}).ToArray(),
-            readings = _latest.ToArray(), persistent = true
+            readings = _latest.ToArray(),
+            overrides = _overrides.Values.Select(o=>new {
+                channelId=o.ChannelId,percent=o.Percent,expires=o.Expires
+            }).ToArray(),
+            persistent = true
         };
+    }
+
+    public object RequestOverride(FanCommand command, DashboardSettings settings,
+        IReadOnlyList<FanOutputInfo> outputs)
+    {
+        lock(_sync)
+        {
+            if(command.Action=="reset-overrides")
+            {
+                foreach(var id in _overrides.Keys)_pendingOutputResets.Add(id);
+                _overrides.Clear();
+                _trace?.Event("OVERRIDE","All temporary overrides released to approved curves.");
+                return new {accepted=true,message="Automatic fan curves resume on the next hardware poll."};
+            }
+            if(command.Action=="reset-override")
+            {
+                if(string.IsNullOrEmpty(command.ChannelId) || !_overrides.Remove(command.ChannelId))
+                    return new {accepted=false,message="No active override for this fan channel."};
+                _pendingOutputResets.Add(command.ChannelId);
+                _trace?.Event("OVERRIDE","Temporary override released: "+command.ChannelId);
+                return new {accepted=true,message="Automatic fan curve resumes on the next hardware poll."};
+            }
+            if(command.Action!="override" || !command.ConfirmExclusiveOwnership)
+                return new {accepted=false,message="Explicit approval required for a temporary fan override."};
+            if(command.ChannelId.Length is <3 or >256 ||
+                command.DurationSeconds is <15 or >MaxOverrideSeconds ||
+                !double.IsFinite(command.Percent))
+                return new {accepted=false,message="Invalid override channel, duration or duty."};
+            var profile=_approved.Values.FirstOrDefault(p=>p.ChannelIds.Contains(command.ChannelId));
+            if(profile==null)
+                return new {accepted=false,message="Enable an approved automatic profile before using temporary fan overrides."};
+            // Never change pumps or unknown hardware through convenience sliders.
+            var mapping=settings.FanChannelMappings?.FirstOrDefault(m=>m.ChannelId==command.ChannelId);
+            if(mapping?.Kind!="fan")
+                return new {accepted=false,message="Identify and save this channel as a fan before using a slider."};
+            var output=outputs.FirstOrDefault(o=>o.Id==command.ChannelId);
+            if(output==null || !output.Writable)
+                return new {accepted=false,message="The approved fan output is no longer writable."};
+            var minimum=Math.Max(10,Math.Max(profile.MinimumPercent,output.Minimum));
+            var maximum=Math.Min(100,output.Maximum);
+            if(minimum>maximum || command.Percent<minimum || command.Percent>maximum)
+                return new {accepted=false,message=$"Override must be within {minimum:0.#}–{maximum:0.#}% for this approved fan."};
+            _overrides[command.ChannelId]=new(command.ChannelId,command.Percent,
+                DateTimeOffset.UtcNow.AddSeconds(command.DurationSeconds));
+            _pendingOutputResets.Add(command.ChannelId);
+            _trace?.Event("OVERRIDE",$"Temporary fan override approved for {command.ChannelId} at {command.Percent:0.#}%.");
+            return new {accepted=true,message="Temporary fan override approved; automatic curve will resume at expiry."};
+        }
     }
 
     private void Save(IEnumerable<ApprovedFanProfile> entries)
@@ -104,7 +161,11 @@ public sealed class PersistentFanProfiles
                 var keep=remaining.Values.SelectMany(p=>p.ChannelIds).ToHashSet(StringComparer.Ordinal);
                 foreach(var id in previous)if(!keep.Contains(id))_pendingReleases.Add(id);
                 _approved=remaining;
-                foreach(var id in previous.Except(keep))_pendingOutputResets.Add(id);
+                foreach(var id in previous.Except(keep))
+                {
+                    _overrides.Remove(id);
+                    _pendingOutputResets.Add(id);
+                }
                 foreach(var id in _approved.Keys)
                     if(!remaining.ContainsKey(id))_pendingProfileResets.Add(id);
                 return new {accepted=true,message="Stopped profile; restoring firmware control on the next hardware poll."};
@@ -156,6 +217,8 @@ public sealed class PersistentFanProfiles
             try{Save(next.Values);}
             catch(Exception ex){return new {accepted=false,message="Could not activate profile: "+ex.Message};}
             _approved=next;
+            // Profile reapproval revokes temporary manual targets, never persists them.
+            foreach(var id in draft.ChannelIds)_overrides.Remove(id);
             // Resending a deliberate user-approved edit must update hardware.
             foreach(var id in draft.ChannelIds)_pendingOutputResets.Add(id);
             _pendingProfileResets.Add(draft.Id);
@@ -189,12 +252,29 @@ public sealed class PersistentFanProfiles
         // ownership and force a real SetDefault/SetSoftware transition once.
         var previouslyApproved=profiles.SelectMany(p=>p.ChannelIds)
             .Distinct(StringComparer.Ordinal).ToArray();
-        if(FanResumePolicy.NeedsRearm(_lastTick,now,profiles.Length>0))
+        var previousTick=_lastTick;
+        if(FanResumePolicy.NeedsRearm(previousTick,now,profiles.Length>0))
         {
-            _trace?.ResumeGap(now-_lastTick!.Value,previouslyApproved,now);
+            _trace?.ResumeGap(now-previousTick!.Value,previouslyApproved,now);
             _writer.ForceRearm(previouslyApproved);
         }
         _lastTick=now;
+        Dictionary<string,TemporaryOverride> overrides;
+        lock(_sync)
+        {
+            if(FanResumePolicy.NeedsRearm(previousTick,now,profiles.Length>0))
+                _overrides.Clear();
+            foreach(var id in _overrides.Where(kv=>kv.Value.Expires<=now ||
+                !profiles.Any(p=>p.ChannelIds.Contains(kv.Key))).Select(kv=>kv.Key).ToArray())
+            {
+                _overrides.Remove(id);
+                _pendingOutputResets.Add(id);
+            }
+            overrides=new(_overrides,StringComparer.Ordinal);
+            // Previously queued resets plus any expired override must be consumed this tick.
+            outputResets=[..outputResets,.._pendingOutputResets];
+            _pendingOutputResets.Clear();
+        }
         foreach(var id in profileResets)_planner.Reset(id);
         _writer.ResetProfile(outputResets);
         foreach(var id in releases)
@@ -208,6 +288,17 @@ public sealed class PersistentFanProfiles
             var problems=new List<string>();
             foreach(var id in profile.ChannelIds)
             {
+                // Temperature sensor failure always wins over a convenience override.
+                // A sensor failure or high automatic cooling demand cancels the override rather than allowing it to
+                // silently resume at an unsafe low duty after a transient fault.
+                if((demand.Failsafe || demand.Percent>=80) && overrides.Remove(id))
+                {
+                    lock(_sync)_overrides.Remove(id);
+                    _writer.ResetProfile([id]);
+                }
+                var manual=overrides.TryGetValue(id,out var entry) ? entry : null;
+                var applied=manual==null?demand:
+                    new FanDutyDecision(manual.Percent,false,"Temporary manual override");
                 if(!controls.TryGetValue(id,out var channel))
                 {
                     problems.Add(id+" missing");
@@ -215,7 +306,8 @@ public sealed class PersistentFanProfiles
                         null,null,now);
                     continue;
                 }
-                var error=_writer.Apply(id,channel,demand,profile.ResponseSeconds,now);
+                var error=_writer.Apply(id,channel,applied,
+                    manual==null?profile.ResponseSeconds:0,now);
                 if(error!=null)problems.Add(error);
                 if(_trace!=null)
                 {
@@ -227,14 +319,15 @@ public sealed class PersistentFanProfiles
                         Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
                         s.Value is double v && double.IsFinite(v));
                     _trace.Observe(profile.Id,id,error!=null?"degraded":
-                        demand.Failsafe?"failsafe":"running",demand.Percent,
+                        demand.Failsafe?"failsafe":manual!=null?"override":"running",applied.Percent,
                         _writer.LastDuty(id),channel.IsSoftwareMode,
                         mapped?.RpmSensorId,reading?.Value,now);
                 }
             }
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
                 profile.ChannelIds.ToArray(),
-                problems.Count>0?"degraded":demand.Failsafe?"failsafe":"running",
+                problems.Count>0?"degraded":demand.Failsafe?"failsafe":
+                    profile.ChannelIds.Any(overrides.ContainsKey)?"override":"running",
                 demand.Percent,problems.Count>0?string.Join("; ",problems):demand.Reason));
         }
         lock(_sync)_latest=readouts;
@@ -244,7 +337,11 @@ public sealed class PersistentFanProfiles
     {
         _writer.ReleaseAll(FanPwmChannelAdapter.Wrap(controls));
         _planner.Clear();
-        lock(_sync)_latest=[];
+        lock(_sync)
+        {
+            _latest=[];
+            _overrides.Clear();
+        }
         _lastTick=null;
         // Persistent approval survives clean shutdown; firmware restore is best-effort.
         // A process crash cannot invoke a software recovery callback.
