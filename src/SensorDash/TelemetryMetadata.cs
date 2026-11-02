@@ -183,6 +183,10 @@ internal static class TelemetryMetadataSelfTest
         Check(previous.Count == 9, "four sensor descriptors, three bindings and two components");
         Check(previous.Any(x => x.Contains("device_type=Cpu") && x.Contains("sensor=/cpu/0/temperature/0")),
             "storage and CPU hardware family metadata must be available for Grafana without guessing sensor IDs");
+        Check(previous.Any(x => x.Contains("device_type=Gpu") && x.Contains("sensor=/gpu/0/temperature/0")),
+            "GPU hardware metadata must be available for cross-device reports without ID matching");
+        Check(previous.Any(x => x.Contains("device_type=Cpu") && x.Contains("kind=Power") && x.Contains("sensor=/cpu/0/power/0")),
+            "CPU watts reporting must retain device family and sample kind");
         Check(previous.Any(x => x.Contains("alias=CPU_Coolant_Proxy") && x.Contains("sensor=/cpu/0/temperature/0")),
             "alias is informational and stripped of spaces");
         Check(previous.Any(x => x.StartsWith("sensordash_cooling_binding,") &&

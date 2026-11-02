@@ -68,3 +68,11 @@ This controls-only + outbound telemetry design is implemented in [SensorDash PR 
 - Deploy Pi intake/schema changes **before** the updated Windows exporter so older and new metrics are accepted throughout the rollout.
 - This is a **draft branch**, not an installed/validated Windows fan-control replacement. Ensure stable radiator RPM/duty, pump tach-only, NVMe fan, tray icons, and sleep/resume recovery on the actual machine before merging Production.
 
+
+## Reporting contract (HomeAway / Grafana)
+
+The HomeAway [SensorDash reporting summary](https://github.com/CodyMathis123/HomeAwayFromHome/blob/feature/sensordash-reporting-summary-20261101/grafana/dashboards/reporting-summary.json) is a read-only consumer of the existing exporter. Use Grafana's 24-hour, 7-day or 30-day time range to compare observations. It relies on immutable sensor IDs for time-series joins and on the published `device_type=Cpu` / `device_type=Gpu` metadata for hardware family identification; **do not parse vendor-specific sensor IDs or assume that a single "CPU temperature" probe exists**. Aliases remain defined in SensorDash and are display-only.
+
+Recorded minimum, average and maximum are statistics **of available samples**, not proof of continuous use. The reported count and recording-density graph can expose gaps, but sample counts alone cannot measure uptime or coverage because different sensors have different collection cadences. Empty or offline periods must be shown as missing, never silently converted to zero. CPU/GPU watts originate from hardware sensors; fan and pump watts may be model estimates with separate `source` and calibration `revision` labels.
+
+A wall-clock energy total must be derived only from actual timestamp pairs with a bounded interval and clearly stated coverage, like the existing `HistoryStatsAccumulator` behavior. Do not compute kWh by multiplying arbitrary snapshots by a dashboard duration or fill sleep gaps. `sensordash_spool_value` covers the Windows SQLite database/WAL/SHM footprint; it does not imply VictoriaMetrics can accurately attribute compressed disk bytes to individual sensors. SensorDash retains the exporter retry spool and all cooling/PWM control authority; dashboards cannot edit profiles.
