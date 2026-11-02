@@ -72,6 +72,14 @@ internal static class HistoryStatisticsSelfTest
         empty.Add(0,120);
         Check(empty.Finish() is {EnergyWh:null,Count:1},
             "A single power sample cannot imply any consumed energy");
+        var gapOnly = new HistoryStatsAccumulator("pump","Power",0,4*hour,90000);
+        gapOnly.Add(0,10);
+        gapOnly.Add(3*hour,10);
+        Check(gapOnly.Finish() is {EnergyWh:null,Count:2,CoveredHours:0},
+            "Separated readings with no contiguous intervals cannot estimate energy");
+        var noData = new HistoryStatsAccumulator("gpu","Power",0,hour,90000);
+        Check(noData.Finish() is {Count:0,Min:null,Max:null,Average:null,EnergyWh:null},
+            "Unavailable history remains missing and is not presented as zero");
         var sensor=new HistoryStatsAccumulator("temp","Temperature",0,hour,90000);
         sensor.Add(100,20);sensor.Add(200,30);
         Check(sensor.Finish().EnergyWh==null,
