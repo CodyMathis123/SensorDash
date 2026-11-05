@@ -13,10 +13,17 @@
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Explicit opt-in memory experiments only; baseline release is unchanged. -->
+    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'workstation'">false</ServerGarbageCollection>
+    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'server'">true</ServerGarbageCollection>
   </PropertyGroup>
   <Target Name="GenerateSensorDashApplicationIcon" BeforeTargets="PrepareForBuild">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Generate-SensorDashIcon.ps1&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\Assets\SensorDash.ico&quot;" />
   </Target>
+  <ItemGroup Condition="'$(SensorDashGcConserveMemory)' != ''">
+    <!-- Valid values: 0-9; never set by normal release builds. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="$(SensorDashGcConserveMemory)" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="Assets\SensorDash.ico" CopyToPublishDirectory="Always" TargetPath="SensorDash.ico" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
