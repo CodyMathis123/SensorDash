@@ -218,6 +218,10 @@ public sealed class PersistentFanProfiles
         {
             if(command.Action is "stop-profile" or "stop-all")
             {
+                if(_calibration?.Running==true &&
+                    (command.Action=="stop-all" || _approved.TryGetValue(command.ProfileId,out var toStop)
+                        && toStop.ChannelIds.Contains(_calibration.ChannelId)))
+                    _calibration.Abort("Approved profile stopped; calibration cancelled.");
                 if(command.Action=="stop-profile" && !_approved.ContainsKey(command.ProfileId))
                     return new {accepted=false,message="Fan profile is not active."};
                 var previous=_approved.Values.SelectMany(p=>p.ChannelIds).ToHashSet(StringComparer.Ordinal);
@@ -428,7 +432,8 @@ public sealed class PersistentFanProfiles
                 if(calibrating==null && settings!=null &&
                     settings.FanChannelMappings.Any(m=>m.ChannelId==id && m.Kind=="fan"))
                 {
-                    var check=_feedback.Check(id,_writer.LastDuty(id),frame,now);
+                    (bool Rearm,bool Recovered,string Message) check;
+                    lock(_sync)check=_feedback.Check(id,_writer.LastDuty(id),frame,now);
                     if(check.Message.Length>0)
                     {
                         _trace?.Event(check.Rearm?"PWM-DRIFT":
