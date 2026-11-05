@@ -489,7 +489,13 @@ const SDWorkspace = (() => {
  const renderLiveFanControl=(S)=>{
   const data=S.fanControl||{};
   const state=data.status||{};
-  const outputs=data.outputs||[];
+  const allOutputs=data.outputs||[];
+  const referenced=new Set([
+   ...(S.settings?.fanChannelMappings||[]).map(m=>m.channelId),
+   ...(S.settings?.fanProfiles||[]).flatMap(p=>p.channelIds||[]),
+   ...(data.persistent?.profiles||[]).flatMap(p=>p.channelIds||[])
+  ]);
+  const outputs=allOutputs.filter(o=>referenced.has(o.id)||!isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const active=state.state==='active'||state.state==='pending';
   const supported=outputs.filter(o=>o.writable);
   const rows=outputs.map(o=>
@@ -514,7 +520,7 @@ const SDWorkspace = (() => {
     '<div class="w-actions">'+
       '<label>Writable channel<select id="liveFanChannel">'+
       '<option value="">Choose an output</option>'+supported.map(o=>
-        '<option value="'+attr(o.id)+'">'+safe(o.device+' / '+o.name+' ('+o.mode+')')+'</option>').join('')+
+        '<option value="'+attr(o.id)+'">'+safe(o.device+' / '+o.name+' ('+o.mode+')'+(isHidden(S,S.byId.get(o.id))?' [Hidden]':''))+'</option>').join('')+
       '</select></label>'+
       '<label>Control mode<select id="liveFanMode"><option value="manual">Manual test</option>'+
       '<option value="curve">Saved temperature curve</option></select></label>'+
@@ -540,7 +546,10 @@ const SDWorkspace = (() => {
   const editing=!WorkspaceLocks.fan(S);
   const all=S.settings?.fanProfiles||[], approved=S.fanControl?.persistent||{};
   const active=approved.profiles||[], reports=approved.readings||[];
-  const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
+  const allOutputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
+  const outputsFor=p=>allOutputs.filter(o=>p.channelIds.includes(o.id)||
+   active.some(a=>(a.channelIds||[]).includes(o.id))||
+   !isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const curves=S.settings?.simulatedFanCurves||[];
   const mapping=id=>FanFeedback.mapping(S,id);
   const header=card('Live fan profiles','Automatic fan control',
@@ -578,9 +587,9 @@ const SDWorkspace = (() => {
         '<span>'+safe(c.name)+'<small>'+safe(displayName(S,S.byId.get(c.sourceSensorId)||{name:'Select source sensor'}))+'</small></span></label>').join(''):
         '<p class="note">Create a temperature curve below first.</p>')+
        '</div><div><h3>Hardware PWM channels</h3>'+
-       (outputs.length?outputs.map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
+       (outputsFor(p).length?outputsFor(p).map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
         '<span>'+safe((mapping(o.id)?.label?mapping(o.id).label+' · ':'')+
-           o.device+' / '+o.name)+'<small>'+safe(
+           o.device+' / '+o.name+(isHidden(S,S.byId.get(o.id))?' [Hidden]':''))+'<small>'+safe(
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
