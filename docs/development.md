@@ -45,22 +45,36 @@ cumulative fraction of runtime paused in GC. A null effective configuration
 entry is **unknown**, not proof of a default setting. The last-GC values are
 unavailable until the first GC. No collection is requested by diagnostics.
 
-Optional build-time overrides let us test one GC dimension at a time on a
-**disposable machine or explicitly supervised maintenance window**:
+The `Windows MSI build` workflow offers a manual `gc_profile` choice:
+`baseline` (normal installer and normal GC runtime policy) or `workstation`
+(explicit Workstation GC for **both** processes). On `Production`, the workflow
+always uses the baseline and rejects experimental selections. Every new
+workflow run has a unique MSI version/ProductCode; the experimental MSI filename
+ends with `-workstation-gc.msi` and is validated against the previous Production
+MSI in the existing installer servicing test.
+
+To start the experiment against the feature branch, **prefer GitHub CLI** while
+the workflow input is not yet on `Production`: the web form may still show the
+default-branch workflow's older inputs.
 
 ```powershell
-dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcMode=workstation
-dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcMode=server
-dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcConserveMemory=5
+gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/performance-diagnostics-and-footprint -f gc_profile=workstation
 ```
 
-Do not deploy these loose publish outputs over an installed MSI or reuse an MSI
-ProductVersion for different binaries. Use a separately versioned, validated
-installer for each supervised experiment; never change the current fan-control
-service's environment or restart it as part of exploratory profiling. The
-shared executable serves both the privileged collector and desktop; MSBuild
-overrides affect both in any installed experimental build. The baseline needs
-to be measured first and must remain available for rollback.
+After the run, check Actions → Windows MSI build and confirm the run SHA,
+`gc_profile=workstation` selection, the `-workstation-gc.msi` artifact name,
+successful automated checks, and the smoke-test assertion that both running
+processes report `serverGc=false`. This is a **manually requested run**;
+ordinary feature commits and PR edits still trigger no CI.
+
+**Supervised real-PC installation is a separate decision.** Before replacing an
+installed automatic fan-control service, retain its working installer and
+verify a viable downgrade/rollback strategy. The MSI intentionally rejects
+downgrades and a previously built baseline MSI has a lower version than the
+experimental MSI. Rolling back may therefore require a *newer versioned*
+baseline MSI or a carefully planned uninstall/reinstall preserving user data.
+Do not assume running an older baseline MSI will revert the GC experiment.
+Avoid installing any unverified or failed artifact on the cooling PC.
 
 Compare the same configuration, workload, and runtime (including installed
 driver state) for startup, 1-hour, and 24-hour readings. Export both process
