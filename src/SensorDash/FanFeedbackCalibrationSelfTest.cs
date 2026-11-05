@@ -143,6 +143,10 @@ internal static class FanFeedbackCalibrationSelfTest
                 now.AddSeconds(second));
         Check(sweep.CompletedSteps==1 && sweep.CurrentDuty==95 &&
             sweep.NeedsApply,"full response sweep advances in five percent increments");
+        Check(sweep.Measurements[0].Temperatures.Count==1 &&
+              sweep.Measurements[0].Temperatures[0].SensorId=="temp" &&
+              Math.Abs(sweep.Measurements[0].Temperatures[0].Celsius-30)<0.01,
+            "each settled fan RPM point must capture the selected thermal guard's actual reading");
         sweep.MarkApplied(now.AddSeconds(21));
         Check(sweep.Observe(Frame(now.AddSeconds(28),95,0),now.AddSeconds(28)) &&
             sweep.State=="aborted","stalled fan aborts calibration");
