@@ -57,6 +57,16 @@ const FanCommissioning=(()=>{
   const status=S.fanControl?.status||{};
   const calibration=S.fanControl?.persistent?.calibration;
   const calibrationHere=calibration?.channelId===selected?calibration:null;
+  const running=calibration?.state==='running';
+  const otherRunning=running&&calibration.channelId!==selected;
+  const activeMapping=mappings(S).find(m=>m.channelId===calibration?.channelId);
+  const activeOutput=outputs.find(o=>o.id===calibration?.channelId);
+  const activeName=activeMapping?.label||activeOutput?.name||calibration?.channelId||'Fan';
+  const completed=Number(calibration?.completedSteps)||0;
+  const total=Math.max(1,Number(calibration?.totalSteps)||1);
+  const progressText=completed+' of '+total+' stable speeds measured';
+  const busyMessage=activeName+' is currently being calibrated. Only one fan can be calibrated at a time.';
+  const disabledReason=running?' title="'+esc(busyMessage)+'"':'';
   const temperatures=S.sensors.filter(x=>x.type==='Temperature');
   const linkedProfileDrafts=(S.settings?.fanProfiles||[])
     .filter(p=>(p.channelIds||[]).includes(selected));
@@ -99,6 +109,17 @@ const FanCommissioning=(()=>{
    '<p>Identify the physical fan and tachometer before configuring temperature curves</p></div>'+
    '<span class="pill '+(verified?'':'warn')+'">'+(verified?(fullSaved?'Full RPM response saved':'PWM/RPM pairing verified'):'Unverified pairing')+'</span></div>'+
    '<div class="help">Calibration belongs to the physical PWM header, not a CPU/GPU curve. The first sweep identifies its tachometer; the optional full sweep builds a PWM-to-RPM table. Both require local administrator authorization and supervision. Never test a pump.</div>'+
+   (running?'<div class="fc-global-calibration" id="fcGlobalCalibration" role="status" aria-live="polite">'+
+     '<div class="fc-global-calibration-copy"><strong>'+
+       (otherRunning?'Another calibration is running':'Calibration in progress')+'</strong>'+
+       '<span><b>'+esc(activeName)+'</b> · <span id="fcGlobalCalibrationSteps">'+
+       progressText+'</span> · <span id="fcGlobalCalibrationDuty">'+
+       Number(calibration.currentDuty).toFixed(0)+'% PWM</span></span></div>'+
+     '<progress id="fcGlobalCalibrationProgress" value="'+completed+
+       '" max="'+total+'"></progress>'+
+     (otherRunning?'<button class="btn secondary" data-commissioning="view-active-calibration">'+
+       'View '+esc(activeName)+'</button>':'')+
+     '</div>':'')+
    '<div class="w-actions"><label>1 · Physical PWM output<select id="fcChannel">'+
    outputs.map(o=>choice(o.id,o.device+' / '+o.name+' ['+o.id+']',selected)).join('')+
    '</select></label><label>Type of connected equipment<select id="fcKind">'+
@@ -114,11 +135,15 @@ const FanCommissioning=(()=>{
    ' · supported '+output.minimum+'–'+output.maximum+'% PWM. '+esc(readOnly)+
    ' Selecting an RPM sensor does not prove it belongs to this output.</p>'+
    '<div class="fc-steps"><div class="fc-calibration-primary"><h3>Fan speed calibration</h3>'+
+   (otherRunning?'<div class="fc-other-calibration" role="status">'+
+     '<strong>Calibration unavailable for this fan</strong>'+
+     '<p>'+esc(busyMessage)+' This fan continues using its normal control settings. '+
+     'Choose View '+esc(activeName)+' above to see the running test.</p></div>':'')+
    '<p class="fc-calibration-intro">Full calibration measures up to 19 speeds, from 100% to 10% in 5% steps. Each point is recorded only after the fan stays at a stable RPM. Allow roughly 7–20 minutes; you can cancel at any time.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcExclusive"><span>I can observe these fans and no other fan-control software is active. This output is not a pump.</span></label>'+
    '<p class="note fc-setup-details">New fan? Verify the PWM/RPM pairing first. An already verified fan can go straight to a full calibration.</p>'+
    '<div class="w-actions"><button class="btn" data-commissioning="start-identify" '+
-     (!identifyReady||calibration?.state==='running'?'disabled':'')+
+     (!identifyReady||running?'disabled':'')+disabledReason+
      '>Verify fan and RPM pairing</button></div>'+
    '<p class="fc-setup-details">Calibration temporarily takes control of this PWM output and ignores its normal temperature curve. Only the selected temperature guards, fan/RPM feedback and hardware safety checks can stop the test. Select every temperature that depends on these fans; the normal approved curve resumes afterward. A 25-minute cutoff prevents indefinite testing.</p>'+
    '<div class="fc-calibration-guards">'+
@@ -126,7 +151,7 @@ const FanCommissioning=(()=>{
      guardSelect('fcGuardSecondary','Additional thermal guard',guardDefaults.second,true)+
      '<label>Stop test above (°C)<input type="number" id="fcGuardLimit" min="35" max="100" step="1" value="'+esc(guardDefaults.limit)+'"></label></div>'+
    '<div class="fc-calibration-actions"><button class="btn" data-commissioning="start-auto" '+
-     (!responseReady||calibration?.state==='running'?'disabled':'')+
+     (!responseReady||running?'disabled':'')+disabledReason+
      '>Run full calibration</button>'+
    (calibrationHere?.state==='running'?
       '<button class="btn secondary" data-commissioning="cancel-auto">Cancel and restore control</button>':'')+
@@ -223,12 +248,41 @@ const FanCommissioning=(()=>{
   if(byId('fcLivePwm'))byId('fcLivePwm').textContent=Number.isFinite(pwm?.value)?
     Number(pwm.value).toFixed(1)+'%':'—';
   const cal=S.fanControl?.persistent?.calibration;
+  const global=byId('fcGlobalCalibration');
+  if(global&&cal?.state==='running'){
+    const progress=byId('fcGlobalCalibrationProgress');
+    if(progress){
+      progress.max=Math.max(1,Number(cal.totalSteps)||1);
+      progress.value=Number(cal.completedSteps)||0;
+    }
+    const steps=byId('fcGlobalCalibrationSteps');
+    if(steps)steps.textContent=(Number(cal.completedSteps)||0)+' of '+
+      (Number(cal.totalSteps)||1)+' stable speeds measured';
+    const duty=byId('fcGlobalCalibrationDuty');
+    if(duty)duty.textContent=Math.round(Number(cal.currentDuty)||0)+'% PWM';
+  }
   const banner=byId('fcCalibrationBanner');
   const heading=byId('fcCalibrationHeading');
   const message=byId('fcAutoStatus');
   const progress=byId('fcCalibrationProgress');
   const details=byId('fcAutoProgress');
-  if(cal?.channelId===selected){
+  if(cal?.state==='running'&&cal.channelId!==selected){
+   if(banner)banner.dataset.status='busy';
+   if(heading)heading.textContent='Another calibration is running';
+   const map=mappings(S).find(m=>m.channelId===cal.channelId);
+   const output=channels(S).find(o=>o.id===cal.channelId);
+   const name=map?.label||output?.name||cal.channelId;
+   if(message)message.textContent=name+
+     ' is being calibrated. Only one fan can be calibrated at a time. '+
+     'This fan remains on its normal settings.';
+   if(details)details.textContent=(Number(cal.completedSteps)||0)+
+     ' of '+(Number(cal.totalSteps)||1)+' stable speeds measured on '+name;
+   if(progress){
+     progress.hidden=false;
+     progress.max=Math.max(1,Number(cal.totalSteps)||1);
+     progress.value=Number(cal.completedSteps)||0;
+   }
+  }else if(cal?.channelId===selected){
    pendingCalibration=null;
    calibrationNotice='';
    if(banner)banner.dataset.status=cal.state;
@@ -266,6 +320,16 @@ const FanCommissioning=(()=>{
  const doAction=async(action,el,S,h)=>{
   const channel=channels(S).find(o=>o.id===selected),map=current(S);
   if(!channel)throw Error('Select a discovered physical output first.');
+  if(action==='view-active-calibration'){
+   const cal=S.fanControl?.persistent?.calibration;
+   if(cal?.state!=='running'||!channels(S).some(o=>o.id===cal.channelId))
+    throw Error('No active calibration is available to view.');
+   selected=cal.channelId;
+   seenKey='';activeSince=0;
+   h.render();
+   byId('fcChannel')?.focus?.();
+   return;
+  }
   if(action==='save'){
    const kind=byId('fcKind')?.value||'unknown';
    const label=byId('fcLabel')?.value.trim()||'';
@@ -301,6 +365,13 @@ const FanCommissioning=(()=>{
    return persist(S,draft,h,'Fan identity confirmed. Calibration remains observational.');
   }
   if(action==='start-identify'||action==='start-auto'){
+   const currentRun=S.fanControl?.persistent?.calibration;
+   if(currentRun?.state==='running'){
+    const map=mappings(S).find(m=>m.channelId===currentRun.channelId);
+    const output=channels(S).find(o=>o.id===currentRun.channelId);
+    throw Error((map?.label||output?.name||currentRun.channelId)+
+      ' is already being calibrated. Finish that test before starting another.');
+   }
    const identifying=action==='start-identify';
    if(!map||map.kind!=='fan'||!map.rpmSensorId||byId('fcKind')?.value!=='fan'||
       byId('fcRpm')?.value!==map.rpmSensorId||!channel.writable)
