@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -304,7 +305,10 @@ public sealed record ProcessPerformanceSample(
     int ThreadCount, int HandleCount,
     double? CollectorCycleMeanMs, double? HardwareScanMeanMs,
     double? IpcSerializationMeanMs, double? IpcResponseMeanBytes,
-    long CollectorCycles, long IpcResponses);
+    long CollectorCycles, long IpcResponses,
+    bool ServerGc, int? GcHeapCount, int? GcConserveMemoryLevel,
+    long? GcLastHeapSizeBytes, long? GcFragmentedBytes, double? GcPauseTimePercent,
+    long? GcIndex);
 
 public static class CollectorPerformance
 {
@@ -340,6 +344,15 @@ public static class CollectorPerformance
 public static class ProcessTelemetry
 {
     private static readonly object Gate = new();
+    // Runtime effective configuration is queried once, never per collector tick.
+    // Only a fixed allowlist of GC numbers is exposed (no environment dump).
+    private static readonly IReadOnlyDictionary<string, object> GcConfiguration = GC.GetConfigurationVariables();
+    private static int? ConfigInteger(string key)
+    {
+        if (!GcConfiguration.TryGetValue(key, out var value)) return null;
+        try { return Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception) { return null; }
+    }
     private static readonly List<ProcessPerformanceSample> Samples = [];
     private static ProcessPerformanceSample? _current;
     private static double _previousCpuSeconds, _previousAllocatedBytes;
@@ -372,7 +385,13 @@ public static class ProcessTelemetry
                 allocated, cpuPercent, allocationRate, GC.CollectionCount(0), GC.CollectionCount(1),
                 GC.CollectionCount(2), process.Threads.Count, process.HandleCount,
                 timings.CycleMs, timings.ScanMs, timings.IpcMs, timings.IpcBytes,
-                timings.Cycles, timings.Responses);
+                timings.Cycles, timings.Responses,
+                GCSettings.IsServerGC, ConfigInteger("GCHeapCount"),
+                ConfigInteger("GCConserveMemory"),
+                gc.Index > 0 ? gc.HeapSizeBytes : null,
+                gc.Index > 0 ? gc.FragmentedBytes : null,
+                gc.Index > 0 ? gc.PauseTimePercentage : null,
+                gc.Index > 0 ? gc.Index : null);
             _previousTimestamp = now;
             _previousCpuSeconds = cpu;
             _previousAllocatedBytes = allocated;
