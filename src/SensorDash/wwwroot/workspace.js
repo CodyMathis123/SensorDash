@@ -557,7 +557,8 @@ const SDWorkspace = (() => {
    return controls+renderProfiles(S)+
       FanControlUx.section(S,'calibration','Fan control & calibration',
         'One place for temporary speed, identification, manual tests and automatic PWM/RPM measurement',
-        editing?FanCommissioning.render(S):
+        editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
+          '<p class="note">Fan calibration module unavailable.</p>'):
           WorkspaceLocks.readonly('Fan control & calibration')+
           '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',true)+
       FanControlUx.section(S,'curves','Temperature curves',
