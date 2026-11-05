@@ -324,7 +324,7 @@ public sealed class PersistentFanProfiles
                 {
                     problems.Add(id+" missing");
                     _trace?.Observe(profile.Id,id,"missing",demand.Percent,null,false,
-                        null,null,now);
+                        null,null,null,now);
                     continue;
                 }
                 var error=_writer.Apply(id,channel,applied,
@@ -339,10 +339,19 @@ public sealed class PersistentFanProfiles
                         s.ObservedAt.HasValue &&
                         Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
                         s.Value is double v && double.IsFinite(v));
+                    // Distinct from IControl.SoftwareValue (command-side cache):
+                    // the Control sensor reports the last Super I/O register
+                    // readback from hardware.Update() on this collection tick.
+                    // It is sampled before this tick's PWM write.
+                    var registerDuty=frame.Sensors.FirstOrDefault(s=>
+                        s.Id==id && s.Type=="Control" &&
+                        s.ObservedAt.HasValue &&
+                        Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
+                        s.Value is double v && double.IsFinite(v))?.Value;
                     _trace.Observe(profile.Id,id,error!=null?"degraded":
                         demand.Failsafe?"failsafe":manual!=null?"override":"running",applied.Percent,
                         _writer.LastDuty(id),channel.IsSoftwareMode,
-                        mapped?.RpmSensorId,reading?.Value,now);
+                        registerDuty,mapped?.RpmSensorId,reading?.Value,now);
                 }
             }
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
