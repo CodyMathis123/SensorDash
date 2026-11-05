@@ -56,7 +56,8 @@ public sealed class FanControlRuntime
 
     public bool IsActive
     {
-        get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
+        get { lock (_sync) return _pending != null || _session != null ||
+            _profiles.HasActiveProfiles || _profiles.HasCalibrationRunning; }
     }
 
     // Called by the collection thread after a fresh LHM Computer.Open()
@@ -124,6 +125,7 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "A hardware operation is still pending." };
             if (command.Action == "release")
             {
+                _profiles.CancelCalibration("User requested firmware-default control.");
                 _pending = new Pending(command, null);
                 _trace.Event("REQUEST","Manual firmware release queued.");
                 return new { accepted = true, message = "Firmware-default restoration queued." };
@@ -133,6 +135,8 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "This channel is identified as a pump; manual fan-commissioning tests are disabled." };
             if (_session != null)
                 return new { accepted = false, message = "Release the current session first." };
+            if(_profiles.HasCalibrationRunning)
+                return new {accepted=false,message="Finish calibration before starting a separate manual test."};
             if (!command.ConfirmExclusiveOwnership)
                 return new { accepted = false, message = "You must confirm no other software controls this output." };
             if (command.ChannelId.Length is < 3 or > 256 ||
