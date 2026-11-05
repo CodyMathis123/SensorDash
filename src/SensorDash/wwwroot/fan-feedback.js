@@ -33,6 +33,20 @@ const FanFeedback=(()=>{
   const map=mapping(S,channelId);
   if(map?.kind!=='fan'||!map.verifiedAt)
    return {text:'Not calibrated',hint:'Verify the physical fan and RPM sensor first.'};
+  // A descending sweep observed a confirmed fan stop here. Never
+  // interpolate the 0 RPM reading as a running-speed calibration, or claim
+  // it establishes the fan's startup threshold.
+  const cutoff=map.cutoff;
+  if(Number.isFinite(cutoff?.dutyPercent)){
+   if(percent===cutoff.dutyPercent)
+    return {text:'0 RPM observed at '+cutoff.dutyPercent+'%',
+      hint:'Fan stopped at this PWM duty during a descending calibration sweep. '+
+        'This is an observation, not a tested startup or guaranteed running threshold.'};
+   if(percent<cutoff.dutyPercent)
+    return {text:'Below observed stop',
+      hint:'The fan was observed stopped at '+cutoff.dutyPercent+
+        '% PWM. No running RPM measurement exists at this lower duty.'};
+  }
   const points=[...(map.measurements||[])]
     .filter(p=>Number.isFinite(p.dutyPercent)&&Number.isFinite(p.rpm)&&p.rpm>0)
     .sort((a,b)=>a.dutyPercent-b.dutyPercent);
