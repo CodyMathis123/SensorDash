@@ -230,6 +230,7 @@ const SDWorkspace = (() => {
     '<text x="36" y="'+(y(v)+4)+'" text-anchor="end" fill="#98b2c4" font-size="11">'+v+'%</text>').join('');
   const pointsMarkup=sorted.map(p=>
     '<g class="w-curve-point-marker" data-curve-point-index="'+p.index+
+      '" data-curve-dot-temperature="'+p.temperature+'" data-curve-dot-percent="'+p.percent+
       '" tabindex="0" role="button" aria-label="'+attr(
        'Curve point: '+p.temperature+' degrees Celsius, '+p.percent+' percent fan speed')+'">'+
       '<circle class="w-curve-point-halo" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
@@ -317,7 +318,7 @@ const SDWorkspace = (() => {
   '<p class="note w-curve-estimate-note">Est. RPM is informational and uses the fan output’s saved measurements. A dash (—) means this duty is not calibrated; hover for details. CPU/GPU MAX mixing can select a higher actual duty.</p>'+
   '<p class="note">Use the empty row to add a point.</p>'+
   '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
- const readCurvePointRows=(table)=>{
+ const readCurvePointRows=(table,preserveRowOrder=false)=>{
   const rows=[...table.querySelectorAll('tbody tr[data-curve-point-row]')];
   const points=[];
   for(const row of rows){
@@ -336,10 +337,10 @@ const SDWorkspace = (() => {
   }
   if(points.length<2)throw Error('Enter at least two complete curve points.');
   if(points.length>16)throw Error('A curve can contain at most 16 points.');
-  points.sort((a,b)=>a.temperature-b.temperature);
-  if(points.some((p,i)=>i>0&&p.temperature===points[i-1].temperature))
+  const sorted=[...points].sort((a,b)=>a.temperature-b.temperature);
+  if(sorted.some((p,i)=>i>0&&p.temperature===sorted[i-1].temperature))
     throw Error('Each temperature must be unique.');
-  return points;
+  return preserveRowOrder?points:sorted;
  };
  const updateCurvePreview=(table,S)=>{
   const container=table.closest('.panel');
@@ -347,7 +348,7 @@ const SDWorkspace = (() => {
   const preview=container?.querySelector('[data-curve-preview]');
   if(!preview)return;
   try{
-   const points=readCurvePointRows(table);
+   const points=readCurvePointRows(table,true);
    const id=table.dataset.curveTable;
    const live=S.simulation?.results?.find(x=>x.id===id);
    preview.innerHTML=curveDiagram(points,live?.inputTemperature,null);
@@ -361,6 +362,9 @@ const SDWorkspace = (() => {
      cell.title=estimate.hint;
     }
    }
+   const focused=document.activeElement?.closest?.('[data-curve-point-row]');
+   if(focused && table.contains(focused) && focused.dataset.curvePointIndex!=null)
+    activateCurvePoint(focused,Number(focused.dataset.curvePointIndex));
    if(message)message.textContent='Preview updated · save to apply this curve to simulation.';
   }catch(e){
    if(message)message.textContent=e.message;
@@ -378,6 +382,7 @@ const SDWorkspace = (() => {
      rows.length<=16){
     last.insertAdjacentHTML('afterend',curvePointRow());
   }
+  indexCurveRows(table);
   updateCurvePreview(table,S);
   return true;
  };
@@ -931,6 +936,7 @@ const SDWorkspace = (() => {
          if(!last || temperature || percent){
            table.querySelector('tbody')?.insertAdjacentHTML('beforeend',curvePointRow());
          }
+         indexCurveRows(table);
          updateCurvePreview(table,S);
        }
        return true;
