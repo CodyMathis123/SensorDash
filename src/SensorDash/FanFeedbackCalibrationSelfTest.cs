@@ -196,6 +196,12 @@ internal static class FanFeedbackCalibrationSelfTest
             DutyPercent=100-i*5,
             Rpm=2000-i*70,ObservedAt=now
         }).ToList();
+        points[0].Temperatures=[
+            new(){SensorId="nvme",SensorName="NVMe Temperature",
+                Celsius=47.5,ObservedAt=now},
+            new(){SensorId="bad",SensorName="Invalid",
+                Celsius=double.NaN,ObservedAt=now}
+        ];
         var allPoints=new FanChannelMapping {
             ChannelId="pwm-all",Kind="fan",Label="Calibrated radiator bank",
             RpmSensorId="rpm",VisuallyIdentified=true,VerifiedAt=now,
@@ -207,6 +213,17 @@ internal static class FanFeedbackCalibrationSelfTest
               normalized.Measurements[^1].DutyPercent==100 &&
               normalized.VerifiedAt.HasValue,
             "save/settings normalization must preserve all 19 RPM calibration points");
+        var stored=normalized.Measurements.Single(p=>p.DutyPercent==100);
+        Check(stored.Temperatures.Count==1 &&
+              stored.Temperatures[0].SensorId=="nvme" &&
+              Math.Abs(stored.Temperatures[0].Celsius-47.5)<0.001,
+            "normalization retains valid guard observations and drops invalid values");
+        var roundTrip=System.Text.Json.JsonSerializer.Deserialize<FanChannelMapping>(
+            System.Text.Json.JsonSerializer.Serialize(normalized))!;
+        Check(roundTrip.Measurements.Count==19 &&
+              roundTrip.Measurements.Single(p=>p.DutyPercent==100)
+                  .Temperatures.Single().SensorName=="NVMe Temperature",
+            "RPM/temperature calibration data must survive JSON persistence");
 
         // A fan must be discoverable and calibratable BEFORE any temperature
         // curve or live profile exists. Only the elevated, timed session may
