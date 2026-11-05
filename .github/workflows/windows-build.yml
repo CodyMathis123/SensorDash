@@ -5,6 +5,15 @@ on:
   push:
     branches: [Production]
   workflow_dispatch:
+    inputs:
+      gc_profile:
+        description: "Runtime GC profile for this manually requested MSI"
+        type: choice
+        required: true
+        default: baseline
+        options:
+          - baseline
+          - workstation
 permissions:
   contents: read
   actions: read
@@ -16,6 +25,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Select and validate GC profile
+        shell: pwsh
+        env:
+          GC_PROFILE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.gc_profile || 'baseline' }}
+        run: |
+          $profile = $env:GC_PROFILE_INPUT
+          if ($profile -notin @('baseline', 'workstation')) {
+            throw "Unrecognized GC profile: $profile"
+          }
+          # Production builds must never silently switch the installed GC policy.
+          if ('${{ github.ref }}' -eq 'refs/heads/Production' -and $profile -ne 'baseline') {
+            throw 'Production branch must use baseline GC configuration.'
+          }
+          "SENSORDASH_GC_PROFILE=$profile" >> $env:GITHUB_ENV
+          if ($profile -eq 'workstation') {
+            "SENSORDASH_MSI_SUFFIX=-workstation-gc" >> $env:GITHUB_ENV
+            Write-Host 'GC experiment: Workstation GC (both desktop and collector).'
+          } else {
+            Write-Host 'Normal release GC configuration; no override applied.'
+          }
       - name: Validate release identity
         shell: pwsh
         run: |
@@ -177,7 +206,15 @@ jobs:
             throw 'Exporter hot reload or interrupted manual PWM safeguards are missing'
           }
       - name: Publish Windows application
-        run: dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 --no-restore -o dist
+        shell: pwsh
+        run: |
+          $publishArgs = @('publish', 'src/SensorDash/SensorDash.csproj', '-c', 'Release',
+            '-r', 'win-x64', '--no-restore', '-o', 'dist')
+          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
+            $publishArgs += '-p:SensorDashGcMode=workstation'
+          }
+          & dotnet @publishArgs
+          if ($LASTEXITCODE -ne 0) { throw 'SensorDash publish failed' }
       - name: Validate generic models and simulation engine
         shell: pwsh
         run: |
@@ -219,13 +256,439 @@ jobs:
           if (!$icon -or $icon.Width -lt 16) { throw 'Shortcut icon carrier has no embedded icon' }
           $icon.Dispose()
       - name: Build Windows MSI installer
-        run: dotnet build installer/SensorDash.wixproj -c Release -p:Platform=x64
+        shell: pwsh
+        run: |
+          $msiArgs = @('build', 'installer/SensorDash.wixproj', '-c', 'Release', '-p:Platform=x64')
+          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
+            $msiArgs += '-p:SensorDashMsiVariantSuffix=-workstation-gc'
+          }
+          & dotnet @msiArgs
+          if ($LASTEXITCODE -ne 0) { throw 'SensorDash MSI build failed' }
       - name: Confirm installer created
         shell: pwsh
         run: |
-          $msi = Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse | Select-Object -First 1
-          if (!$msi) { throw 'WiX did not produce an MSI' }
-          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes)"
+          $msis = @(Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse)
+          if ($msis.Count -ne 1) { throw "Expected exactly one MSI; found $($msis.Count)" }
+          $msi = $msis[0]
+          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation' -and $msi.Name -notmatch '-workstation-gc\.msi
+      - name: Smoke-test local HTTP API and dashboard
+        shell: pwsh
+        run: |
+          # Prove that the executable serves its UI with NO external webroot,
+          # and with a completely unrelated working directory.
+          $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
+          New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
+          Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          # Exercise both components, including named-pipe service communication,
+          # without installing a service on the CI runner.
+          $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          Start-Sleep -Seconds 3
+          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/status' -TimeoutSec 2
+                if ($status.app -eq 'SensorDash') { $ready = $true; break }
+              } catch { }
+            }
+            if (!$ready) { throw 'SensorDash did not open its local API' }
+            $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
+            $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
+            if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }
+            foreach ($file in $sourcePresets) {
+              $expectedPreset = Get-Content $file.FullName -Raw | ConvertFrom-Json
+              $actualPreset = $presets | Where-Object id -eq $expectedPreset.id
+              if (!$actualPreset -or $actualPreset.revision -ne $expectedPreset.revision) { throw 'Packaged preset missing or outdated' }
+            }
+            $liveDriver = $null
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+              $liveDriver = (Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/live' -TimeoutSec 5).pawnIo
+              if ($liveDriver) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (!$liveDriver -or $liveDriver.state -notin @('available','missing','outdated','unavailable','unknown','restart-required')) { throw 'Collector did not report hardware driver status' }
+            $driverScript = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/driver-status.js' -UseBasicParsing
+            if ($driverScript.Content -notmatch 'DriverStatus') { throw 'Driver status UI was not embedded' }
+            $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
+            if ($page.Content -notmatch 'Local Hardware Control' -or $page.Content -match 'data-view="virtual"') { throw 'Missing local control-only HTML' }
+            $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
+            if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
+          $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
+          if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
+          $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+          if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
+          $outputs = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/fan-control' -TimeoutSec 8
+          if (!$outputs.persistent -or !$outputs.persistent.persistent -or
+              $outputs.persistent.profiles.Count -ne 0) {
+            throw 'Installed v0.6 must start with no active fan-control approvals'
+          }
+          if (!$outputs.status -or !$outputs.experimental -or !$outputs.requiresAdministrator) {
+            throw 'Control inventory is not available or is incorrectly configured'
+          }
+          $denied = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/fan-control/authorize' -Method Post `
+            -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
+            -SkipHttpErrorCheck
+          if ($denied.StatusCode -ne 403) {
+            throw 'Cross-origin or originless write requests must be rejected before UAC'
+          }
+            if ($script.Content -match 'chart-hover-overlay' -or
+                $script.Content -match 'hoverCtx.clearRect' -or
+                $script.Content -notmatch 'scheduleLivePaint' -or
+                $script.Content -notmatch 'telemetryConfigPanel') {
+              throw 'Obsolete history overlay present or local live/configuration UI absent'
+            }
+            $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
+            if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
+            # Invoke-RestMethod deserializes the JSON array into a PowerShell
+            # array. Count that array directly; wrapping it in @() would treat
+            # the entire array as one pipeline object on some PS versions.
+            $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
+            if ($groups.Count -ne 8) { throw "Expected eight collection families, got $($groups.Count)" }
+            $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
+              throw 'Missing Network from generic hardware collection capabilities'
+            }
+
+            # Save real workspace configurations across the UI -> named pipe -> service.
+            $settings.disabledCollectionGroups = @('Network')
+            $settings.disabledCollectionDeviceIds = @()
+            $settings.coolingSystems = @(@{
+              id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
+                @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
+              )
+            })
+            $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
+            $settings.simulatedFanCurves = @(@{
+              id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
+              outputSensorId='';maxSampleAgeSeconds=30;
+              points=@(@{temperature=30;percent=25},@{temperature=75;percent=100})
+            })
+            $body = ConvertTo-Json $settings -Depth 30 -Compress
+            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
+              throw 'Cooling component role not persisted correctly'
+            }
+            if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
+              throw 'Generic workspace settings did not round-trip through named pipe'
+            }
+            $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
+              throw 'Generic collection family setting did not persist through service IPC'
+            }
+            if ($persisted.simulatedFanCurves[0].id -ne 'ci-curve' -or
+                $persisted.PSObject.Properties.Name -contains 'virtualSensors' -or
+                $persisted.PSObject.Properties.Name -contains 'dashboards') {
+              throw 'Legacy virtual/dashboard settings survived or fan simulation was lost'
+            }
+            $telemetrySettings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($telemetrySettings.PSObject.Properties.Name -contains 'token' -or
+                $telemetrySettings.PSObject.Properties.Name -contains 'caCertificatePem') {
+              throw 'Collector exposed telemetry secret values in read-only configuration API'
+            }
+            $blockedTelemetry = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"","hostLabel":"ci-test"}' `
+              -SkipHttpErrorCheck
+            if ($blockedTelemetry.StatusCode -ne 403) {
+              throw 'Telemetry configuration without verified origin and action header must be rejected'
+            }
+            # A valid local browser action changes only exporter settings; it
+            # must not require a collector restart or expose token/CA contents.
+            $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
+              -TimeoutSec 8
+            $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($confirmedTelemetry.hostLabel -ne 'ci-desktop' -or
+                $confirmedTelemetry.endpoint -ne 'https://192.168.1.43:8429/ingest' -or
+                $confirmedTelemetry.restartRequired -or $confirmedTelemetry.token -or
+                $confirmedTelemetry.caCertificatePem) {
+              throw 'Local exporter configuration was not saved/redacted or incorrectly requires service restart'
+            }
+            if (!$allowedTelemetry.configured) {
+              throw 'Local exporter settings write was not acknowledged'
+            }
+            Start-Sleep -Seconds 2
+            $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+            $curve = @($preview.results | Where-Object { $_.id -eq 'ci-curve' })
+            if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
+              throw 'Missing-input simulated curve must produce no hardware target'
+            }
+            Write-Host 'Verified cooling systems, tray icons, curve simulation and redacted telemetry settings'
+
+            Write-Host 'Verified desktop + collector named pipe + browser shell'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Select previous successful Production installer
+        id: baseline
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const select = require('./scripts/select-msi-baseline.cjs');
+            const baseline = await select({github, context});
+            core.setOutput('run-id', baseline.runId);
+            core.setOutput('artifact-id', baseline.artifactId);
+      - name: Download previous Production MSI
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.baseline.outputs.artifact-id }}
+          run-id: ${{ steps.baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/sensordash-baseline
+      - name: Verify MSI upgrade, repair, downgrade rejection and uninstall
+        shell: pwsh
+        # Bound the WHOLE step. Individual msiexec operations have a 3-minute
+        # heartbeat watchdog, but a PowerShell/Windows Installer host hang can
+        # otherwise consume the entire 20-minute Windows build.
+        timeout-minutes: 8
+        run: ./scripts/Test-MsiUpgrade.ps1
+      - name: Report MSI servicing diagnostics on failure
+        if: failure()
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          Write-Host 'MSI servicing failed or timed out; reporting disposable CI runner state'
+          Get-Service -Name msiserver,SensorDashCollector -ErrorAction SilentlyContinue |
+            Select-Object Name,Status | Format-Table | Out-String | Write-Host
+          Get-Process -Name msiexec,SensorDash -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,CPU,Responding | Format-Table | Out-String | Write-Host
+          $dir=Join-Path $env:RUNNER_TEMP 'sensordash-upgrade-test'
+          if (Test-Path $dir) {
+            Get-ChildItem $dir -Filter '*.log' | ForEach-Object {
+              Write-Host "### $($_.Name) ($($_.Length) bytes)"
+              Get-Content $_.FullName -Tail 40 -ErrorAction SilentlyContinue
+            }
+          }
+      - name: Upload installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-diagnostics
+          path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
+          if-no-files-found: ignore
+      - name: Upload MSI
+        uses: actions/upload-artifact@v7
+        with:
+          path: installer-output/**/*.msi
+          archive: false
+          if-no-files-found: error
+) {
+            throw 'Experimental MSI must be clearly labeled workstation-gc.'
+          }
+          if ($env:SENSORDASH_GC_PROFILE -eq 'baseline' -and $msi.Name -match '-workstation-gc\.msi
+      - name: Smoke-test local HTTP API and dashboard
+        shell: pwsh
+        run: |
+          # Prove that the executable serves its UI with NO external webroot,
+          # and with a completely unrelated working directory.
+          $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
+          New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
+          Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          # Exercise both components, including named-pipe service communication,
+          # without installing a service on the CI runner.
+          $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          Start-Sleep -Seconds 3
+          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/status' -TimeoutSec 2
+                if ($status.app -eq 'SensorDash') { $ready = $true; break }
+              } catch { }
+            }
+            if (!$ready) { throw 'SensorDash did not open its local API' }
+            $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
+            $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
+            if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }
+            foreach ($file in $sourcePresets) {
+              $expectedPreset = Get-Content $file.FullName -Raw | ConvertFrom-Json
+              $actualPreset = $presets | Where-Object id -eq $expectedPreset.id
+              if (!$actualPreset -or $actualPreset.revision -ne $expectedPreset.revision) { throw 'Packaged preset missing or outdated' }
+            }
+            $liveDriver = $null
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+              $liveDriver = (Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/live' -TimeoutSec 5).pawnIo
+              if ($liveDriver) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (!$liveDriver -or $liveDriver.state -notin @('available','missing','outdated','unavailable','unknown','restart-required')) { throw 'Collector did not report hardware driver status' }
+            $driverScript = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/driver-status.js' -UseBasicParsing
+            if ($driverScript.Content -notmatch 'DriverStatus') { throw 'Driver status UI was not embedded' }
+            $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing
+            if ($page.Content -notmatch 'Local Hardware Control' -or $page.Content -match 'data-view="virtual"') { throw 'Missing local control-only HTML' }
+            $script = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/app.js' -UseBasicParsing
+            if ($script.Content -notmatch 'SDWorkspace.render') { throw 'Missing workspace-aware dashboard JS' }
+          $workspace = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/workspace.js' -UseBasicParsing
+          if ($workspace.Content -notmatch 'renderCooling') { throw 'Missing configurable cooling workspace' }
+          $simulation = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+          if ($simulation.mode -ne 'simulation-only') { throw 'Simulation endpoint is not read-only' }
+          $outputs = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/fan-control' -TimeoutSec 8
+          if (!$outputs.persistent -or !$outputs.persistent.persistent -or
+              $outputs.persistent.profiles.Count -ne 0) {
+            throw 'Installed v0.6 must start with no active fan-control approvals'
+          }
+          if (!$outputs.status -or !$outputs.experimental -or !$outputs.requiresAdministrator) {
+            throw 'Control inventory is not available or is incorrectly configured'
+          }
+          $denied = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/fan-control/authorize' -Method Post `
+            -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
+            -SkipHttpErrorCheck
+          if ($denied.StatusCode -ne 403) {
+            throw 'Cross-origin or originless write requests must be rejected before UAC'
+          }
+            if ($script.Content -match 'chart-hover-overlay' -or
+                $script.Content -match 'hoverCtx.clearRect' -or
+                $script.Content -notmatch 'scheduleLivePaint' -or
+                $script.Content -notmatch 'telemetryConfigPanel') {
+              throw 'Obsolete history overlay present or local live/configuration UI absent'
+            }
+            $styles = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/style.css' -UseBasicParsing
+            if ($styles.Content -notmatch 'sidebar') { throw 'Missing embedded dashboard CSS' }
+            # Invoke-RestMethod deserializes the JSON array into a PowerShell
+            # array. Count that array directly; wrapping it in @() would treat
+            # the entire array as one pipeline object on some PS versions.
+            $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
+            if ($groups.Count -ne 8) { throw "Expected eight collection families, got $($groups.Count)" }
+            $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
+              throw 'Missing Network from generic hardware collection capabilities'
+            }
+
+            # Save real workspace configurations across the UI -> named pipe -> service.
+            $settings.disabledCollectionGroups = @('Network')
+            $settings.disabledCollectionDeviceIds = @()
+            $settings.coolingSystems = @(@{
+              id='ci-system';name='CI Secondary Loop';kind='liquid';components=@(
+                @{id='ci-comp';name='Radiator fan bank';kind='fan-group';sensorIds=@('/ci/fan')}
+              )
+            })
+            $settings.trayWidgets = @(@{id='ci-tray';sensorId='/ci/temperature';label='CI';color='#62d5ce';decimals=0})
+            $settings.simulatedFanCurves = @(@{
+              id='ci-curve';name='CI Simulated';sourceSensorId='/ci/temperature';
+              outputSensorId='';maxSampleAgeSeconds=30;
+              points=@(@{temperature=30;percent=25},@{temperature=75;percent=100})
+            })
+            $body = ConvertTo-Json $settings -Depth 30 -Compress
+            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
+              throw 'Cooling component role not persisted correctly'
+            }
+            if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
+              throw 'Generic workspace settings did not round-trip through named pipe'
+            }
+            $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
+            if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
+              throw 'Generic collection family setting did not persist through service IPC'
+            }
+            if ($persisted.simulatedFanCurves[0].id -ne 'ci-curve' -or
+                $persisted.PSObject.Properties.Name -contains 'virtualSensors' -or
+                $persisted.PSObject.Properties.Name -contains 'dashboards') {
+              throw 'Legacy virtual/dashboard settings survived or fan simulation was lost'
+            }
+            $telemetrySettings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($telemetrySettings.PSObject.Properties.Name -contains 'token' -or
+                $telemetrySettings.PSObject.Properties.Name -contains 'caCertificatePem') {
+              throw 'Collector exposed telemetry secret values in read-only configuration API'
+            }
+            $blockedTelemetry = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"","hostLabel":"ci-test"}' `
+              -SkipHttpErrorCheck
+            if ($blockedTelemetry.StatusCode -ne 403) {
+              throw 'Telemetry configuration without verified origin and action header must be rejected'
+            }
+            # A valid local browser action changes only exporter settings; it
+            # must not require a collector restart or expose token/CA contents.
+            $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
+              -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
+              -TimeoutSec 8
+            $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
+            if ($confirmedTelemetry.hostLabel -ne 'ci-desktop' -or
+                $confirmedTelemetry.endpoint -ne 'https://192.168.1.43:8429/ingest' -or
+                $confirmedTelemetry.restartRequired -or $confirmedTelemetry.token -or
+                $confirmedTelemetry.caCertificatePem) {
+              throw 'Local exporter configuration was not saved/redacted or incorrectly requires service restart'
+            }
+            if (!$allowedTelemetry.configured) {
+              throw 'Local exporter settings write was not acknowledged'
+            }
+            Start-Sleep -Seconds 2
+            $preview = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/simulation' -TimeoutSec 8
+            $curve = @($preview.results | Where-Object { $_.id -eq 'ci-curve' })
+            if ($preview.mode -ne 'simulation-only' -or $curve.Count -ne 1 -or $curve[0].state -ne 'missing-input') {
+              throw 'Missing-input simulated curve must produce no hardware target'
+            }
+            Write-Host 'Verified cooling systems, tray icons, curve simulation and redacted telemetry settings'
+
+            Write-Host 'Verified desktop + collector named pipe + browser shell'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Select previous successful Production installer
+        id: baseline
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const select = require('./scripts/select-msi-baseline.cjs');
+            const baseline = await select({github, context});
+            core.setOutput('run-id', baseline.runId);
+            core.setOutput('artifact-id', baseline.artifactId);
+      - name: Download previous Production MSI
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.baseline.outputs.artifact-id }}
+          run-id: ${{ steps.baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/sensordash-baseline
+      - name: Verify MSI upgrade, repair, downgrade rejection and uninstall
+        shell: pwsh
+        # Bound the WHOLE step. Individual msiexec operations have a 3-minute
+        # heartbeat watchdog, but a PowerShell/Windows Installer host hang can
+        # otherwise consume the entire 20-minute Windows build.
+        timeout-minutes: 8
+        run: ./scripts/Test-MsiUpgrade.ps1
+      - name: Report MSI servicing diagnostics on failure
+        if: failure()
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          Write-Host 'MSI servicing failed or timed out; reporting disposable CI runner state'
+          Get-Service -Name msiserver,SensorDashCollector -ErrorAction SilentlyContinue |
+            Select-Object Name,Status | Format-Table | Out-String | Write-Host
+          Get-Process -Name msiexec,SensorDash -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,CPU,Responding | Format-Table | Out-String | Write-Host
+          $dir=Join-Path $env:RUNNER_TEMP 'sensordash-upgrade-test'
+          if (Test-Path $dir) {
+            Get-ChildItem $dir -Filter '*.log' | ForEach-Object {
+              Write-Host "### $($_.Name) ($($_.Length) bytes)"
+              Get-Content $_.FullName -Tail 40 -ErrorAction SilentlyContinue
+            }
+          }
+      - name: Upload installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-diagnostics
+          path: ${{ runner.temp }}/sensordash-upgrade-test/*.log
+          if-no-files-found: ignore
+      - name: Upload MSI
+        uses: actions/upload-artifact@v7
+        with:
+          path: installer-output/**/*.msi
+          archive: false
+          if-no-files-found: error
+) {
+            throw 'Normal MSI must not be labeled as a GC experiment.'
+          }
+          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes); GC profile: $env:SENSORDASH_GC_PROFILE"
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
         run: |
