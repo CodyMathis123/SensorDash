@@ -6,7 +6,8 @@ using LibreHardwareMonitor.Hardware;
 public sealed record FanCommand(
     string Action, string ChannelId = "", string CurveId = "",
     double Percent = 100, int DurationSeconds = 60, bool ConfirmExclusiveOwnership = false,
-    string ProfileId = "");
+    string ProfileId = "", string CalibrationMode = "identify",
+    string[]? TemperatureSensorIds = null, double TemperatureLimit = 85);
 
 public sealed record FanOutputInfo(string Id, string Name, string Device, string DeviceId,
     float Minimum, float Maximum, string Mode, bool Writable);
