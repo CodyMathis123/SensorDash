@@ -73,7 +73,7 @@ public sealed class FanControlRuntime
     }
 
     public object DebugLog() => _trace.ReadRecent();
-    public FanRecoveryEvent[] DrainRecoveryEvents() => _profiles.DrainRecoveryEvents();
+    internal FanRecoveryEvent[] DrainRecoveryEvents() => _profiles.DrainRecoveryEvents();
     
     public object Snapshot(DashboardSettings? settings = null)
     {
