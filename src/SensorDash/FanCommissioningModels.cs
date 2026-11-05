@@ -54,7 +54,7 @@ public static class FanCommissioningRules
                         p.ObservedAt>new DateTimeOffset(2020,1,1,0,0,0,TimeSpan.Zero) &&
                         p.ObservedAt<=DateTimeOffset.UtcNow.AddMinutes(5))
                         .OrderByDescending(p=>p.ObservedAt).DistinctBy(p=>p.DutyPercent)
-                        .Take(12).OrderBy(p=>p.DutyPercent).ToList()
+                        .Take(24).OrderBy(p=>p.DutyPercent).ToList()
                     :[]);
                 if(m.Kind!="fan" || !HasVerifiedResponse(m))
                     m.VerifiedAt=null;
