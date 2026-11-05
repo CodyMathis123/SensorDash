@@ -92,8 +92,41 @@ internal static class FanFeedbackCalibrationSelfTest
             "response sweep never tests below the selected channel minimum");
         sweep.MarkApplied(now);
         Check(!sweep.GuardsSafe(Frame(now,10,490,95),now) &&
-            sweep.State=="aborted",
-            "temperature guard must abort a low-duty sweep before commanding hardware");
+            sweep.State=="aborted" &&
+            sweep.Message.Contains("CPU temp") &&
+            sweep.Message.Contains("95.0°C") &&
+            sweep.Message.Contains("85.0°C"),
+            "over-limit temperature must identify the exact sensor, value and threshold");
+        var missingGuard=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        Check(!missingGuard.GuardsSafe(Frame(now,10,490,null),now) &&
+            missingGuard.Message.Contains("CPU") == false &&
+            missingGuard.Message.Contains("(temp)") &&
+            missingGuard.Message.Contains("not found"),
+            "missing selected sensor must be identified by its saved sensor ID");
+        var staleGuard=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        Check(staleGuard.GuardsSafe(Frame(now,10,490,30),now.AddSeconds(8)),
+            "a short sensor collection delay should not abort a 19-step calibration");
+        Check(!staleGuard.GuardsSafe(Frame(now,10,490,30),now.AddSeconds(11)) &&
+            staleGuard.Message.Contains("CPU temp") &&
+            staleGuard.Message.Contains("11.0s ago") &&
+            staleGuard.Message.Contains("30.0°C"),
+            "stale guard must state the actual sample age and last temperature");
+        var risingGuard=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        Check(risingGuard.GuardsSafe(Frame(now,10,490,30),now) &&
+            !risingGuard.GuardsSafe(Frame(now.AddSeconds(1),10,490,38),
+                now.AddSeconds(1)) &&
+            risingGuard.Message.Contains("CPU temp") &&
+            risingGuard.Message.Contains("30.0°C") &&
+            risingGuard.Message.Contains("38.0°C"),
+            "temperature-rise abort must identify the sensor and its measured increase");
+        var invalidGuard=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        Check(!invalidGuard.GuardsSafe(Frame(now,10,490,double.NaN),now) &&
+            invalidGuard.Message.Contains("no valid temperature"),
+            "invalid temperature must never be confused with overheating");
         sweep=new FanAutoCalibration("pwm","rpm",10,100,now,
             "response",["temp"],85);
         sweep.MarkApplied(now);
