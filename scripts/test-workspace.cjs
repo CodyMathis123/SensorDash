@@ -182,6 +182,32 @@ const h={
    'Pump mappings must never appear in standalone quick-speed controls');
  S.settings.fanChannelMappings=[];
  S.fanControl=priorFanControl;
+ // The radiator fan calibration belongs to one PWM header, so the CPU
+ // and GPU MAX curves display estimates from the SAME measured response.
+ const previousCurves=S.settings.simulatedFanCurves;
+ const previousProfiles=S.settings.fanProfiles;
+ const previousMapping=S.settings.fanChannelMappings;
+ S.settings.simulatedFanCurves=[
+  {id:'cpu',name:'CPU radiator curve',sourceSensorId:'cpuTemp',
+    points:[{temperature:40,percent:25},{temperature:85,percent:100}]},
+  {id:'gpu',name:'GPU hotspot radiator curve',sourceSensorId:'gpuTemp',
+    points:[{temperature:40,percent:40},{temperature:85,percent:100}]}
+ ];
+ S.settings.fanProfiles=[{id:'radiator',name:'Radiator MAX',
+   curveIds:['cpu','gpu'],channelIds:['pwm1']}];
+ S.settings.fanChannelMappings=[{channelId:'pwm1',label:'Radiator Fans',
+   kind:'fan',verifiedAt:new Date().toISOString(),rpmSensorId:'rpm',
+   measurements:[{dutyPercent:10,rpm:490},
+     {dutyPercent:40,rpm:1050},{dutyPercent:100,rpm:1980}]}];
+ const estimated=workspace.render(S,'curves',h);
+ assert.ok(estimated.includes('Estimated RPM')&&
+   estimated.includes('Radiator Fans: ≈770 RPM')&&
+   estimated.includes('Radiator Fans: ≈1,050 RPM')&&
+   estimated.includes('MAX profile'),
+   'CPU/GPU MAX curves reuse one physical fan calibration to estimate RPM');
+ S.settings.simulatedFanCurves=previousCurves;
+ S.settings.fanProfiles=previousProfiles;
+ S.settings.fanChannelMappings=previousMapping;
  assert.ok(curvesView.includes('data-fan-fold="profiles"')&&
    curvesView.includes('data-fan-fold="curves"')&&
    curvesView.includes('data-fan-fold="calibration"'),
