@@ -36,6 +36,42 @@ in different ways. Inspect memory after startup, one hour, and 24 hours before
 changing collector sampling or fan-control hardware access. Collector/IPC
 timing fields are secondary diagnostic context, not extra polling.
 
+## Controlled .NET GC memory experiments
+
+The default MSI runtime settings remain unchanged. Diagnostic CSV now records
+`serverGc`, `gcHeapCount` and `gcConserveMemoryLevel` when the runtime
+exposes those settings, as well as last-GC heap size, fragmentation, and the
+cumulative fraction of runtime paused in GC. A null effective configuration
+entry is **unknown**, not proof of a default setting. The last-GC values are
+unavailable until the first GC. No collection is requested by diagnostics.
+
+Optional build-time overrides let us test one GC dimension at a time on a
+**disposable machine or explicitly supervised maintenance window**:
+
+```powershell
+dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcMode=workstation
+dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcMode=server
+dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 /p:SensorDashGcConserveMemory=5
+```
+
+Do not deploy these loose publish outputs over an installed MSI or reuse an MSI
+ProductVersion for different binaries. Use a separately versioned, validated
+installer for each supervised experiment; never change the current fan-control
+service's environment or restart it as part of exploratory profiling. The
+shared executable serves both the privileged collector and desktop; MSBuild
+overrides affect both in any installed experimental build. The baseline needs
+to be measured first and must remain available for rollback.
+
+Compare the same configuration, workload, and runtime (including installed
+driver state) for startup, 1-hour, and 24-hour readings. Export both process
+histories for every trial and use private bytes as the primary footprint metric;
+check GC pauses, collection-cycle latency, recovery logs, and fan-control parity.
+Reset by reinstalling the last validated baseline MSI, not by manipulating
+the live service or GC environment variables. Changing GC mode has no promised
+memory benefit. Never apply a GC heap hard limit during these first tests.
+
+Microsoft reference: https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector
+
 ## Required PR workflow
 
 CI prepares release identity before compilation. The major.minor series comes from Directory.Build.props; the third MSI field is GITHUB_RUN_NUMBER. ProductCode is a deterministic UUID for the platform/version, while UpgradeCode is permanent. Thus a Production run is newer than its PR run. Retries of the same run retain its version/source identity; start a new workflow run to produce a new distributable version. Local source version values are development defaults and must not be distributed. Preserve the workflow's counter; if replacing/resetting the workflow, advance the version series first. The allocator fails at the MSI field limits instead of wrapping.
