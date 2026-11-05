@@ -430,16 +430,43 @@ public sealed class PersistentFanProfiles
                 {
                     calibrating=_calibration?.Running==true && _calibration.ChannelId==id
                         ?_calibration:null;
-                    if(calibrating!=null && (!calibrating.GuardsSafe(frame,now) ||
-                        demand.Failsafe ||
-                        demand.Percent>calibrating.CurrentDuty+0.1 ||
-                        settings?.FanChannelMappings?.Any(m=>m.ChannelId==id &&
-                            m.Kind=="fan" && m.VisuallyIdentified &&
-                            m.RpmSensorId==calibrating.RpmSensorId)!=true))
+                    if(calibrating!=null)
                     {
-                        calibrating.Abort("Cooling demand or fan mapping changed; approved fan curve restored.");
-                        _trace?.Event("CALIBRATION",calibrating.Message,now);
-                        calibrating=null;
+                        // Never overwrite a specific guard failure with a
+                        // generic "cooling demand or mapping changed" message.
+                        if(!calibrating.GuardsSafe(frame,now))
+                        {
+                            _trace?.Event("CALIBRATION",calibrating.Message,now);
+                            calibrating=null;
+                        }
+                        else if(demand.Failsafe)
+                        {
+                            calibrating.Abort("Calibration stopped because the live "+
+                                $"profile '{profile.Name}' entered its 100% cooling failsafe: "+
+                                demand.Reason+" Approved fan curve restored.");
+                        }
+                        else if(settings?.FanChannelMappings?.Any(m=>m.ChannelId==id &&
+                            m.Kind=="fan" && m.VisuallyIdentified &&
+                            m.RpmSensorId==calibrating.RpmSensorId)!=true)
+                        {
+                            calibrating.Abort("Fan-to-RPM sensor mapping changed during "+
+                                "calibration. Approved fan curve restored.");
+                        }
+                        else if(demand.Percent>calibrating.CurrentDuty+0.1)
+                        {
+                            // The user's ordinary profile needs more airflow
+                            // than the next calibration speed. Respect that
+                            // demand instead of trying to override it.
+                            calibrating.FinishPartial(
+                                $"Calibration stopped before {calibrating.CurrentDuty}% "+
+                                $"because profile '{profile.Name}' currently requires "+
+                                $"{demand.Percent:0.#}% PWM. Approved fan curve restored.");
+                        }
+                        if(calibrating!=null && !calibrating.Running)
+                        {
+                            _trace?.Event("CALIBRATION",calibrating.Message,now);
+                            calibrating=null;
+                        }
                     }
                 }
                 var applied=calibrating!=null
