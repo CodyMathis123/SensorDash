@@ -431,7 +431,10 @@ async function loadFanControl(){
   const signature=JSON.stringify({
     outputs:(data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]),
     enabled:(data.persistent?.profiles||[]).map(p=>[p.id,p.needsReapproval,p.reviewReasons]).sort((a,b)=>a[0].localeCompare(b[0])),
-    overrides:(data.persistent?.overrides||[]).map(o=>[o.channelId,o.percent,o.expires])
+    overrides:(data.persistent?.overrides||[]).map(o=>[o.channelId,o.percent,o.expires]),
+    calibration:data.persistent?.calibration?
+      [data.persistent.calibration.channelId,data.persistent.calibration.state,
+       data.persistent.calibration.currentDuty,data.persistent.calibration.completedSteps]:null
   });
   const changed=signature!==S.fanOutputSignature;
   S.fanControl=data;
@@ -588,6 +591,11 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
 
 });
 document.addEventListener('input',e=>{
+ if(e.target.id==='fcOverrideDuty'){
+   const result=document.getElementById('fcOverrideValue');
+   if(result)result.textContent=e.target.value+'%';
+   return;
+ }
  if(SDWorkspace.quickInput(e,S))return;
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
