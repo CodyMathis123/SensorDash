@@ -23,6 +23,9 @@ internal sealed class FanAutoCalibration
     private readonly List<(DateTimeOffset Time,double Rpm)> _recentRpm = [];
     private readonly Dictionary<string,double> _thermalBaseline = new(StringComparer.Ordinal);
     private readonly string[] _thermalGuards;
+    // Freeze the user's friendly sensor names for clear diagnostic messages
+    // throughout this calibration session; sensor IDs remain authoritative.
+    private readonly Dictionary<string,string> _temperatureAliases=new(StringComparer.Ordinal);
     private readonly double _temperatureLimit;
     private readonly int[] _duties;
     private DateTimeOffset _stepStarted;
@@ -62,7 +65,8 @@ internal sealed class FanAutoCalibration
     internal FanAutoCalibration(string channelId,string rpmSensorId,
         double minimumDuty,double maximumDuty,DateTimeOffset now,
         string mode="identify",IEnumerable<string>? temperatureSensors=null,
-        double temperatureLimit=85)
+        double temperatureLimit=85,
+        IReadOnlyDictionary<string,string>? temperatureAliases=null)
     {
         if(mode is not ("identify" or "response"))
             throw new ArgumentException("Unknown calibration phase.");
@@ -72,6 +76,11 @@ internal sealed class FanAutoCalibration
         _thermalGuards=(temperatureSensors??[]).Where(x=>!string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal).Take(8).ToArray();
         _temperatureLimit=temperatureLimit;
+        foreach(var id in _thermalGuards)
+            if(temperatureAliases!=null &&
+               temperatureAliases.TryGetValue(id,out var alias) &&
+               !string.IsNullOrWhiteSpace(alias))
+                _temperatureAliases[id]=alias.Trim();
         if(mode=="response" && (_thermalGuards.Length<1 ||
             !double.IsFinite(_temperatureLimit) ||
             _temperatureLimit is <35 or >100))
@@ -107,6 +116,13 @@ internal sealed class FanAutoCalibration
         return value;
     }
 
+    private string GuardName(string id,string? hardwareName)
+    {
+        if(_temperatureAliases.TryGetValue(id,out var alias))
+            return alias;
+        return string.IsNullOrWhiteSpace(hardwareName)?id:hardwareName;
+    }
+
     // Called before every PWM command and on every poll. User-selected
     // thermal guards are independent of temperature curves, so calibration
     // can precede a curve. Full sweeps need fresh guard observations.
@@ -119,7 +135,7 @@ internal sealed class FanAutoCalibration
             // The distinction between a hot component and missing/stale
             // telemetry is important; neither is safe to ignore.
             var sensor=frame.Sensors.FirstOrDefault(s=>s.Id==id && s.Type=="Temperature");
-            var label=string.IsNullOrWhiteSpace(sensor?.Name)?id:sensor.Name;
+            var label=GuardName(id,sensor?.Name);
             if(sensor==null)
             {
                 Abort($"Temperature monitor {label} ({id}) was not found in the latest sensor collection. Calibration stopped; prior fan control restored.");
@@ -179,7 +195,7 @@ internal sealed class FanAutoCalibration
                 continue;
             result.Add(new FanCalibrationTemperature{
                 SensorId=id,
-                SensorName=string.IsNullOrWhiteSpace(sensor.Name)?id:sensor.Name,
+                SensorName=GuardName(id,sensor.Name),
                 Celsius=value,
                 ObservedAt=observed
             });
