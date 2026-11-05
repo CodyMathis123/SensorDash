@@ -318,6 +318,12 @@ function settingsView(){
   '<div class="stat-row"><label>Private memory</label><strong>'+formatMb(p?.privateBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
   '<div class="stat-row"><label>GC committed memory</label><strong>'+formatMb(p?.gcCommittedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>GC mode</label><strong>'+(typeof p?.serverGc==='boolean'?(p.serverGc?'Server':'Workstation'):'—')+'</strong></div>'+
+  '<div class="stat-row"><label>Configured GC heap count</label><strong>'+(Number.isInteger(p?.gcHeapCount)?p.gcHeapCount:'Runtime default / unavailable')+'</strong></div>'+
+  '<div class="stat-row"><label>Memory conservation setting</label><strong>'+(Number.isInteger(p?.gcConserveMemoryLevel)?p.gcConserveMemoryLevel:'Runtime default / unavailable')+'</strong></div>'+
+  '<div class="stat-row"><label>Last GC heap size</label><strong>'+formatMb(p?.gcLastHeapSizeBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Last GC fragmentation</label><strong>'+formatMb(p?.gcFragmentedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>GC pause · process lifetime</label><strong>'+perfNumber(p?.gcPauseTimePercent,'%',2)+'</strong></div>'+
   '<div class="stat-row"><label>Process uptime</label><strong>'+perfUptime(p?.uptimeSeconds)+'</strong></div>'+
   '<div class="stat-row"><label>Sampled at</label><strong>'+(p?.timestamp?new Date(p.timestamp).toLocaleString():'—')+'</strong></div>'+
   '<div class="stat-row"><label>Total allocations since start</label><strong>'+formatMb(p?.totalAllocatedBytes)+'</strong></div>'+
@@ -333,7 +339,7 @@ function settingsView(){
  ).join('')+
  '<h3 class="sensor-used-title">Historical analysis</h3>'+
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
-  '<p class="note">Memory-first diagnostics: private memory reflects committed process-private virtual memory, while working set includes resident shared pages. GC committed is not interchangeable with total native memory. Samples are taken once per minute, held only in memory for up to 24 hours (maximum 1,440 per process) and reset on restart. CPU is shown as one-core equivalent; no collection is forced.</p>'+
+  '<p class="note">Memory-first diagnostics: private memory reflects committed process-private virtual memory, while working set includes resident shared pages. GC committed is not interchangeable with total native memory. Heap size and fragmentation are values from the last GC, not live heap measures; they remain unavailable until a GC occurs. The configured GC heap count is not necessarily the current active heap count; unavailable configuration values are not evidence of a particular default. GC pause is the cumulative percent of runtime spent paused in GC. Samples are taken once per minute, held only in memory for up to 24 hours (maximum 1,440 per process) and reset on restart. No collection is forced.</p>'+
  '<div class="w-actions"><button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>'+
  '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
@@ -404,7 +410,9 @@ async function exportPerformance(){
    'cpuPercentOneCore','allocationBytesPerSecond','gen0Collections',
    'gen1Collections','gen2Collections','threadCount','handleCount',
    'collectorCycleMeanMs','hardwareScanMeanMs','ipcSerializationMeanMs',
-   'ipcResponseMeanBytes','collectorCycles','ipcResponses'];
+   'ipcResponseMeanBytes','collectorCycles','ipcResponses',
+   'serverGc','gcHeapCount','gcConserveMemoryLevel','gcLastHeapSizeBytes',
+   'gcFragmentedBytes','gcPauseTimePercent','gcIndex'];
   const cell=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
   const rows=[['process',...fields].map(cell).join(',')];
   for(const [kind,samples] of [['desktop',data.desktop],['collector',data.collector]]){
