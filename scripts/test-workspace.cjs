@@ -311,7 +311,8 @@ const h={
    channelIds:['pwm1']}],readings:[{id:'radiator',name:'Radiator MAX',
    state:'running',targetPercent:40,message:'MAX of CPU/GPU curves'}],
    overrides:[]}};
- S.sensors.push(sensor('hiddenPwm','Unused PWM','Control',0));
+ S.sensors.push(sensor('pwm1','Radiator PWM','Control',40),sensor('hiddenPwm','Unused PWM','Control',0));
+ S.byId.set('pwm1',S.sensors.at(-2));
  S.byId.set('hiddenPwm',S.sensors.at(-1));
  S.settings.hiddenSensorIds=['hiddenPwm','pwm1'];
  S.fanControl.outputs.push({id:'hiddenPwm',name:'Unused PWM',device:'IT8688E',writable:true});
@@ -323,7 +324,7 @@ const h={
  assert.match(hiddenProfileHtml,/Radiator PWM \[Hidden\]/,
   'Existing hidden channel must carry an explicit label');
  S.settings.hiddenSensorIds=[];S.fanControl.outputs.pop();
- S.byId.delete('hiddenPwm');S.sensors.pop();
+ S.byId.delete('hiddenPwm');S.byId.delete('pwm1');S.sensors.pop();S.sensors.pop();
  const estimated=workspace.render(S,'curves',h);
  assert.ok(estimated.includes('Target PWM')&&
    estimated.includes('Estimated RPM')&&
