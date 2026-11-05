@@ -15,7 +15,7 @@ const FanCommissioning=(()=>{
   if(!m||m.kind!=='fan'||!m.visuallyIdentified||!m.rpmSensorId)return false;
   const points=[...(m.measurements||[])].sort((a,b)=>a.dutyPercent-b.dutyPercent);
   return points.length>=2&&points.at(-1).dutyPercent-points[0].dutyPercent>=10&&
-   points.every(p=>p.dutyPercent>=70&&p.dutyPercent<=100&&Number.isFinite(p.rpm)&&p.rpm>0)&&
+   points.every(p=>p.dutyPercent>=10&&p.dutyPercent<=100&&Number.isFinite(p.rpm)&&p.rpm>0)&&
    points.every((p,i)=>i===0||p.rpm>=points[i-1].rpm*0.92)&&
    points.at(-1).rpm>=points[0].rpm*1.08;
  };
@@ -137,8 +137,10 @@ const FanCommissioning=(()=>{
  const paint=S=>{
   if(S.view!=='curves'||!byId('fcStatus'))return;
   const status=S.fanControl?.status||{};
+  const override=(S.fanControl?.persistent?.overrides||[]).find(x=>x.channelId===selected);
   const key=status.state==='active'&&status.mode==='manual'?
-    status.channelId+'|'+status.target+'|'+status.expires:'';
+    status.channelId+'|'+status.target+'|'+status.expires:
+    override?override.channelId+'|'+override.percent+'|'+override.expires:'';
   if(key!==seenKey){seenKey=key;activeSince=key?Date.now():0}
   byId('fcStatus').textContent=status.state||'off';
   byId('fcMessage').textContent=status.message||'';
@@ -146,6 +148,15 @@ const FanCommissioning=(()=>{
   const reading=S.sensors.find(s=>s.id===id);
   byId('fcLiveRpm').textContent='RPM: '+(reading&&Number.isFinite(reading.value)?
    Number(reading.value).toFixed(0):'—');
+  const pwm=S.sensors.find(s=>s.id===selected && s.type==='Control');
+  if(byId('fcLivePwm'))byId('fcLivePwm').textContent=Number.isFinite(pwm?.value)?
+    Number(pwm.value).toFixed(1)+'%':'—';
+  const cal=S.fanControl?.persistent?.calibration;
+  if(cal?.channelId===selected){
+   if(byId('fcAutoStatus'))byId('fcAutoStatus').textContent=cal.message;
+   if(byId('fcAutoProgress'))byId('fcAutoProgress').textContent=
+     cal.completedSteps+' / '+cal.totalSteps+' measured points · '+cal.state;
+  }
  };
  const doAction=async(action,el,S,h)=>{
   const channel=channels(S).find(o=>o.id===selected),map=current(S);
@@ -174,6 +185,66 @@ const FanCommissioning=(()=>{
    draft.fanChannelMappings=(draft.fanChannelMappings||[]).filter(m=>m.channelId!==selected);
    return persist(S,draft,h,'Channel mapping removed.');
   }
+  if(action==='confirm-identity'){
+   if(!map||map.kind!=='fan'||byId('fcKind')?.value!=='fan'||!map.rpmSensorId)
+    throw Error('Save the fan and its matching RPM sensor before confirming identity.');
+   if(!byId('fcVisual')?.checked)
+    throw Error('Confirm this is physically a fan bank, not an essential pump.');
+   const draft=structuredClone(S.settings);
+   const entry=draft.fanChannelMappings.find(m=>m.channelId===selected);
+   entry.visuallyIdentified=true;
+   return persist(S,draft,h,'Fan identity confirmed. Calibration remains observational.');
+  }
+  if(action==='start-auto'){
+   if(!map||map.kind!=='fan'||!map.visuallyIdentified||!map.rpmSensorId||
+      byId('fcRpm')?.value!==map.rpmSensorId||!activeProfile(S,selected))
+    throw Error('Auto calibration requires a confirmed fan, matching RPM sensor and enabled approved profile.');
+   if(!byId('fcExclusive')?.checked)
+    throw Error('Confirm you can observe the fan and no other fan-control software is active.');
+   await command({action:'calibrate',channelId:selected,percent:100,
+     durationSeconds:240,confirmExclusiveOwnership:true});
+   h.toast('Approve Windows elevation once to start supervised auto calibration.');
+   return;
+  }
+  if(action==='cancel-auto'){
+   await command({action:'cancel-calibration',channelId:selected,percent:100,
+      durationSeconds:30});
+   h.toast('Approve elevation to cancel; approved curve will resume.');
+   return;
+  }
+  if(action==='save-auto'){
+   const result=S.fanControl?.persistent?.calibration;
+   if(!result||result.channelId!==selected||result.state!=='complete'||
+     !map||map.kind!=='fan'||!map.visuallyIdentified)
+    throw Error('Only a completed calibration for this confirmed fan can be saved.');
+   const sample=result.measurements||[];
+   if(!qualifyResponse({...map,measurements:sample}))
+    throw Error('Measured response was not consistent enough to verify; existing calibration was preserved.');
+   const draft=structuredClone(S.settings);
+   const entry=draft.fanChannelMappings.find(m=>m.channelId===selected);
+   entry.measurements=sample;
+   entry.verifiedAt=new Date().toISOString();
+   return persist(S,draft,h,'Automatic PWM/RPM calibration saved and verified.');
+  }
+  if(action==='override'){
+   if(!map||map.kind!=='fan'||!activeProfile(S,selected))
+    throw Error('An approved fan profile is required for temporary override.');
+   if(!byId('fcExclusive')?.checked)
+    throw Error('Confirm exclusive ownership and that this output drives fans.');
+   const percent=Number(byId('fcOverrideDuty')?.value);
+   if(!Number.isFinite(percent)||percent<10||percent>100)
+    throw Error('Choose a supported PWM percentage.');
+   await command({action:'override',channelId:selected,percent,
+      durationSeconds:300,confirmExclusiveOwnership:true});
+   h.toast('Approve elevation to apply this temporary 5-minute fan override.');
+   return;
+  }
+  if(action==='reset-override'){
+   await command({action:'reset-override',channelId:selected,percent:100,
+      durationSeconds:30});
+   h.toast('Approve elevation to restore the automatic fan curve.');
+   return;
+  }
   if(action==='release'){
    await command({action:'release',channelId:'',durationSeconds:30,percent:100});
    h.toast('Windows elevation requested to restore firmware control.');
@@ -200,15 +271,25 @@ const FanCommissioning=(()=>{
    const r=await fetch('/api/fan-control');
    if(!r.ok)throw Error('Could not confirm current hardware-control status.');
    const control=(await r.json()).status||{};
-   if(control.state!=='active'||control.mode!=='manual'||control.channelId!==selected||
-      ![70,85,100].includes(Math.round(control.target))||
-      Math.abs(control.target-Math.round(control.target))>0.1||
-      Date.parse(control.expires)<=Date.now())
-    throw Error('An authorized 70%, 85%, or 100% manual test must be active on this exact channel.');
-   const key=control.channelId+'|'+control.target+'|'+control.expires;
+   const override=(S.fanControl?.persistent?.overrides||[])
+     .find(x=>x.channelId===selected && Date.parse(x.expires)>Date.now());
+   const manual=control.state==='active'&&control.mode==='manual'&&
+     control.channelId===selected&&[70,85,100].includes(Math.round(control.target))&&
+     Math.abs(control.target-Math.round(control.target))<=0.1&&
+     Date.parse(control.expires)>Date.now();
+   if(!manual&&!override)
+    throw Error('A currently authorized manual test or active profile override is required to capture RPM.');
+   const percent=manual?Math.round(control.target):Math.round(override.percent);
+   const key=manual?control.channelId+'|'+control.target+'|'+control.expires:
+     override.channelId+'|'+override.percent+'|'+override.expires;
    if(key!==seenKey){seenKey=key;activeSince=Date.now()}
    if(Date.now()-activeSince<5000)
     throw Error('Let the fan settle for at least 5 seconds while this test is active.');
+   const pwm=S.sensors.find(s=>s.id===selected && s.type==='Control');
+   const pwmTime=Date.parse(pwm?.observedAt||'');
+   if(!Number.isFinite(pwm?.value)||Math.abs(pwm.value-percent)>4||
+      !Number.isFinite(pwmTime)||Math.abs(Date.now()-pwmTime)>6000)
+    throw Error('Fresh PWM register feedback must match the active test duty.');
    const reading=S.sensors.find(s=>s.id===map.rpmSensorId);
    const observed=Date.parse(reading?.observedAt||S.frame?.timestamp||'');
    if(reading?.type!=='Fan'||!Number.isFinite(reading.value)||reading.value<=0||
@@ -216,8 +297,8 @@ const FanCommissioning=(()=>{
     throw Error('A fresh, positive RPM reading is required. Confirm the tachometer sensor.');
    const draft=structuredClone(S.settings);
    const entry=draft.fanChannelMappings.find(m=>m.channelId===selected);
-   entry.measurements=(entry.measurements||[]).filter(p=>p.dutyPercent!==Math.round(control.target));
-   entry.measurements.push({dutyPercent:Math.round(control.target),rpm:reading.value,
+   entry.measurements=(entry.measurements||[]).filter(p=>p.dutyPercent!==percent);
+   entry.measurements.push({dutyPercent:percent,rpm:reading.value,
     observedAt:new Date(observed).toISOString()});
    entry.verifiedAt=null;
    return persist(S,draft,h,'RPM observation recorded. Release the test or collect another duty.');
@@ -250,6 +331,10 @@ const FanCommissioning=(()=>{
   return true;
  };
  const change=(e,S,h)=>{
+  if(e.target.id==='fcOverrideDuty'){
+   if(byId('fcOverrideValue'))byId('fcOverrideValue').textContent=e.target.value+'%';
+   return true;
+  }
   if(e.target.id!=='fcChannel')return false;
   selected=e.target.value;seenKey='';activeSince=0;h.render();
   return true;
