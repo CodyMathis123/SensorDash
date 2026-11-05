@@ -97,13 +97,13 @@ const FanCommissioning=(()=>{
    ' · supported '+output.minimum+'–'+output.maximum+'% PWM. '+esc(readOnly)+
    ' Selecting an RPM sensor does not prove it belongs to this output.</p>'+
    '<div class="fc-steps"><div class="fc-calibration-primary"><h3>Fan speed calibration</h3>'+
-   '<p class="fc-calibration-intro">Measure how fast these fans spin at different speeds. SensorDash waits for the RPM to settle before recording each point. Testing may take several minutes.</p>'+
+   '<p class="fc-calibration-intro">Full calibration measures up to 19 speeds, from 100% to 10% in 5% steps. Each point is recorded only after the fan stays at a stable RPM. Allow roughly 7–20 minutes; you can cancel at any time.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcExclusive"><span>I can observe these fans and no other fan-control software is active. This output is not a pump.</span></label>'+
    '<p class="note fc-setup-details">New fan? Verify the PWM/RPM pairing first. An already verified fan can go straight to a full calibration.</p>'+
    '<div class="w-actions"><button class="btn" data-commissioning="start-identify" '+
      (!identifyReady||calibration?.state==='running'?'disabled':'')+
      '>Verify fan and RPM pairing</button></div>'+
-   '<p class="fc-setup-details">Choose the temperatures to watch during the test. SensorDash will stop if a temperature rises too far, a sensor disappears, or fan RPM stops responding.</p>'+
+   '<p class="fc-setup-details">Choose the temperatures to monitor during calibration. The test stops if a temperature rises too far, a sensor disappears, or fan RPM fails to stabilize. A 25-minute safety cutoff prevents indefinite testing.</p>'+
    '<div class="fc-calibration-guards">'+
      guardSelect('fcGuardPrimary','Primary thermal guard',guardDefaults.first,false)+
      guardSelect('fcGuardSecondary','Additional thermal guard',guardDefaults.second,true)+
