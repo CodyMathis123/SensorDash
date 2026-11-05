@@ -86,7 +86,8 @@ const FanCommissioning=(()=>{
   const busyMessage=activeName+' is currently being calibrated. Only one fan can be calibrated at a time.';
   const disabledReason=running?' title="'+esc(busyMessage)+'"':'';
   const existingGuards=calibrationGuards.get(selected);
-  const configuredGuardIds=(S.settings?.simulatedFanCurves||[]).map(c=>c.sourceSensorId);
+  const configuredGuardIds=(S.settings?.simulatedFanCurves||[]).filter(c=>
+    (S.settings?.fanProfiles||[]).some(p=>(p.channelIds||[]).includes(selected)&&(p.curveIds||[]).includes(c.id))).map(c=>c.sourceSensorId);
   const temperatures=S.sensors.filter(x=>x.type==='Temperature'&&selectable(S,x,
     [existingGuards?.first,existingGuards?.second,...configuredGuardIds]));
   const linkedProfileDrafts=(S.settings?.fanProfiles||[])
