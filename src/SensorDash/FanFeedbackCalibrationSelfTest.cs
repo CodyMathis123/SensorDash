@@ -54,6 +54,31 @@ internal static class FanFeedbackCalibrationSelfTest
             "missing register feedback must never force a write");
         Check(monitor.Snapshot()["pwm"].State=="unavailable",
             "missing feedback is unknown, not a good PWM match");
+        // The original sleep/resume failure might show 10% register
+        // readback with ~1269 RPM instead of the calibrated ~490 RPM.
+        // A one-minute stable-duty comparison catches that second failure mode.
+        var tachMonitor=new FanPwmFeedbackMonitor();
+        var verified=new FanChannelMapping{
+            ChannelId="pwm",Kind="fan",RpmSensorId="rpm",
+            VisuallyIdentified=true,VerifiedAt=now,
+            Measurements=[
+                new(){DutyPercent=10,Rpm=490,ObservedAt=now},
+                new(){DutyPercent=40,Rpm=1080,ObservedAt=now},
+                new(){DutyPercent=100,Rpm=1980,ObservedAt=now}
+            ]
+        };
+        Check(!tachMonitor.Check("pwm",10,Frame(now,10,1269),now,verified).Rearm,
+            "do not infer a settled tach mismatch immediately after startup");
+        var drift=tachMonitor.Check("pwm",10,Frame(now.AddSeconds(60),10,1269),
+            now.AddSeconds(60),verified);
+        Check(drift.Rearm&&drift.Message.Contains("Calibrated RPM mismatch"),
+            "calibrated RPM detects bad physical fan speed despite matching PWM register");
+        Check(!tachMonitor.Check("pwm",10,Frame(now.AddSeconds(120),10,1269),
+            now.AddSeconds(120),verified).Rearm,
+            "rearm must remain bounded for persistent calibrated RPM deviation");
+        Check(tachMonitor.Check("pwm",10,Frame(now.AddSeconds(180),10,490),
+            now.AddSeconds(180),verified).Recovered,
+            "normal RPM after correction generates a recovery transition");
 
         var sweep=new FanAutoCalibration("pwm","rpm",10,100,now,
             "response",["temp"],85);
