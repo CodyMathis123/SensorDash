@@ -8,12 +8,12 @@ const FanFeedback=(()=>{
  const reading=(S,id)=>{
   const map=mapping(S,id);
   const sensor=(S.sensors||[]).find(x=>x.id===map?.rpmSensorId);
-  if(map?.kind!=='fan'||!map.rpmSensorId)return {text:'Not mapped',mapped:false};
+  if(map?.kind!=='fan'||!map.rpmSensorId)return {text:'No RPM mapping',mapped:false};
   if(!sensor||sensor.type!=='Fan'||!Number.isFinite(sensor.value))
-   return {text:'Unavailable',mapped:true};
+   return {text:'RPM unavailable',mapped:true};
   const timestamp=Date.parse(sensor.observedAt||S.frame?.timestamp||'');
   if(!Number.isFinite(timestamp)||Math.abs(Date.now()-timestamp)>10000)
-   return {text:'Stale reading',mapped:true};
+   return {text:'RPM stale',mapped:true};
   return {text:Math.round(sensor.value).toLocaleString()+' RPM',mapped:true};
  };
  const target=(S,profileId,channelId)=>{
