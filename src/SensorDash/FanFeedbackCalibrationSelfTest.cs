@@ -84,6 +84,89 @@ internal static class FanFeedbackCalibrationSelfTest
             now.AddSeconds(23)) && timeout.State=="aborted",
             "register mismatch must abort instead of saving corrupted data");
 
+        // A fan must be discoverable and calibratable BEFORE any temperature
+        // curve or live profile exists. Only the elevated, timed session may
+        // touch that physical PWM output. Completion returns BIOS ownership.
+        var preCurveDir=Directory.CreateTempSubdirectory("SensorDash-PreCurve-");
+        try
+        {
+            var fanMap=new FanChannelMapping {
+                ChannelId="pwm",Kind="fan",Label="Radiators",RpmSensorId="rpm"
+            };
+            var cfg=new DashboardSettings{FanChannelMappings=[fanMap]};
+            WorkspaceLogic.Normalize(cfg);
+            var outputs=new List<FanOutputInfo>{
+                new("pwm","Radiator fan","SuperIO","superio",0,100,"Undefined",true)
+            };
+            var preCurve=new PersistentFanProfiles(preCurveDir.FullName);
+            Check(!preCurve.HasActiveProfiles,
+                "pre-curve calibration cannot require existing temperature curves");
+            Check(CoolingEventRecorder.Accepted(preCurve.RequestCalibration(
+                new FanCommand("calibrate",ChannelId:"pwm",
+                    CalibrationMode:"identify",ConfirmExclusiveOwnership:true),cfg,outputs)),
+                "unassigned physical fan can run high-duty identification");
+            var fake=new FakePwm();
+            var channels=new Dictionary<string,IFanPwmChannel>{{"pwm",fake}};
+            var started=now.AddMinutes(1);
+            preCurve.Tick(channels,Frame(started,10,490),started,cfg);
+            Check(fake.SoftwareValue==100 && preCurve.HasCalibrationRunning,
+                "pre-curve session commands high duty through the collector");
+            foreach(var seconds in new[]{6,7,8})
+                preCurve.Tick(channels,Frame(started.AddSeconds(seconds),100,1900),
+                    started.AddSeconds(seconds),cfg);
+            preCurve.Tick(channels,Frame(started.AddSeconds(9),100,1900),
+                started.AddSeconds(9),cfg);
+            Check(fake.SoftwareValue==85,
+                "pre-curve identification progresses to next measured duty");
+            foreach(var seconds in new[]{15,16,17})
+                preCurve.Tick(channels,Frame(started.AddSeconds(seconds),85,1550),
+                    started.AddSeconds(seconds),cfg);
+            preCurve.Tick(channels,Frame(started.AddSeconds(18),85,1550),
+                started.AddSeconds(18),cfg);
+            Check(fake.SoftwareValue==70,
+                "pre-curve identification reaches its lowest, conservative 70 percent step");
+            foreach(var seconds in new[]{24,25,26})
+                preCurve.Tick(channels,Frame(started.AddSeconds(seconds),70,1260),
+                    started.AddSeconds(seconds),cfg);
+            Check(!preCurve.HasCalibrationRunning &&
+                  fake.IsSoftwareMode==false && fake.Resets>=2,
+                "successful pre-curve identification must restore firmware control");
+            var result=System.Text.Json.JsonSerializer.Serialize(
+                preCurve.Snapshot(cfg));
+            Check(result.Contains("\"mode\":\"identify\"") &&
+                  result.Contains("\"state\":\"complete\""),
+                "completed measured pairing remains available to the UI");
+            Check(preCurve.DrainRecoveryEvents().Any(e=>e.Severity=="info"),
+                "completed calibration emits a local history event");
+            // Full low-duty sweep is blocked without a verified pairing and
+            // explicit independent thermal monitors.
+            Check(!CoolingEventRecorder.Accepted(preCurve.RequestCalibration(
+                new FanCommand("calibrate",ChannelId:"pwm",
+                    CalibrationMode:"response",TemperatureSensorIds:["temp"],
+                    ConfirmExclusiveOwnership:true),cfg,outputs)),
+                "an unverified tach pairing cannot authorize low-duty control");
+            fanMap.VisuallyIdentified=true;
+            fanMap.VerifiedAt=now;
+            fanMap.Measurements=[
+                new(){DutyPercent=70,Rpm=1260,ObservedAt=now},
+                new(){DutyPercent=85,Rpm=1550,ObservedAt=now},
+                new(){DutyPercent=100,Rpm=1900,ObservedAt=now}
+            ];
+            Check(CoolingEventRecorder.Accepted(preCurve.RequestCalibration(
+                new FanCommand("calibrate",ChannelId:"pwm",
+                    CalibrationMode:"response",TemperatureSensorIds:["temp"],
+                    TemperatureLimit:85,ConfirmExclusiveOwnership:true),cfg,outputs)),
+                "verified fan may calibrate full response before assigning a curve");
+            var resumed=started.AddSeconds(30);
+            preCurve.Tick(channels,Frame(resumed,70,1260,30),resumed,cfg);
+            Check(fake.SoftwareValue==100,"full response begins at safe maximum");
+            preCurve.Tick(channels,Frame(resumed.AddSeconds(1),100,1900,40),
+                resumed.AddSeconds(1),cfg);
+            Check(!preCurve.HasCalibrationRunning && !fake.IsSoftwareMode,
+                "rising temperature must immediately abort full calibration and release hardware");
+        }
+        finally {try{preCurveDir.Delete(true);}catch{}}
+
         var dir=Directory.CreateTempSubdirectory("SensorDash-Calibration-");
         try
         {
