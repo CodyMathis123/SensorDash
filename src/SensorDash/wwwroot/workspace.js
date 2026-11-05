@@ -239,7 +239,7 @@ const SDWorkspace = (() => {
        '" r="8" fill="none" stroke="#e8f9f7" stroke-width="2"/>'+
       '<circle class="w-curve-point-dot" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
        '" r="4.5" fill="#60d6cf"/>'+
-      '<title>'+p.temperature+'°C · '+p.percent+'% fan speed</title></g>').join('');
+      '</g>').join('');
   const marker=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent)
     ?'<circle cx="'+x(activeTemperature)+'" cy="'+y(activePercent)+'" r="6" fill="#f2bd6d" stroke="#132535" stroke-width="2"></circle>'+
      '<line x1="'+x(activeTemperature)+'" y1="20" x2="'+x(activeTemperature)+'" y2="180" stroke="#f2bd6d" stroke-dasharray="4 4"/>':'';
@@ -345,10 +345,12 @@ const SDWorkspace = (() => {
  // Reindex after insertion/removal; indices always refer to the displayed
  // editor row, never to a sorted copy of the temperature points.
  const indexCurveRows=(table)=>{
-  table.querySelectorAll('tbody tr[data-curve-point-row]').forEach((row,index)=>{
+  let pointIndex=0;
+  table.querySelectorAll('tbody tr[data-curve-point-row]').forEach(row=>{
    const temperature=row.querySelector('[data-curve-temperature]')?.value.trim();
    const percent=row.querySelector('[data-curve-percentage]')?.value.trim();
-   if(temperature!=='' && percent!=='')row.dataset.curvePointIndex=String(index);
+   if(temperature!=='' && temperature!=null && percent!=='' && percent!=null)
+    row.dataset.curvePointIndex=String(pointIndex++);
    else delete row.dataset.curvePointIndex;
   });
  };
