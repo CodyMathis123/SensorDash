@@ -163,7 +163,7 @@ public sealed class PersistentFanProfiles
                 _calibration=new FanAutoCalibration(command.ChannelId,map.RpmSensorId,
                     minDuty,Math.Min(100,output.Maximum),DateTimeOffset.UtcNow,
                     command.CalibrationMode,command.TemperatureSensorIds,
-                    command.TemperatureLimit);
+                    command.TemperatureLimit,settings.Aliases);
                 _calibrationFinalized=false;
                 _standaloneCalibrationOwned=false;
                 _trace?.Event("CALIBRATION",
