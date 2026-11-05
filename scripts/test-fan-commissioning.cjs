@@ -153,7 +153,7 @@ async function click(action,duty){
  assert.match(enabled,/Calibration belongs to the physical PWM header/i);
  assert.match(enabled,/Saved calibration/);
  assert.match(enabled,/70–100% PWM/);
- assert.match(enabled,/3 points/);
+ assert.match(enabled,/3 running-speed points/);
  const sampleAt=new Date().toISOString();
  S.fanControl.persistent.calibration={
   channelId:'channel1',rpmSensorId:'tach1',mode:'response',
@@ -231,5 +231,58 @@ async function click(action,duty){
  S.fanControl.persistent.calibration=null;
  assert.doesNotMatch(controller.render(S),/id="fcGlobalCalibration"/,
   'Global progress indicator should disappear after calibration ends');
+ // The NVMe fan can stop at 10% after 18 stable positive readings.
+ // Saving the usable points and an observed 0 RPM cutoff is explicitly
+ // allowed, and the 0 must not enter positive RPM interpolation.
+ const cutoffAt=new Date().toISOString();
+ const responsePoints=Array.from({length:18},(_,i)=>{
+  const dutyPercent=100-i*5;
+  return {dutyPercent,rpm:350+dutyPercent*95,observedAt:cutoffAt,
+   temperatures:[{sensorId:'temp1',sensorName:'CPU package',
+    celsius:39,observedAt:cutoffAt}]};
+ });
+ S.fanControl.persistent.calibration={
+  channelId:'channel1',rpmSensorId:'tach1',mode:'response',
+  state:'cutoff',completedSteps:18,totalSteps:19,currentDuty:10,
+  cutoff:{dutyPercent:10,observedAt:cutoffAt,temperatures:[
+    {sensorId:'temp1',sensorName:'CPU package',celsius:39,observedAt:cutoffAt}]},
+  message:'Observed fan stop at 10% PWM',measurements:responsePoints
+ };
+ const withStop=controller.render(S);
+ assert.match(withStop,/Fan stop observed · results ready to save/);
+ assert.match(withStop,/Save 18 RPM points \+ observed stop/);
+ assert.match(withStop,/10% PWM · observed stop/);
+ assert.match(withStop,/0 RPM \(confirmed\)/);
+ assert.match(withStop,/lowest measured running duty is 15%/i);
+ const beforeSave=requests.length;
+ await click('save-auto');
+ assert.equal(requests.length,beforeSave+1,
+  'Saving an observed fan cutoff persists calibration without any fan write');
+ const cutoffSaved=requests.at(-1);
+ assert.equal(cutoffSaved.url,'/api/settings');
+ assert.equal(cutoffSaved.payload.fanChannelMappings[0].measurements.length,18);
+ assert.equal(cutoffSaved.payload.fanChannelMappings[0].cutoff.dutyPercent,10);
+ assert.equal(cutoffSaved.payload.fanChannelMappings[0].measurements.every(p=>p.rpm>0),true,
+  'Observed zero RPM must remain separate from running-speed calibration');
+ S.fanControl.persistent.calibration=null;
+ const persisted=controller.render(S);
+ assert.match(persisted,/Fan stop observed at 10%/);
+ assert.match(persisted,/18 running-speed points/);
+ assert.match(persisted,/10% PWM · observed stop/);
+ assert.match(persisted,/A restart threshold was not measured/);
+
+ // Other safety aborts may retain earlier valid measurements. Allow an
+ // explicitly confirmed partial save but do not invent a fan-stop duty.
+ S.fanControl.persistent.calibration={
+  channelId:'channel1',rpmSensorId:'tach1',mode:'response',
+  state:'aborted',completedSteps:18,totalSteps:19,currentDuty:10,
+  message:'Missing guard data; previous control restored',
+  measurements:responsePoints
+ };
+ assert.match(controller.render(S),/Save 18 valid RPM points \(partial\)/);
+ await click('save-auto');
+ assert.equal(requests.at(-1).payload.fanChannelMappings[0].cutoff,null);
+ assert.equal(requests.at(-1).payload.fanChannelMappings[0].measurements.length,18);
+ console.log('PASS: confirmed low-duty fan stop is persistent diagnostic data, not discarded calibration');
  console.log('PASS: single active fan calibration status, alias-aware guards and saved RPM history');
 })().catch(e=>{console.error(e);process.exitCode=1});
