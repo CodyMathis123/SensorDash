@@ -77,6 +77,14 @@ public sealed class PersistentFanProfiles
         double.IsFinite(p.HysteresisDegrees) && p.HysteresisDegrees is >=0 and <=10;
 
     public bool HasActiveProfiles { get { lock(_sync)return _approved.Count>0; } }
+    public bool HasCalibrationRunning { get {lock(_sync)return _calibration?.Running==true;} }
+    public void CancelCalibration(string reason)
+    {
+        lock(_sync)
+        {
+            if(_calibration?.Running==true)_calibration.Abort(reason);
+        }
+    }
     public bool OwnsChannel(string id)
     {
         lock(_sync)return _approved.Values.Any(p=>p.ChannelIds.Contains(id));
@@ -256,6 +264,9 @@ public sealed class PersistentFanProfiles
                 return new {accepted=false,message="Confirm exclusive fan-control ownership."};
             var configured=settings.FanProfiles.FirstOrDefault(p=>p.Id==command.ProfileId);
             if(configured==null)return new {accepted=false,message="Save the fan profile first."};
+            if(_calibration?.Running==true &&
+                configured.ChannelIds.Contains(_calibration.ChannelId))
+                return new {accepted=false,message="Complete or cancel the fan calibration before assigning this output to a live profile."};
             if(configured.CurveIds.Count==0 || configured.ChannelIds.Count==0)
                 return new {accepted=false,message="Assign at least one curve and one writable output."};
             var lookup=settings.SimulatedFanCurves.ToDictionary(c=>c.Id);
@@ -355,6 +366,11 @@ public sealed class PersistentFanProfiles
             _writer.ForceRearm(previouslyApproved);
         }
         _lastTick=now;
+        lock(_sync)
+        {
+            if(_calibration?.Running==true && now>=_calibration.ExpiresAt)
+                _calibration.Abort("Calibration timer expired; restoring the prior controller.");
+        }
         Dictionary<string,TemporaryOverride> overrides;
         lock(_sync)
         {
@@ -410,7 +426,8 @@ public sealed class PersistentFanProfiles
                 {
                     calibrating=_calibration?.Running==true && _calibration.ChannelId==id
                         ?_calibration:null;
-                    if(calibrating!=null && (demand.Failsafe ||
+                    if(calibrating!=null && (!calibrating.GuardsSafe(frame,now) ||
+                        demand.Failsafe ||
                         demand.Percent>calibrating.CurrentDuty+0.1 ||
                         settings?.FanChannelMappings?.Any(m=>m.ChannelId==id &&
                             m.Kind=="fan" && m.VisuallyIdentified &&
