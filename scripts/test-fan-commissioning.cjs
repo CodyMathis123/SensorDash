@@ -129,7 +129,6 @@ async function click(action,duty){
  assert.equal(requests[1].payload.channelId,'channel1');
  assert.equal(requests[1].payload.confirmExclusiveOwnership,true);
  assert.equal(requests[1].payload.durationSeconds,300);
- assert.equal(requests[2]?.payload?.durationSeconds,undefined);
  // Once the high-duty response is physically verified, a guarded full
  // calibration may run even without a configured or approved profile.
  S.settings.fanChannelMappings[0].visuallyIdentified=true;
@@ -139,12 +138,16 @@ async function click(action,duty){
  await click('start-auto');
  assert.equal(requests.length,3);
  assert.equal(requests[2].payload.calibrationMode,'response');
+ assert.equal(requests[2].payload.durationSeconds,1500,
+  'Full calibration must allow the 19-point stable sweep to finish');
  assert.equal(requests[2].payload.temperatureLimit,85);
  assert.deepEqual(Array.from(requests[2].payload.temperatureSensorIds),['temp1']);
  assert.equal(requests[2].payload.confirmExclusiveOwnership,true);
  const enabled=controller.render(S);
  assert.match(enabled,/Verify fan and RPM pairing/);
  assert.match(enabled,/Run full calibration/);
+ assert.match(enabled,/19 speeds/);
+ assert.match(enabled,/5% steps/);
  assert.match(enabled,/Primary thermal guard/);
  assert.match(enabled,/PWM register/);
  assert.match(enabled,/Calibration belongs to the physical PWM header/i);
