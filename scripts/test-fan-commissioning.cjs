@@ -118,6 +118,7 @@ async function click(action,duty){
  // Fan/RPM identification must be available before a curve exists.
  S.fanControl.persistent.profiles=[];
  S.settings.fanChannelMappings[0].visuallyIdentified=false;
+ nodes.get('fcExclusive').checked=false;
  await click('start-identify');
  assert.equal(requests.length,1,'Identification still requires ownership acknowledgment');
  nodes.get('fcExclusive').checked=true;
