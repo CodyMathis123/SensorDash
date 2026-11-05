@@ -539,6 +539,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
   S.fanExpanded[details.dataset.fanFold]=!details.open;
   return;
  }
+ if(S.view==='curves'&&SDWorkspace.handleCurvePointClick(e))return;
  if(FanControlDebug.handle(e,{toast}))return;
  if(FanCommissioning.handle(e,S,{render,toast}))return;
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast,refreshFanControl:loadFanControl});return}
@@ -589,6 +590,26 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
   if(e.target.closest('#saveTelemetryConfig'))void saveTelemetryConfig();
   if(e.target.closest('#refresh'))void Promise.all([loadEvents(),loadFanControl(),loadStatus(false),loadTelemetryConfig()]).then(()=>toast('Local status refreshed'));
 
+});
+// Curve visualization is bound to its editable rows using delegated events.
+// Hover and focus never write settings or command hardware.
+document.addEventListener('pointerover',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointEnter(e);
+});
+document.addEventListener('pointerout',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointExit(e);
+});
+document.addEventListener('focusin',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointEnter(e);
+});
+document.addEventListener('focusout',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointExit(e);
+});
+document.addEventListener('keydown',e=>{
+ if(S.view==='curves'&& (e.key==='Enter'||e.key===' ') &&
+   e.target?.closest?.('.w-curve-point-marker[data-curve-point-index]')){
+  if(SDWorkspace.handleCurvePointClick(e))return;
+ }
 });
 document.addEventListener('input',e=>{
  if(e.target.id==='fcOverrideDuty'){
