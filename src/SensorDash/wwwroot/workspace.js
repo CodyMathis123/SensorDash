@@ -259,23 +259,19 @@ const SDWorkspace = (() => {
  const curvePointRow=(point=null,S=null,curveId='',index=null)=>{
   const temp=point?.temperature==null?'':point.temperature;
   const percent=point?.percent==null?'':point.percent;
-  const rpmEstimate=percent===''?{text:'—',hint:'Enter a fan speed.'}:
-    estimatedFanRpm(S,curveId,Number(percent));
   return '<tr data-curve-point-row'+(index!=null?' data-curve-point-index="'+index+'"':'')+'>'+
    '<td><input type="number" min="-30" max="150" step="1" inputmode="decimal" '+
     'data-curve-temperature value="'+attr(temp)+'" placeholder="°C" aria-label="Curve point temperature in °C"></td>'+
    '<td><input type="number" min="0" max="100" step="1" inputmode="decimal" '+
     'data-curve-percentage value="'+attr(percent)+'" placeholder="%" aria-label="Curve point fan duty percentage"></td>'+
-   '<td data-curve-estimated-rpm title="'+attr(rpmEstimate.hint)+
-     '" class="w-curve-rpm">'+safe(rpmEstimate.text)+'</td>'+
    '<td>'+button('remove-curve-point','×','aria-label="Remove curve point"')+'</td></tr>';
  };
  const curveTable=(curve,S)=>
   '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
-  '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th title="Based on the fan output calibration, not a measured live RPM">Est. RPM</th><th class="w-curve-actions-col"></th></tr></thead>'+
+  '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th class="w-curve-actions-col"></th></tr></thead>'+
   '<tbody>'+(curve.points||[]).map((point,index)=>curvePointRow(point,S,curve.id,index)).join('')+
     curvePointRow(null,S,curve.id)+'</tbody></table></div>'+
-  '<p class="note w-curve-estimate-note">Est. RPM is informational and uses the fan output’s saved measurements. A dash (—) means this duty is not calibrated; hover for details. CPU/GPU MAX mixing can select a higher actual duty.</p>'+
+  '<p class="note">Temperature curves set PWM duty only. See Live fan profiles for estimated and measured RPM on the mapped hardware output.</p>'+
   '<p class="note">Use the empty row to add a point.</p>'+
   '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
  const readCurvePointRows=(table,preserveRowOrder=false)=>{
@@ -405,16 +401,6 @@ const SDWorkspace = (() => {
    const id=table.dataset.curveTable;
    const live=S.simulation?.results?.find(x=>x.id===id);
    preview.innerHTML=curveDiagram(points,live?.inputTemperature,null);
-   for(const row of table.querySelectorAll('tbody tr[data-curve-point-row]')){
-    const val=row.querySelector('[data-curve-percentage]')?.value.trim()||'';
-    const cell=row.querySelector('[data-curve-estimated-rpm]');
-    if(cell){
-     const estimate=val===''?{text:'—',hint:'Enter a fan speed.'}:
-       estimatedFanRpm(S,id,Number(val));
-     cell.textContent=estimate.text;
-     cell.title=estimate.hint;
-    }
-   }
    const focused=document.activeElement?.closest?.('[data-curve-point-row]');
    if(focused && table.contains(focused) && focused.dataset.curvePointIndex!=null)
     activateCurvePoint(focused,Number(focused.dataset.curvePointIndex));
@@ -555,7 +541,7 @@ const SDWorkspace = (() => {
           '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
         '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
           ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
-        FanFeedback.render(S,p.channelIds)+
+        FanFeedback.render(S,p.channelIds,p.id)+
         (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
       return FanControlUx.section(S,'profile:'+p.id,p.name,
@@ -582,7 +568,7 @@ const SDWorkspace = (() => {
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
-      FanFeedback.render(S,p.channelIds)+
+      FanFeedback.render(S,p.channelIds,p.id)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
