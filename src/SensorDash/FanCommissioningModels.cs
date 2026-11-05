@@ -17,6 +17,15 @@ public sealed class FanCalibrationPoint
     // Earlier saved measurements may have no temperature observations.
     public List<FanCalibrationTemperature> Temperatures { get; set; } = [];
 }
+// A confirmed zero-RPM observation at a low PWM step is NOT an
+// interpolated fan speed or a guaranteed restart threshold. Keep it separate
+// from stable positive RPM samples so fan-speed estimation stays honest.
+public sealed class FanCalibrationCutoff
+{
+    public int DutyPercent { get; set; }
+    public DateTimeOffset ObservedAt { get; set; }
+    public List<FanCalibrationTemperature> Temperatures { get; set; } = [];
+}
 public sealed class FanChannelMapping
 {
     public string ChannelId { get; set; } = "";
@@ -26,6 +35,7 @@ public sealed class FanChannelMapping
     public bool VisuallyIdentified { get; set; }
     public DateTimeOffset? VerifiedAt { get; set; }
     public List<FanCalibrationPoint> Measurements { get; set; } = [];
+    public FanCalibrationCutoff? Cutoff { get; set; }
 }
 
 public static class FanCommissioningRules
@@ -58,12 +68,13 @@ public static class FanCommissioningRules
                 m.Kind=m.Kind is "fan" or "pump" ? m.Kind : "unknown";
                 m.RpmSensorId=(!string.IsNullOrWhiteSpace(m.RpmSensorId) &&
                     m.RpmSensorId.Length<=256)?m.RpmSensorId:"";
-                // Sanitize optional thermal observations without discarding
-                // legacy fan calibrations that have no temperature metadata.
-                foreach(var point in m.Measurements??[])
+                // Preserve sensor IDs and historical values, but reject
+                // corrupt/unbounded guard metadata for either a settled RPM
+                // point or the separately recorded zero-RPM cutoff.
+                List<FanCalibrationTemperature> SanitizeTemps(
+                    List<FanCalibrationTemperature>? temperatures)
                 {
-                    if(point==null)continue;
-                    point.Temperatures=(point.Temperatures??[])
+                    return (temperatures??[])
                         .Where(t=>t!=null && !string.IsNullOrWhiteSpace(t.SensorId) &&
                             t.SensorId.Length<=256 && double.IsFinite(t.Celsius) &&
                             t.Celsius is >=-60 and <=150 &&
@@ -76,6 +87,8 @@ public static class FanCommissioningRules
                             return t;
                         }).ToList();
                 }
+                foreach(var point in m.Measurements??[])
+                    if(point!=null)point.Temperatures=SanitizeTemps(point.Temperatures);
                 m.Measurements=(m.Kind=="fan" && m.RpmSensorId.Length>0
                     ?(m.Measurements??[]).Where(p=>p!=null &&
                         p.DutyPercent is >=10 and <=100 &&
@@ -85,6 +98,20 @@ public static class FanCommissioningRules
                         .OrderByDescending(p=>p.ObservedAt).DistinctBy(p=>p.DutyPercent)
                         .Take(24).OrderBy(p=>p.DutyPercent).ToList()
                     :[]);
+                // Only a zero-RPM observation BELOW all retained positive
+                // RPM points is a meaningful downward-sweep cutoff. Never
+                // infer a motor restart duty or mark that 0-RPM value as a
+                // calibrated, usable RPM.
+                if(m.Cutoff is { } cutoff &&
+                   m.Kind=="fan" && m.Measurements.Count>=2 &&
+                   cutoff.DutyPercent is >=10 and <=40 &&
+                   cutoff.DutyPercent<m.Measurements.Min(p=>p.DutyPercent) &&
+                   cutoff.ObservedAt>new DateTimeOffset(2020,1,1,0,0,0,TimeSpan.Zero) &&
+                   cutoff.ObservedAt<=DateTimeOffset.UtcNow.AddMinutes(5))
+                {
+                    cutoff.Temperatures=SanitizeTemps(cutoff.Temperatures);
+                }
+                else m.Cutoff=null;
                 if(m.Kind!="fan" || !HasVerifiedResponse(m))
                     m.VerifiedAt=null;
                 return m;
