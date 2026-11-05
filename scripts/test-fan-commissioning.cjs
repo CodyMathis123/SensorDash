@@ -128,7 +128,8 @@ async function click(action,duty){
  assert.equal(requests[1].payload.calibrationMode,'identify');
  assert.equal(requests[1].payload.channelId,'channel1');
  assert.equal(requests[1].payload.confirmExclusiveOwnership,true);
- assert.equal(requests[1].payload.durationSeconds,600);
+ assert.equal(requests[1].payload.durationSeconds,300);
+ assert.equal(requests[2]?.payload?.durationSeconds,undefined);
  // Once the high-duty response is physically verified, a guarded full
  // calibration may run even without a configured or approved profile.
  S.settings.fanChannelMappings[0].visuallyIdentified=true;
