@@ -19,6 +19,23 @@ git diff --check
 
 Check each command's exit status. The Windows workflow is authoritative for the complete backend self-test commands, publish, MSI creation, install/uninstall checks and artifact validation. Local package/network limitations must be reported; a successful remote Windows run can supply that missing validation.
 
+## Memory-first performance diagnostics
+
+Settings → Performance diagnostics shows a one-minute sampling cadence for the
+desktop/tray process and the elevated collector. Each process retains at most
+1,440 in-memory samples spanning up to 24 hours; history is discarded on restart
+and is never written into the telemetry SQLite database. The **Export memory
+history CSV** button combines the two process streams without exporting sensor
+values, saved settings, machine names or token material.
+
+Use **private memory** to compare process-private commitment, **working set** to
+compare resident pages (which can include shared memory), and **GC committed
+memory** to assess how much is committed by the managed GC. Do not label the
+difference as exact native memory; runtime and other components reserve memory
+in different ways. Inspect memory after startup, one hour, and 24 hours before
+changing collector sampling or fan-control hardware access. Collector/IPC
+timing fields are secondary diagnostic context, not extra polling.
+
 ## Required PR workflow
 
 CI prepares release identity before compilation. The major.minor series comes from Directory.Build.props; the third MSI field is GITHUB_RUN_NUMBER. ProductCode is a deterministic UUID for the platform/version, while UpgradeCode is permanent. Thus a Production run is newer than its PR run. Retries of the same run retain its version/source identity; start a new workflow run to produce a new distributable version. Local source version values are development defaults and must not be distributed. Preserve the workflow's counter; if replacing/resetting the workflow, advance the version series first. The allocator fails at the MSI field limits instead of wrapping.
