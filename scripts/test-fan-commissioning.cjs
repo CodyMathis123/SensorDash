@@ -79,8 +79,8 @@ async function click(action,duty){
  assert.match(html,/<option value="tempHidden" selected>[^<]*\[Hidden\]/,
   'An already assigned hidden guard remains identified and selectable');
  S.settings.simulatedFanCurves=[];S.settings.fanProfiles=[];
- const sampleAt='2025-01-02T15:04:00Z';
- S.settings.fanChannelMappings[0].measurements=[{dutyPercent:100,rpm:1800,observedAt:sampleAt}];
+ const historicalSampleAt='2025-01-02T15:04:00Z';
+ S.settings.fanChannelMappings[0].measurements=[{dutyPercent:100,rpm:1800,observedAt:historicalSampleAt}];
  html=controller.render(S);
  assert.match(html,/Jan 2, 2025|2 Jan 2025|2025[^<]*Jan 2/,
   'Saved calibration dates must display a year as well as a time');
