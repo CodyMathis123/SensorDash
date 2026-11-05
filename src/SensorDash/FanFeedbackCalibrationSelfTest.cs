@@ -97,6 +97,33 @@ internal static class FanFeedbackCalibrationSelfTest
             sweep.Message.Contains("95.0°C") &&
             sweep.Message.Contains("85.0°C"),
             "over-limit temperature must identify the exact sensor, value and threshold");
+        // The readable guard name is taken from the user's alias, not
+        // LibreHardwareMonitor's raw sensor label. Sensor IDs still make
+        // missing-sensor messages unambiguous.
+        var aliases=new Dictionary<string,string>(StringComparer.Ordinal){
+            ["temp"]="CPU Coolant Guard"
+        };
+        var namedHot=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85,aliases);
+        Check(!namedHot.GuardsSafe(Frame(now,10,490,95),now) &&
+            namedHot.Message.Contains("CPU Coolant Guard") &&
+            !namedHot.Message.Contains("CPU temp"),
+            "thermal guard over-temperature diagnostics must honor configured sensor aliases");
+        var namedMissing=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85,aliases);
+        Check(!namedMissing.GuardsSafe(Frame(now,10,490,null),now) &&
+            namedMissing.Message.Contains("CPU Coolant Guard (temp)"),
+            "missing aliased thermal guard must retain its stable sensor ID");
+        var namedSamples=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85,aliases);
+        namedSamples.MarkApplied(now);
+        for(var second=8;second<=20;second++)
+            namedSamples.Observe(Frame(now.AddSeconds(second),100,1960),
+                now.AddSeconds(second));
+        Check(namedSamples.CompletedSteps==1 &&
+            namedSamples.Measurements[0].Temperatures.Single().SensorName=="CPU Coolant Guard",
+            "captured calibration guard temperatures must use the selected alias");
+
         var missingGuard=new FanAutoCalibration("pwm","rpm",10,100,now,
             "response",["temp"],85);
         Check(!missingGuard.GuardsSafe(Frame(now,10,490,null),now) &&
