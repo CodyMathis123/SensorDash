@@ -34,7 +34,9 @@ const scope={
  Date
 };
 const controller=vm.runInNewContext(source+'\nFanCommissioning;',scope);
-scope.SDWorkspace={saveSettings:async(S,draft)=>{
+scope.SDWorkspace={isHidden:(S,s)=>(S.settings?.hiddenSensorIds||[]).includes(s.id)||
+  (S.settings?.hiddenDeviceIds||[]).includes(s.deviceId)||
+  (S.settings?.hiddenHardwareTypes||[]).includes(s.deviceType),saveSettings:async(S,draft)=>{
  const r=await scope.fetch('/api/settings',{body:JSON.stringify(draft)});
  S.settings=await r.json();return S.settings;
 }};
@@ -60,7 +62,29 @@ async function click(action,duty){
  await new Promise(setImmediate);
 }
 (async()=>{
+ S.sensors.push({id:'tachHidden',type:'Fan',name:'Hidden RPM',device:'Mainboard',deviceId:'hiddenDevice',value:400},
+  {id:'tempHidden',type:'Temperature',name:'Hidden temperature',device:'CPU',deviceId:'hiddenDevice',value:44});
+ S.settings.hiddenDeviceIds=['hiddenDevice'];
  let html=controller.render(S);
+ assert.doesNotMatch(html,/value="tachHidden"|value="tempHidden"/,
+  'Hidden device sensors must be excluded from new calibration selections');
+ S.settings.fanChannelMappings[0].rpmSensorId='tachHidden';
+ html=controller.render(S);
+ assert.match(html,/<option value="tachHidden" selected>[^<]*\[Hidden\]/,
+  'A configured hidden RPM sensor must remain visible in its existing assignment');
+ S.settings.fanChannelMappings[0].rpmSensorId='tach1';
+ S.settings.simulatedFanCurves=[{id:'hiddenCurve',sourceSensorId:'tempHidden'}];
+ S.settings.fanProfiles=[{channelIds:['channel1'],curveIds:['hiddenCurve']}];
+ html=controller.render(S);
+ assert.match(html,/<option value="tempHidden" selected>[^<]*\[Hidden\]/,
+  'An already assigned hidden guard remains identified and selectable');
+ S.settings.simulatedFanCurves=[];S.settings.fanProfiles=[];
+ const sampleAt='2025-01-02T15:04:00Z';
+ S.settings.fanChannelMappings[0].measurements=[{dutyPercent:100,rpm:1800,observedAt:sampleAt}];
+ html=controller.render(S);
+ assert.match(html,/Jan 2, 2025|2 Jan 2025|2025[^<]*Jan 2/,
+  'Saved calibration dates must display a year as well as a time');
+ S.settings.fanChannelMappings[0].measurements=[];
  assert.match(html,/Identify the physical fan and tachometer/);
  assert.match(html,/Pump — never test here/);
  assert.match(html,/Test 100%/);
