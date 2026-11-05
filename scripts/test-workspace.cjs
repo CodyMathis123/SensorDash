@@ -154,49 +154,38 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
- assert.ok(curvesView.includes('Temporary fan speed')&&
-   curvesView.includes('Advanced setup &amp; diagnostics'),
-   'Quick fan sliders and advanced commissioning stay available');
- assert.ok(curvesView.includes('data-fan-fold="quick"')&&
-   /data-fan-fold="quick"\s*><summary>/.test(curvesView)&&
+ assert.ok(curvesView.includes('Fan control &amp; calibration') &&
+   curvesView.includes('Temperature curves'),
+   'Fan control, identification and calibration share one workspace');
+ assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
    curvesView.indexOf('data-fan-fold="profiles"') <
-     curvesView.indexOf('data-fan-fold="quick"')&&
-   curvesView.indexOf('data-fan-fold="quick"') <
-     curvesView.indexOf('data-fan-fold="curves"'),
-   'Temporary fan controls should default closed below automatic profiles');
+     curvesView.indexOf('data-fan-fold="calibration"') &&
+   curvesView.indexOf('data-fan-fold="calibration"') <
+     curvesView.indexOf('data-fan-fold="curves"') &&
+   !curvesView.includes('data-fan-fold="manual"') &&
+   !curvesView.includes('data-fan-fold="quick"'),
+   'Only the consolidated manual control/calibration section may appear');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
    persistent:{profiles:[{id:'shared',name:'Shared radiators',channelIds:['pwm1'],minimumPercent:20}],
      readings:[{id:'shared',targetPercent:45}],overrides:[]}
  };
- S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub'}];
+ S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub',rpmSensorId:'rpm1'}];
  let quick=workspace.render(S,'curves',h);
- assert.ok(quick.includes('data-quick-slider="pwm1"')&&
-   quick.includes('min="20" max="100"')&&
-   quick.includes('Apply for 5 minutes'),
-   'Approved fan channel must expose its own bounded slider');
- assert.ok(!quick.includes('Return to fan curve'),
-   'Automatic mode should not show a redundant reset button');
- S.fanControl.persistent.overrides=[{channelId:'pwm1',percent:36,expires:'2026-11-02T12:00:00Z'}];
- quick=workspace.render(S,'curves',h);
- assert.ok(quick.includes('Return to fan curve')&&quick.includes('Return all to curves'),
-   'Active overrides need local and global return actions');
- assert.ok(quick.includes('1 active override')&&
-   /data-fan-fold="quick"\s*><summary>/.test(quick),
-   'Collapsed heading must report active override count without opening controls');
- S.fanExpanded={quick:true};
- assert.ok(workspace.render(S,'curves',h).includes('data-fan-fold="quick" open'),
-   'Expanding temporary controls should persist across re-render');
- delete S.fanExpanded;
+ assert.ok(quick.includes('Fan control &amp; calibration') &&
+   !quick.includes('data-quick-slider=') &&
+   !quick.includes('data-fan-fold="manual"'),
+   'There must not be a duplicate manual override UI');
  S.settings.fanChannelMappings[0].kind='pump';
  assert.ok(!workspace.render(S,'curves',h).includes('data-quick-slider="pwm1"'),
-   'Pumps must not appear in temporary speed controls');
+   'Pump mappings must never appear in standalone quick-speed controls');
  S.settings.fanChannelMappings=[];
  S.fanControl=priorFanControl;
- assert.ok(curvesView.includes('data-fan-fold="profiles"')&&curvesView.includes('data-fan-fold="curves"')&&
-  curvesView.includes('data-fan-fold="commissioning"')&&curvesView.includes('data-fan-fold="manual"'),
-  'Fan control must be grouped into collapsible sections');
+ assert.ok(curvesView.includes('data-fan-fold="profiles"')&&
+   curvesView.includes('data-fan-fold="curves"')&&
+   curvesView.includes('data-fan-fold="calibration"'),
+   'Fan control and curves remain grouped into accessible folds');
  // Editor locks stay at the UI level and do not stop the service or remove
  // readings. Verify cooling systems are individually lockable.
  await click('toggle-cooling-lock',{id:'loop-1'});
