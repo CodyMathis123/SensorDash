@@ -593,15 +593,17 @@ const SDWorkspace = (() => {
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
    const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
-   return controls+renderProfiles(S)+
+   return controls+
       FanControlUx.section(S,'calibration','Fan control & calibration',
-        'One place for temporary speed, identification, manual tests and automatic PWM/RPM measurement',
+        '1 · Identify and measure physical fan PWM/RPM before assigning temperature curves',
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
           '<p class="note">Fan calibration module unavailable.</p>'):
           WorkspaceLocks.readonly('Fan control & calibration')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',true)+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',true)+
       FanControlUx.section(S,'curves','Temperature curves',
-        curves.length+' curve(s) · expand to edit',curveContent,false)+
+        '2 · Define temperature-to-PWM demand · '+curves.length+' curve(s)',
+        curveContent,false)+
+      renderProfiles(S)+
       FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
         FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
           'Resume recovery, commands, RPM feedback and errors',
