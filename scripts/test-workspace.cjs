@@ -163,6 +163,48 @@ const h={
    app.includes("document.addEventListener('pointerover'") &&
    app.includes("document.addEventListener('focusin'"),
    'Curve graph must expose interactive points linked to editor rows');
+ // Simulate the delegated interaction without real fan hardware or a DOM lib.
+ const classFlag=()=>{const flags=new Set();return{
+   toggle:(k,v)=>v?flags.add(k):flags.delete(k),
+   remove:k=>flags.delete(k),contains:k=>flags.has(k)}};
+ const tooltipTemp={textContent:''},tooltipDuty={textContent:''};
+ const tooltip={hidden:true,style:{},classList:classFlag(),
+   querySelector:q=>q.includes('temp')?tooltipTemp:tooltipDuty};
+ const dot={getBoundingClientRect:()=>({left:170,right:180,top:110,bottom:120})};
+ const plot={getBoundingClientRect:()=>({left:0,top:0,width:700,height:300})};
+ const input={focus(){this.wasFocused=true;}};
+ const row={dataset:{curvePointIndex:'0'},classList:classFlag(),
+   querySelector:()=>input,scrollIntoView(){this.wasScrolled=true;}};
+ const point={dataset:{curvePointIndex:'0',curveDotTemperature:'40',
+   curveDotPercent:'25'},classList:classFlag(),
+   querySelector:()=>dot};
+ const table={querySelectorAll:()=>[row]};
+ const scope={
+   querySelector:q=>q==='[data-curve-tooltip]'?tooltip:
+     q==='[data-curve-table]'?table:null,
+   querySelectorAll:q=>q.includes('w-curve-point-marker')?[point]:
+     q.includes('tr[data-curve-point-row]')?[row]:[],
+   contains:n=>n===row||n===input||n===point
+ };
+ row.closest=q=>q.includes('tr[data-curve-point-row]')?row:scope;
+ point.closest=q=>q.includes('w-curve-point-marker')?point:
+   q==='.w-curve-graph'?plot:scope;
+ row.contains=n=>n===row||n===input;
+ point.contains=n=>n===point||n===dot;
+ assert.equal(workspace.handleCurvePointEnter({target:row,relatedTarget:null}),true);
+ assert.equal(point.classList.contains('is-active'),true);
+ assert.equal(row.classList.contains('is-active'),true);
+ assert.equal(tooltip.hidden,false);
+ assert.equal(tooltipTemp.textContent,'40 °C');
+ assert.equal(tooltipDuty.textContent,'25% fan speed');
+ let prevented=false;
+ assert.equal(workspace.handleCurvePointClick({target:point,
+   preventDefault(){prevented=true;}}),true);
+ assert.equal(prevented,true);
+ assert.equal(input.wasFocused,true);
+ assert.equal(row.wasScrolled,true);
+ assert.equal(workspace.handleCurvePointExit({target:row,relatedTarget:null}),true);
+ assert.equal(tooltip.hidden,true);
  assert.ok(curvesView.includes('Fan control &amp; calibration') &&
    curvesView.includes('Temperature curves'),
    'Fan control, identification and calibration share one workspace');
