@@ -206,6 +206,13 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
        (command.Action is not ("override" or "calibrate") &&
         command.DurationSeconds>FanControlRuntime.MaxSessionSeconds) ||
        !double.IsFinite(command.Percent) ||
+       (command.Action=="calibrate" &&
+           (command.CalibrationMode is not ("identify" or "response") ||
+            !double.IsFinite(command.TemperatureLimit) ||
+            command.TemperatureLimit is <35 or >100 ||
+            (command.TemperatureSensorIds?.Length??0)>8 ||
+            (command.TemperatureSensorIds?.Any(x=>string.IsNullOrWhiteSpace(x) ||
+                x.Length>256)??false))) ||
        ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override" || command.Action=="calibrate") &&
            !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
