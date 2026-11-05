@@ -117,15 +117,17 @@ internal static class FanResumeSelfTest
             var beforeWakeWrites=fake.Writes;
             var beforeWakeResets=fake.Resets;
             profiles.Tick(channels,Frame(now.AddSeconds(70)),now.AddSeconds(70));
+            // ReleaseBeforeClose already requested firmware mode, so the
+            // first fresh write must not require another redundant reset.
             Check(fake.Writes==beforeWakeWrites+1 &&
-                  fake.Resets==beforeWakeResets+1,
+                  fake.Resets==beforeWakeResets,
                 "First post-reopen poll reasserts approved PWM");
             profiles.Tick(channels,Frame(now.AddSeconds(79)),now.AddSeconds(79));
             Check(fake.Writes==beforeWakeWrites+1,
                 "Delayed recovery must not fire before hardware settle interval");
             profiles.Tick(channels,Frame(now.AddSeconds(95)),now.AddSeconds(95));
             Check(fake.Writes==beforeWakeWrites+2 &&
-                  fake.Resets==beforeWakeResets+2,
+                  fake.Resets==beforeWakeResets+1,
                 "Delayed recovery performs SetDefault and SetSoftware once");
             profiles.Tick(channels,Frame(now.AddSeconds(96)),now.AddSeconds(96));
             Check(fake.Writes==beforeWakeWrites+2,
