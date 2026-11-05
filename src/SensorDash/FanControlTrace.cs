@@ -12,6 +12,7 @@ internal sealed class FanControlTrace
     private readonly Dictionary<string,(DateTimeOffset Time,string State,double Duty)>
         _samples=new(StringComparer.Ordinal);
     private int _resumeRearms;
+    private DateTimeOffset _resumeDetailedLoggingUntil;
 
     internal string PathName => _path;
     internal int ResumeRearms => Volatile.Read(ref _resumeRearms);
@@ -32,6 +33,9 @@ internal sealed class FanControlTrace
     internal void HardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger)
     {
         Interlocked.Increment(ref _resumeRearms);
+        // Briefly log feedback more often so a resume regression is visible
+        // even if the controller settles before the next minute-long trace.
+        lock (_sync) _resumeDetailedLoggingUntil = now.AddSeconds(70);
         Event("HW-REOPEN", "reason=" + trigger + " gap=" +
             gap.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) +
             "s; reopened LibreHardwareMonitor hardware. Previously approved " +
@@ -84,7 +88,7 @@ internal sealed class FanControlTrace
 
     internal void Observe(string profileId,string channelId,string state,
         double requestedDuty,double? writtenDuty,bool softwareMode,
-        string? mappedSensor,double? rpm,DateTimeOffset now)
+        double? registerDuty,string? mappedSensor,double? rpm,DateTimeOffset now)
     {
         bool emit;
         lock(_sync)
@@ -92,6 +96,8 @@ internal sealed class FanControlTrace
             var key=profileId+"|"+channelId;
             var previous=_samples.GetValueOrDefault(key);
             emit=previous.Time==default || now-previous.Time>=TimeSpan.FromSeconds(60)
+                || (now<=_resumeDetailedLoggingUntil &&
+                    now-previous.Time>=TimeSpan.FromSeconds(5))
                 || previous.State!=state
                 || (now-previous.Time>=TimeSpan.FromSeconds(5)
                     && Math.Abs(previous.Duty-requestedDuty)>=10);
@@ -104,8 +110,9 @@ internal sealed class FanControlTrace
             " state="+state+" requested="+format(requestedDuty)+
             "% lastCommand="+format(writtenDuty)+
             "% lhmSoftwareMode="+softwareMode+
-            " rpmSensor="+(mappedSensor??"none")+
+            " registerDuty="+format(registerDuty)+
+            "% rpmSensor="+(mappedSensor??"none")+
             " rpm="+format(rpm)+
-            " (mode/value are LHM's reported state, not confirmed physical PWM)",now);
+            " (registerDuty is the last Super I/O readback, sampled before this tick's writes; not a measured PWM waveform)",now);
     }
 }
