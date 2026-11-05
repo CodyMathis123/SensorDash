@@ -93,20 +93,62 @@ internal static class FanFeedbackCalibrationSelfTest
         sweep.MarkApplied(now);
         Check(!sweep.Observe(Frame(now.AddSeconds(2),100,1960),now.AddSeconds(2)),
             "no calibration samples before settling time");
-        for(var second=6;second<=8;second++)
+        // A short plateau must NOT be counted as a settled fan speed.
+        for(var second=8;second<=13;second++)
+            sweep.Observe(Frame(now.AddSeconds(second),100,1960),
+                now.AddSeconds(second));
+        Check(sweep.CompletedSteps==0,
+            "Six readings over a short interval must not complete a calibration step");
+        for(var second=14;second<=20;second++)
             sweep.Observe(Frame(now.AddSeconds(second),100,1960),
                 now.AddSeconds(second));
         Check(sweep.CompletedSteps==1 && sweep.CurrentDuty==85 &&
             sweep.NeedsApply,"stable fresh RPM should advance to the next step");
-        sweep.MarkApplied(now.AddSeconds(9));
-        Check(sweep.Observe(Frame(now.AddSeconds(16),85,0),now.AddSeconds(16)) &&
+        sweep.MarkApplied(now.AddSeconds(21));
+        Check(sweep.Observe(Frame(now.AddSeconds(28),85,0),now.AddSeconds(28)) &&
             sweep.State=="aborted","stalled fan aborts calibration");
         Check(sweep.Measurements.Count==1,
             "aborted calibration retains observations for diagnostics only");
+
+        // A smoothly increasing RPM is not a settled response even when
+        // adjacent samples are individually close together.
+        var rising=new FanAutoCalibration("pwm","rpm",70,100,now);
+        rising.MarkApplied(now);
+        for(var second=8;second<=32;second++)
+            rising.Observe(Frame(now.AddSeconds(second),100,1700+
+                (second-8)*12),now.AddSeconds(second));
+        Check(rising.CompletedSteps==0 && rising.Stability=="rising",
+            "monotonic accelerating fan must not be saved as calibrated RPM");
+        for(var second=33;second<=51;second++)
+            rising.Observe(Frame(now.AddSeconds(second),100,1988+
+                (second%3==0?4:second%3==1?-3:1)),now.AddSeconds(second));
+        Check(rising.CompletedSteps==1 && rising.Measurements[0].Rpm>1950,
+            "fan may be accepted later when the whole window has stabilized");
+        var falling=new FanAutoCalibration("pwm","rpm",70,100,now);
+        falling.MarkApplied(now);
+        for(var second=8;second<=32;second++)
+            falling.Observe(Frame(now.AddSeconds(second),100,1980-
+                (second-8)*12),now.AddSeconds(second));
+        Check(falling.CompletedSteps==0 && falling.Stability=="falling",
+            "monotonically decelerating fan must not be saved as calibrated RPM");
+        for(var second=33;second<=51;second++)
+            falling.Observe(Frame(now.AddSeconds(second),100,1690+
+                (second%3==0?4:second%3==1?-3:1)),now.AddSeconds(second));
+        Check(falling.CompletedSteps==1,
+            "falling RPM must settle before calibration accepts the sample");
+        // A fan that never settles must time out rather than guessing.
+        var unstable=new FanAutoCalibration("pwm","rpm",70,100,now);
+        unstable.MarkApplied(now);
+        for(var second=8;second<=60;second++)
+            unstable.Observe(Frame(now.AddSeconds(second),100,
+                second%2==0?1300:1550),now.AddSeconds(second));
+        Check(unstable.State=="aborted" && unstable.Measurements.Count==0,
+            "unstable fan must time out without recording any fake calibration");
+
         var timeout=new FanAutoCalibration("pwm","rpm",70,100,now);
         timeout.MarkApplied(now);
-        Check(timeout.Observe(Frame(now.AddSeconds(23),10,1600),
-            now.AddSeconds(23)) && timeout.State=="aborted",
+        Check(timeout.Observe(Frame(now.AddSeconds(61),10,1600),
+            now.AddSeconds(61)) && timeout.State=="aborted",
             "register mismatch must abort instead of saving corrupted data");
 
         // A fan must be discoverable and calibratable BEFORE any temperature
@@ -136,21 +178,21 @@ internal static class FanFeedbackCalibrationSelfTest
             preCurve.Tick(channels,Frame(started,10,490),started,cfg);
             Check(fake.SoftwareValue==100 && preCurve.HasCalibrationRunning,
                 "pre-curve session commands high duty through the collector");
-            foreach(var seconds in new[]{6,7,8})
+            for(var seconds=8;seconds<=20;seconds++)
                 preCurve.Tick(channels,Frame(started.AddSeconds(seconds),100,1900),
                     started.AddSeconds(seconds),cfg);
-            preCurve.Tick(channels,Frame(started.AddSeconds(9),100,1900),
-                started.AddSeconds(9),cfg);
+            preCurve.Tick(channels,Frame(started.AddSeconds(21),100,1900),
+                started.AddSeconds(21),cfg);
             Check(fake.SoftwareValue==85,
                 "pre-curve identification progresses to next measured duty");
-            foreach(var seconds in new[]{15,16,17})
+            for(var seconds=29;seconds<=41;seconds++)
                 preCurve.Tick(channels,Frame(started.AddSeconds(seconds),85,1550),
                     started.AddSeconds(seconds),cfg);
-            preCurve.Tick(channels,Frame(started.AddSeconds(18),85,1550),
-                started.AddSeconds(18),cfg);
+            preCurve.Tick(channels,Frame(started.AddSeconds(42),85,1550),
+                started.AddSeconds(42),cfg);
             Check(fake.SoftwareValue==70,
                 "pre-curve identification reaches its lowest, conservative 70 percent step");
-            foreach(var seconds in new[]{24,25,26})
+            for(var seconds=50;seconds<=62;seconds++)
                 preCurve.Tick(channels,Frame(started.AddSeconds(seconds),70,1260),
                     started.AddSeconds(seconds),cfg);
             Check(!preCurve.HasCalibrationRunning &&
@@ -182,7 +224,7 @@ internal static class FanFeedbackCalibrationSelfTest
                     CalibrationMode:"response",TemperatureSensorIds:["temp"],
                     TemperatureLimit:85,ConfirmExclusiveOwnership:true),cfg,outputs)),
                 "verified fan may calibrate full response before assigning a curve");
-            var resumed=started.AddSeconds(30);
+            var resumed=started.AddSeconds(75);
             preCurve.Tick(channels,Frame(resumed,70,1260,30),resumed,cfg);
             Check(fake.SoftwareValue==100,"full response begins at safe maximum");
             preCurve.Tick(channels,Frame(resumed.AddSeconds(1),100,1900,40),
@@ -231,18 +273,15 @@ internal static class FanFeedbackCalibrationSelfTest
                 "calibration first step is applied only through the approved profile writer");
             profiles.Tick(channels,Frame(now.AddSeconds(2),100,1980),
                 now.AddSeconds(2),settings);
-            profiles.Tick(channels,Frame(now.AddSeconds(6),100,1980),
-                now.AddSeconds(6),settings);
-            profiles.Tick(channels,Frame(now.AddSeconds(7),100,1980),
-                now.AddSeconds(7),settings);
-            profiles.Tick(channels,Frame(now.AddSeconds(8),100,1980),
-                now.AddSeconds(8),settings);
-            profiles.Tick(channels,Frame(now.AddSeconds(9),100,1980),
-                now.AddSeconds(9),settings);
+            for(var second=8;second<=20;second++)
+                profiles.Tick(channels,Frame(now.AddSeconds(second),100,1980),
+                    now.AddSeconds(second),settings);
+            profiles.Tick(channels,Frame(now.AddSeconds(21),100,1980),
+                now.AddSeconds(21),settings);
             Check(fake.SoftwareValue==85,
                 "calibration walks to 85 percent after stable 100 percent RPM");
-            profiles.Tick(channels,Frame(now.AddSeconds(10),85,1650,80),
-                now.AddSeconds(10),settings);
+            profiles.Tick(channels,Frame(now.AddSeconds(22),85,1650,80),
+                now.AddSeconds(22),settings);
             Check(fake.SoftwareValue>=99,
                 "high temperature demand aborts lower calibration duty and invokes failsafe");
             var snapshot=System.Text.Json.JsonSerializer.Serialize(profiles.Snapshot(settings));
