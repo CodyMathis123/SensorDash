@@ -82,6 +82,14 @@ const FanCommissioning=(()=>{
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
+  const savedCount=observations.length;
+  const savedRange=observations.length?
+    Math.min(...observations.map(p=>p.dutyPercent))+'–'+
+    Math.max(...observations.map(p=>p.dutyPercent))+'% PWM':'';
+  const fullSaved=savedCount>=19&&observations.some(p=>p.dutyPercent<=10);
+  const savedDescription=savedCount?
+    (fullSaved?'Full calibration':'Saved RPM measurements')+
+    ' · '+savedCount+' points · '+savedRange:'No saved RPM measurements';
   const identifyReady=isFan && !!rpm && output.writable;
   const responseReady=identifyReady && verified;
   const sampleRows=observations.length?measurementRows(observations):
@@ -89,7 +97,7 @@ const FanCommissioning=(()=>{
   const readOnly=owner?'An active profile owns this header. Short standalone manual tests are disabled, but guarded response calibration remains available.':'';
   return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan control & calibration</h2>'+
    '<p>Identify the physical fan and tachometer before configuring temperature curves</p></div>'+
-   '<span class="pill '+(verified?'':'warn')+'">'+(verified?(observations.length>=7?'Full RPM response saved':'PWM/RPM pairing verified'):'Unverified pairing')+'</span></div>'+
+   '<span class="pill '+(verified?'':'warn')+'">'+(verified?(fullSaved?'Full RPM response saved':'PWM/RPM pairing verified'):'Unverified pairing')+'</span></div>'+
    '<div class="help">Calibration belongs to the physical PWM header, not a CPU/GPU curve. The first sweep identifies its tachometer; the optional full sweep builds a PWM-to-RPM table. Both require local administrator authorization and supervision. Never test a pump.</div>'+
    '<div class="w-actions"><label>1 · Physical PWM output<select id="fcChannel">'+
    outputs.map(o=>choice(o.id,o.device+' / '+o.name+' ['+o.id+']',selected)).join('')+
@@ -133,7 +141,7 @@ const FanCommissioning=(()=>{
      calibrationHere?.state==='aborted'?'Calibration stopped':
      pendingCalibration?'Waiting for Windows approval':
      calibrationNotice?'Calibration did not start':
-     observations.length>=7?'Full calibration saved':'Ready to calibrate')+'</strong>'+
+     savedCount?'Saved RPM measurements: '+savedCount:'Ready to calibrate')+'</strong>'+
    '<span class="fc-calibration-feedback" id="fcAutoStatus">'+esc(
      calibrationHere?.message||calibrationNotice||
      (pendingCalibration?'Waiting for Windows approval and the service to start the test.':
