@@ -154,6 +154,52 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(curvesView.includes('data-curve-current-values') &&
+   curvesView.includes('data-curve-current-marker') &&
+   curvesView.includes('data-curve-current-title') &&
+   curvesView.includes('w-curve-current-label') &&
+   css.includes('.w-curve-current-label') &&
+   script.includes("marker.setAttribute('aria-label','Current: '+value)"),
+   'The yellow current-temperature marker needs a visible label, hover title and accessible description');
+ // Repaint the current marker without replacing SVG during live readings:
+ // replacing the entire plot would steal point hover/focus during editing.
+ const currentLabel={textContent:'—'};
+ const currentTitle={textContent:'Current: —'};
+ const lineAttributes={},dotAttributes={},markerAttributes={};
+ const currentLine={setAttribute:(key,value)=>{lineAttributes[key]=value;}};
+ const currentDot={setAttribute:(key,value)=>{dotAttributes[key]=value;}};
+ const currentMarker={style:{display:'none'},setAttribute:(key,value)=>{markerAttributes[key]=value;},
+   querySelector:selector=>selector==='[data-curve-current-line]'?currentLine:
+     selector==='[data-curve-current-dot]'?currentDot:
+     selector==='[data-curve-current-title]'?currentTitle:null};
+ const currentGraph={dataset:{curveAxisMin:'0',curveAxisMax:'100'},
+   querySelector:selector=>selector==='[data-curve-current-values]'?currentLabel:
+     selector==='[data-curve-current-marker]'?currentMarker:null};
+ const previewNode={dataset:{curvePreview:'curve'},
+   querySelector:selector=>selector==='[data-curve-graph]'?currentGraph:null};
+ const previousQueryAll=context.document.querySelectorAll;
+ const previousSimulation=S.simulation;
+ context.document.querySelectorAll=selector=>selector==='[data-curve-preview]'?
+   [previewNode]:[];
+ S.simulation={results:[{id:'curve',inputTemperature:25,targetPercent:10}]};
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'25.0°C → 10.0% PWM');
+ assert.equal(currentTitle.textContent,'Current: 25.0°C → 10.0% PWM');
+ assert.equal(currentMarker.style.display,'');
+ assert.equal(lineAttributes.x1,'142.0');
+ assert.equal(dotAttributes.cy,'159.2');
+ assert.ok(markerAttributes['aria-label'].includes('25.0°C'));
+ S.simulation.results[0]={id:'curve',inputTemperature:40,targetPercent:25};
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'40.0°C → 25.0% PWM');
+ assert.equal(lineAttributes.x1,'200.8');
+ assert.equal(dotAttributes.cy,'137.0');
+ S.simulation.results=[];
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'—');
+ assert.equal(currentMarker.style.display,'none');
+ context.document.querySelectorAll=previousQueryAll;
+ S.simulation=previousSimulation;
  assert.ok(curvesView.includes('data-curve-point-index="0"') &&
    curvesView.includes('class="w-curve-point-marker"') &&
    curvesView.includes('data-curve-tooltip') &&
