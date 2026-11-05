@@ -10,7 +10,7 @@ const titles={
  events:['HISTORY','Event log','Alerts and recoveries'],
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
-const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
+const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Common types',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
  status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -38,10 +38,10 @@ function explorer(){
  const display=x=>SDWorkspace.displayName(S,x);
  const key=x=>x.deviceId||x.deviceType+'|'+x.device;
  const devices=[...new Map(S.sensors.map(x=>[key(x),x])).entries()].sort((a,b)=>a[1].device.localeCompare(b[1].device));
- const filterChoices=['Key','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
+ const filterChoices=['Common types','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
  const candidates=S.sensors.filter(x=>{
   const type=S.filter==='All'||S.filter==='In use'||S.filter==='Hidden'||
-   (S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
+   (S.filter==='Common types'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
    x.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(x.id));
   const visible=S.filter==='Hidden'?hidden(x):S.filter==='In use'?usage.has(x.id):S.showHidden||!hidden(x);
   return type&&visible&&(!S.deviceFilter||key(x)===S.deviceFilter);
@@ -90,7 +90,8 @@ function explorer(){
  }
  const tools='<div class="toolbar explorer-toolbar">'+
   '<input id="search" placeholder="Search sensor, ID, hardware or usage…" value="'+esc(S.search)+'">'+
-  filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'">'+
+  filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'"'+
+   (v==='Common types'?' title="Temperature, Fan, Control, Power and Load sensors" aria-label="Common types: Temperature, Fan, Control, Power and Load"':'')+'> '+
     esc(v)+(v==='In use'?' ('+counts.used+')':v==='Hidden'?' ('+counts.hidden+')':'')+'</button>').join('')+
   '</div><div class="explorer-tools">'+
   '<label>Hardware<select id="explorerDevice"><option value="">All devices</option>'+
@@ -152,7 +153,7 @@ function events(){
  '</div>';
 }
 function settingsCandidates(field){
- return S.sensors.filter(s=>!Object.hasOwn(S.settings?.[field]||{},s.id)&&
+ return S.sensors.filter(s=>!SDWorkspace.isHidden(S,s)&&!Object.hasOwn(S.settings?.[field]||{},s.id)&&
   (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type)))
   .sort((a,b)=>label(a).localeCompare(label(b)));
 }
@@ -431,7 +432,10 @@ async function loadFanControl(){
   const signature=JSON.stringify({
     outputs:(data.outputs||[]).map(o=>[o.id,o.name,o.device,o.writable]),
     enabled:(data.persistent?.profiles||[]).map(p=>[p.id,p.needsReapproval,p.reviewReasons]).sort((a,b)=>a[0].localeCompare(b[0])),
-    overrides:(data.persistent?.overrides||[]).map(o=>[o.channelId,o.percent,o.expires])
+    overrides:(data.persistent?.overrides||[]).map(o=>[o.channelId,o.percent,o.expires]),
+    calibration:data.persistent?.calibration?
+      [data.persistent.calibration.channelId,data.persistent.calibration.state,
+       data.persistent.calibration.currentDuty,data.persistent.calibration.completedSteps]:null
   });
   const changed=signature!==S.fanOutputSignature;
   S.fanControl=data;
@@ -443,7 +447,7 @@ async function loadFanControl(){
     enabled?enabled+' enabled fan profile'+(enabled===1?'':'s'):
     data.status?.state==='active'?'Manual test active':'Firmware/default';
   if(changed&&S.view==='curves')render();
-  else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
+  else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);FanFeedback.paint(S);}
   FanCommissioning.paint(S);
   FanFeedback.paint(S);
  }catch(e){console.warn('Live fan channel inventory:',e.message);}
@@ -536,6 +540,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
   S.fanExpanded[details.dataset.fanFold]=!details.open;
   return;
  }
+ if(S.view==='curves'&&SDWorkspace.handleCurvePointClick(e))return;
  if(FanControlDebug.handle(e,{toast}))return;
  if(FanCommissioning.handle(e,S,{render,toast}))return;
  if(e.target.closest('[data-work]')){SDWorkspace.handle(e,S,{render,toast,refreshFanControl:loadFanControl});return}
@@ -587,7 +592,32 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
   if(e.target.closest('#refresh'))void Promise.all([loadEvents(),loadFanControl(),loadStatus(false),loadTelemetryConfig()]).then(()=>toast('Local status refreshed'));
 
 });
+// Curve visualization is bound to its editable rows using delegated events.
+// Hover and focus never write settings or command hardware.
+document.addEventListener('pointerover',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointEnter(e);
+});
+document.addEventListener('pointerout',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointExit(e);
+});
+document.addEventListener('focusin',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointEnter(e);
+});
+document.addEventListener('focusout',e=>{
+ if(S.view==='curves')SDWorkspace.handleCurvePointExit(e);
+});
+document.addEventListener('keydown',e=>{
+ if(S.view==='curves'&& (e.key==='Enter'||e.key===' ') &&
+   e.target?.closest?.('.w-curve-point-marker[data-curve-point-index]')){
+  if(SDWorkspace.handleCurvePointClick(e))return;
+ }
+});
 document.addEventListener('input',e=>{
+ if(e.target.id==='fcOverrideDuty'){
+   const result=document.getElementById('fcOverrideValue');
+   if(result)result.textContent=e.target.value+'%';
+   return;
+ }
  if(SDWorkspace.quickInput(e,S))return;
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);

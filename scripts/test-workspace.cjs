@@ -123,6 +123,13 @@ const h={
  };
  const explorer=vm.runInNewContext(explorerSource+'\nexplorer;',browser);
  const explorerHtml=explorer();
+ S.filter='Common types';
+ const commonHtml=explorer();
+ assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power and Load sensors"/,
+  'The Common types preset must explain its included readings');
+ assert.doesNotMatch(commonHtml,/data-filter="Key"/,
+  'The ambiguous Key label must not remain');
+ S.filter='In use';
  assert.ok(explorerHtml.includes('data-usage-system="loop-1"'));
  assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
  assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
@@ -154,49 +161,193 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
- assert.ok(curvesView.includes('Temporary fan speed')&&
-   curvesView.includes('Advanced setup &amp; diagnostics'),
-   'Quick fan sliders and advanced commissioning stay available');
- assert.ok(curvesView.includes('data-fan-fold="quick"')&&
-   /data-fan-fold="quick"\s*><summary>/.test(curvesView)&&
-   curvesView.indexOf('data-fan-fold="profiles"') <
-     curvesView.indexOf('data-fan-fold="quick"')&&
-   curvesView.indexOf('data-fan-fold="quick"') <
-     curvesView.indexOf('data-fan-fold="curves"'),
-   'Temporary fan controls should default closed below automatic profiles');
+ assert.ok(curvesView.includes('data-curve-current-values') &&
+   curvesView.includes('data-curve-current-marker') &&
+   curvesView.includes('data-curve-current-title') &&
+   curvesView.includes('w-curve-current-label') &&
+   css.includes('.w-curve-current-label') &&
+   script.includes("marker.setAttribute('aria-label','Current: '+value)"),
+   'The yellow current-temperature marker needs a visible label, hover title and accessible description');
+ // Repaint the current marker without replacing SVG during live readings:
+ // replacing the entire plot would steal point hover/focus during editing.
+ const currentLabel={textContent:'—'};
+ const currentTitle={textContent:'Current: —'};
+ const lineAttributes={},dotAttributes={},markerAttributes={};
+ const currentLine={setAttribute:(key,value)=>{lineAttributes[key]=value;}};
+ const currentDot={setAttribute:(key,value)=>{dotAttributes[key]=value;}};
+ const currentMarker={style:{display:'none'},setAttribute:(key,value)=>{markerAttributes[key]=value;},
+   querySelector:selector=>selector==='[data-curve-current-line]'?currentLine:
+     selector==='[data-curve-current-dot]'?currentDot:
+     selector==='[data-curve-current-title]'?currentTitle:null};
+ const currentGraph={dataset:{curveAxisMin:'0',curveAxisMax:'100'},
+   querySelector:selector=>selector==='[data-curve-current-values]'?currentLabel:
+     selector==='[data-curve-current-marker]'?currentMarker:null};
+ const previewNode={dataset:{curvePreview:'curve'},
+   querySelector:selector=>selector==='[data-curve-graph]'?currentGraph:null};
+ const previousQueryAll=context.document.querySelectorAll;
+ const previousSimulation=S.simulation;
+ context.document.querySelectorAll=selector=>selector==='[data-curve-preview]'?
+   [previewNode]:[];
+ S.simulation={results:[{id:'curve',inputTemperature:25,targetPercent:10}]};
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'25.0°C → 10.0% PWM');
+ assert.equal(currentTitle.textContent,'Current: 25.0°C → 10.0% PWM');
+ assert.equal(currentMarker.style.display,'');
+ assert.equal(lineAttributes.x1,'142.0');
+ assert.equal(dotAttributes.cy,'159.2');
+ assert.ok(markerAttributes['aria-label'].includes('25.0°C'));
+ S.simulation.results[0]={id:'curve',inputTemperature:40,targetPercent:25};
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'40.0°C → 25.0% PWM');
+ assert.equal(lineAttributes.x1,'200.8');
+ assert.equal(dotAttributes.cy,'137.0');
+ S.simulation.results=[];
+ workspace.paintSimulation(S);
+ assert.equal(currentLabel.textContent,'—');
+ assert.equal(currentMarker.style.display,'none');
+ context.document.querySelectorAll=previousQueryAll;
+ S.simulation=previousSimulation;
+ assert.ok(curvesView.includes('data-curve-point-index="0"') &&
+   curvesView.includes('class="w-curve-point-marker"') &&
+   curvesView.includes('data-curve-tooltip') &&
+   curvesView.includes('role="tooltip"') &&
+   script.includes('const handleCurvePointEnter=') &&
+   script.includes('const handleCurvePointClick=') &&
+   app.includes("document.addEventListener('pointerover'") &&
+   app.includes("document.addEventListener('focusin'"),
+   'Curve graph must expose interactive points linked to editor rows');
+ // Simulate the delegated interaction without real fan hardware or a DOM lib.
+ const classFlag=()=>{const flags=new Set();return{
+   toggle:(k,v)=>v?flags.add(k):flags.delete(k),
+   remove:k=>flags.delete(k),contains:k=>flags.has(k)}};
+ const tooltipTemp={textContent:''},tooltipDuty={textContent:''};
+ const tooltip={hidden:true,style:{},classList:classFlag(),
+   querySelector:q=>q.includes('temp')?tooltipTemp:tooltipDuty};
+ const dot={getBoundingClientRect:()=>({left:170,right:180,top:110,bottom:120})};
+ const plot={getBoundingClientRect:()=>({left:0,top:0,width:700,height:300})};
+ const input={focus(){this.wasFocused=true;}};
+ const row={dataset:{curvePointIndex:'0'},classList:classFlag(),
+   querySelector:()=>input,scrollIntoView(){this.wasScrolled=true;}};
+ const point={dataset:{curvePointIndex:'0',curveDotTemperature:'40',
+   curveDotPercent:'25'},classList:classFlag(),
+   querySelector:()=>dot};
+ const table={querySelectorAll:()=>[row]};
+ const scope={
+   querySelector:q=>q==='[data-curve-tooltip]'?tooltip:
+     q==='[data-curve-table]'?table:null,
+   querySelectorAll:q=>q.includes('w-curve-point-marker')?[point]:
+     q.includes('tr[data-curve-point-row]')?[row]:[],
+   contains:n=>n===row||n===input||n===point
+ };
+ row.closest=q=>q.includes('tr[data-curve-point-row]')?row:scope;
+ point.closest=q=>q.includes('w-curve-point-marker')?point:
+   q==='.w-curve-graph'?plot:scope;
+ row.contains=n=>n===row||n===input;
+ point.contains=n=>n===point||n===dot;
+ assert.equal(workspace.handleCurvePointEnter({target:row,relatedTarget:null}),true);
+ assert.equal(point.classList.contains('is-active'),true);
+ assert.equal(row.classList.contains('is-active'),true);
+ assert.equal(tooltip.hidden,false);
+ assert.equal(tooltipTemp.textContent,'40 °C');
+ assert.equal(tooltipDuty.textContent,'25% fan speed');
+ let prevented=false;
+ assert.equal(workspace.handleCurvePointClick({target:point,
+   preventDefault(){prevented=true;}}),true);
+ assert.equal(prevented,true);
+ assert.equal(input.wasFocused,true);
+ assert.equal(row.wasScrolled,true);
+ assert.equal(workspace.handleCurvePointExit({target:row,relatedTarget:null}),true);
+ assert.equal(tooltip.hidden,true);
+ assert.ok(curvesView.includes('Fan control &amp; calibration') &&
+   curvesView.includes('Temperature curves'),
+   'Fan control, identification and calibration share one workspace');
+ assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
+   curvesView.indexOf('data-fan-fold="calibration"') <
+     curvesView.indexOf('data-fan-fold="curves"') &&
+   curvesView.indexOf('data-fan-fold="curves"') <
+     curvesView.indexOf('data-fan-fold="profiles"') &&
+   !curvesView.includes('data-fan-fold="manual"') &&
+   !curvesView.includes('data-fan-fold="quick"'),
+   'Physical fan calibration precedes temperature curves and profile association');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
    persistent:{profiles:[{id:'shared',name:'Shared radiators',channelIds:['pwm1'],minimumPercent:20}],
      readings:[{id:'shared',targetPercent:45}],overrides:[]}
  };
- S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub'}];
+ S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub',rpmSensorId:'rpm1'}];
  let quick=workspace.render(S,'curves',h);
- assert.ok(quick.includes('data-quick-slider="pwm1"')&&
-   quick.includes('min="20" max="100"')&&
-   quick.includes('Apply for 5 minutes'),
-   'Approved fan channel must expose its own bounded slider');
- assert.ok(!quick.includes('Return to fan curve'),
-   'Automatic mode should not show a redundant reset button');
- S.fanControl.persistent.overrides=[{channelId:'pwm1',percent:36,expires:'2026-11-02T12:00:00Z'}];
- quick=workspace.render(S,'curves',h);
- assert.ok(quick.includes('Return to fan curve')&&quick.includes('Return all to curves'),
-   'Active overrides need local and global return actions');
- assert.ok(quick.includes('1 active override')&&
-   /data-fan-fold="quick"\s*><summary>/.test(quick),
-   'Collapsed heading must report active override count without opening controls');
- S.fanExpanded={quick:true};
- assert.ok(workspace.render(S,'curves',h).includes('data-fan-fold="quick" open'),
-   'Expanding temporary controls should persist across re-render');
- delete S.fanExpanded;
+ assert.ok(quick.includes('Fan control &amp; calibration') &&
+   !quick.includes('data-quick-slider=') &&
+   !quick.includes('data-fan-fold="manual"'),
+   'There must not be a duplicate manual override UI');
  S.settings.fanChannelMappings[0].kind='pump';
  assert.ok(!workspace.render(S,'curves',h).includes('data-quick-slider="pwm1"'),
-   'Pumps must not appear in temporary speed controls');
+   'Pump mappings must never appear in standalone quick-speed controls');
  S.settings.fanChannelMappings=[];
  S.fanControl=priorFanControl;
- assert.ok(curvesView.includes('data-fan-fold="profiles"')&&curvesView.includes('data-fan-fold="curves"')&&
-  curvesView.includes('data-fan-fold="commissioning"')&&curvesView.includes('data-fan-fold="manual"'),
-  'Fan control must be grouped into collapsible sections');
+ // The radiator fan calibration belongs to one PWM header, so the CPU
+ // and GPU MAX curves display estimates from the SAME measured response.
+ const previousCurves=S.settings.simulatedFanCurves;
+ const previousProfiles=S.settings.fanProfiles;
+ const previousMapping=S.settings.fanChannelMappings;
+ S.settings.simulatedFanCurves=[
+  {id:'cpu',name:'CPU radiator curve',sourceSensorId:'cpuTemp',
+    points:[{temperature:40,percent:25},{temperature:85,percent:100}]},
+  {id:'gpu',name:'GPU hotspot radiator curve',sourceSensorId:'gpuTemp',
+    points:[{temperature:40,percent:40},{temperature:85,percent:100}]}
+ ];
+ S.settings.fanProfiles=[{id:'radiator',name:'Radiator MAX',
+   curveIds:['cpu','gpu'],channelIds:['pwm1']}];
+ S.settings.fanChannelMappings=[{channelId:'pwm1',label:'Radiator Fans',
+   kind:'fan',verifiedAt:new Date().toISOString(),rpmSensorId:'rpm',
+   measurements:[{dutyPercent:10,rpm:490},
+     {dutyPercent:40,rpm:1050},{dutyPercent:100,rpm:1980}]}];
+ // The LIVE profile, not either reusable CPU/GPU curve, maps a
+ // physical radiator PWM header to its independently calibrated RPM.
+ const previousLive=S.fanControl;
+ S.fanControl={outputs:[{id:'pwm1',name:'Radiator PWM',device:'IT8688E',
+   writable:true}],persistent:{profiles:[{id:'radiator',name:'Radiator MAX',
+   channelIds:['pwm1']}],readings:[{id:'radiator',name:'Radiator MAX',
+   state:'running',targetPercent:40,message:'MAX of CPU/GPU curves'}],
+   overrides:[]}};
+ S.sensors.push(sensor('pwm1','Radiator PWM','Control',40),sensor('hiddenPwm','Unused PWM','Control',0));
+ S.byId.set('pwm1',S.sensors.at(-2));
+ S.byId.set('hiddenPwm',S.sensors.at(-1));
+ S.settings.hiddenSensorIds=['hiddenPwm','pwm1'];
+ S.fanControl.outputs.push({id:'hiddenPwm',name:'Unused PWM',device:'IT8688E',writable:true});
+ const hiddenProfileHtml=workspace.render(S,'curves',h);
+ assert.doesNotMatch(hiddenProfileHtml,/data-profile-channel="radiator" value="hiddenPwm"/,
+  'Unassigned hidden physical PWM output must not appear in profile selector');
+ assert.match(hiddenProfileHtml,/data-profile-channel="radiator" value="pwm1" checked/,
+  'Existing hidden PWM output must remain checked in its configured profile');
+ assert.match(hiddenProfileHtml,/Radiator PWM \[Hidden\]/,
+  'Existing hidden channel must carry an explicit label');
+ S.settings.hiddenSensorIds=[];S.fanControl.outputs.pop();
+ S.byId.delete('hiddenPwm');S.byId.delete('pwm1');S.sensors.pop();S.sensors.pop();
+ const estimated=workspace.render(S,'curves',h);
+ assert.ok(estimated.includes('Target PWM')&&
+   estimated.includes('Estimated RPM')&&
+   estimated.includes('Measured RPM')&&
+   estimated.includes('≈1,050 RPM')&&
+   estimated.includes('40.0%') &&
+   !estimated.includes('data-curve-estimated-rpm') &&
+   !estimated.includes('w-curve-estimate-note'),
+   'Only the MAX live profile maps the fan to calibrated RPM; curve editor is PWM-only');
+ S.fanControl.persistent.readings[0].targetPercent=25;
+ assert.ok(workspace.render(S,'curves',h).includes('≈770 RPM'),
+   'Changing the active MAX profile demand reuses the same radiator calibration');
+ S.fanControl.persistent.readings[0].targetPercent=5;
+ assert.ok(workspace.render(S,'curves',h).includes('Not calibrated at 5%'),
+   'Never invent fan RPM outside saved calibration range');
+ S.fanControl=previousLive;
+ S.settings.simulatedFanCurves=previousCurves;
+ S.settings.fanProfiles=previousProfiles;
+ S.settings.fanChannelMappings=previousMapping;
+ assert.ok(curvesView.includes('data-fan-fold="profiles"')&&
+   curvesView.includes('data-fan-fold="curves"')&&
+   curvesView.includes('data-fan-fold="calibration"'),
+   'Fan control and curves remain grouped into accessible folds');
  // Editor locks stay at the UI level and do not stop the service or remove
  // readings. Verify cooling systems are individually lockable.
  await click('toggle-cooling-lock',{id:'loop-1'});

@@ -6,7 +6,8 @@ using LibreHardwareMonitor.Hardware;
 public sealed record FanCommand(
     string Action, string ChannelId = "", string CurveId = "",
     double Percent = 100, int DurationSeconds = 60, bool ConfirmExclusiveOwnership = false,
-    string ProfileId = "");
+    string ProfileId = "", string CalibrationMode = "identify",
+    string[]? TemperatureSensorIds = null, double TemperatureLimit = 85);
 
 public sealed record FanOutputInfo(string Id, string Name, string Device, string DeviceId,
     float Minimum, float Maximum, string Mode, bool Writable);
@@ -55,7 +56,8 @@ public sealed class FanControlRuntime
 
     public bool IsActive
     {
-        get { lock (_sync) return _pending != null || _session != null || _profiles.HasActiveProfiles; }
+        get { lock (_sync) return _pending != null || _session != null ||
+            _profiles.HasActiveProfiles || _profiles.HasCalibrationRunning; }
     }
 
     // Called by the collection thread after a fresh LHM Computer.Open()
@@ -71,6 +73,7 @@ public sealed class FanControlRuntime
     }
 
     public object DebugLog() => _trace.ReadRecent();
+    internal FanRecoveryEvent[] DrainRecoveryEvents() => _profiles.DrainRecoveryEvents();
     
     public object Snapshot(DashboardSettings? settings = null)
     {
@@ -86,6 +89,17 @@ public sealed class FanControlRuntime
 
     public object Request(FanCommand? command, DashboardSettings settings)
     {
+        if(command!=null && command.Action is "calibrate" or "cancel-calibration")
+        {
+            IReadOnlyList<FanOutputInfo> known;
+            lock(_sync)
+            {
+                if(command.Action=="calibrate" && (_session!=null || _pending!=null))
+                    return new {accepted=false,message="Finish the existing manual session before calibration."};
+                known=_outputs.ToArray();
+            }
+            return _profiles.RequestCalibration(command,settings,known);
+        }
         if(command!=null && command.Action is "override" or "reset-override" or "reset-overrides")
         {
             IReadOnlyList<FanOutputInfo> known;
@@ -111,6 +125,7 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "A hardware operation is still pending." };
             if (command.Action == "release")
             {
+                _profiles.CancelCalibration("User requested firmware-default control.");
                 _pending = new Pending(command, null);
                 _trace.Event("REQUEST","Manual firmware release queued.");
                 return new { accepted = true, message = "Firmware-default restoration queued." };
@@ -120,6 +135,8 @@ public sealed class FanControlRuntime
                 return new { accepted = false, message = "This channel is identified as a pump; manual fan-commissioning tests are disabled." };
             if (_session != null)
                 return new { accepted = false, message = "Release the current session first." };
+            if(_profiles.HasCalibrationRunning)
+                return new {accepted=false,message="Finish calibration before starting a separate manual test."};
             if (!command.ConfirmExclusiveOwnership)
                 return new { accepted = false, message = "You must confirm no other software controls this output." };
             if (command.ChannelId.Length is < 3 or > 256 ||

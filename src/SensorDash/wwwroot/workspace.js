@@ -38,9 +38,10 @@ const SDWorkspace = (() => {
  const value=(s)=>s?.value==null?'—':Number(s.value).toLocaleString(undefined,{maximumFractionDigits:s.type==='Fan'?0:1});
  const unit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Voltage:'V',Flow:'L/h',Clock:'MHz',Throughput:'B/s',Data:'GiB'}[t]||'');
  const defaultSensors=(S,group,n=4)=>S.sensors.filter(s=>
-     s.value!=null &&(group==='all'||s.type===group)
+     s.value!=null && !isHidden(S,s) &&(group==='all'||s.type===group)
      ).slice(0,n);
  const isHidden=(S,s)=>{
+  if(!s)return false; // An output without a matching sensor cannot inherit a visibility rule.
   const cfg=S.settings||{};
   return !!(cfg.hiddenSensorIds||[]).includes(s.id)
     || !!(s.deviceId&&(cfg.hiddenDeviceIds||[]).includes(s.deviceId))
@@ -91,7 +92,7 @@ const SDWorkspace = (() => {
   const current=new Set(assigned);
   return '<div class="w-chips">'+assigned.map(id=>{
    const reading=S.byId.get(id);
-   return '<span class="w-chip">'+safe(S.settings?.aliases?.[id]||reading?.name||id)+
+   return '<span class="w-chip">'+safe((S.settings?.aliases?.[id]||reading?.name||id)+(reading&&isHidden(S,reading)?' [Hidden]':''))+
     (reading?'<b data-live-reading="'+attr(id)+'" data-live-format="unit" data-live-unit="'+attr(unit(reading.type))+'">'+
       value(reading)+' '+unit(reading.type)+'</b>':'')+
     button('remove-sensor','×','data-scope="'+attr(scope)+'" data-sensor="'+attr(id)+'"')+'</span>';
@@ -216,7 +217,11 @@ const SDWorkspace = (() => {
       (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
  const curveDiagram=(points,activeTemperature,activePercent)=>{
-  const sorted=[...points].filter(p=>Number.isFinite(p.temperature)&&Number.isFinite(p.percent))
+  // Keep source-row identity when sorting graph points by temperature.
+  // This allows either the graph or the editable table to select the same
+  // physical point even while a draft is being edited out of order.
+  const sorted=[...points].map((p,index)=>({...p,index}))
+    .filter(p=>Number.isFinite(p.temperature)&&Number.isFinite(p.percent))
     .sort((a,b)=>a.temperature-b.temperature);
   if(sorted.length<2)return '';
   const lo=Math.min(0,sorted[0].temperature-5),hi=Math.max(85,sorted[sorted.length-1].temperature+5);
@@ -224,37 +229,69 @@ const SDWorkspace = (() => {
   const poly=sorted.map(p=>x(p.temperature).toFixed(1)+','+y(p.percent).toFixed(1)).join(' ');
   const grid=[0,25,50,75,100].map(v=>'<line x1="44" y1="'+y(v)+'" x2="436" y2="'+y(v)+'" stroke="#293e4c"/>'+
     '<text x="36" y="'+(y(v)+4)+'" text-anchor="end" fill="#98b2c4" font-size="11">'+v+'%</text>').join('');
-  const pointsMarkup=sorted.map(p=>'<circle cx="'+x(p.temperature)+'" cy="'+y(p.percent)+'" r="4" fill="#60d6cf">'+
-     '<title>'+p.temperature+'°C → '+p.percent+'%</title></circle>').join('');
-  const marker=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent)
-    ?'<circle cx="'+x(activeTemperature)+'" cy="'+y(activePercent)+'" r="6" fill="#f2bd6d" stroke="#132535" stroke-width="2"></circle>'+
-     '<line x1="'+x(activeTemperature)+'" y1="20" x2="'+x(activeTemperature)+'" y2="180" stroke="#f2bd6d" stroke-dasharray="4 4"/>':'';
-  return '<svg class="w-curve-plot" viewBox="0 0 460 205" role="img" aria-label="Simulated fan curve showing output percentage by input temperature">'+
+  const pointsMarkup=sorted.map(p=>
+    '<g class="w-curve-point-marker" data-curve-point-index="'+p.index+
+      '" data-curve-dot-temperature="'+p.temperature+'" data-curve-dot-percent="'+p.percent+
+      '" tabindex="0" role="button" aria-label="'+attr(
+       'Curve point: '+p.temperature+' degrees Celsius, '+p.percent+' percent fan speed')+'">'+
+      '<circle class="w-curve-point-halo" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="12" fill="transparent"/>'+
+      '<circle class="w-curve-point-ring" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="8" fill="none" stroke="#e8f9f7" stroke-width="2"/>'+
+      '<circle class="w-curve-point-dot" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="4.5" fill="#60d6cf"/>'+
+      '</g>').join('');
+  const current=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent);
+  const currentLabel=current
+    ?activeTemperature.toFixed(1)+'°C → '+activePercent.toFixed(1)+'% PWM'
+    :'—';
+  // Always create the marker so changing sensor values can move it without
+  // rebuilding the entire SVG (which would steal focus/hover in the editor).
+  const marker='<g class="w-curve-current-marker" data-curve-current-marker tabindex="0" '+
+    'role="img" aria-label="Current temperature and calculated PWM"'+
+    (current?'':' style="display:none"')+'>'+
+    '<line data-curve-current-line x1="'+(current?x(activeTemperature):0)+
+      '" x2="'+(current?x(activeTemperature):0)+'" y1="20" y2="180" '+
+      'stroke="#f2bd6d" stroke-dasharray="4 4"/>'+
+    '<circle data-curve-current-dot cx="'+(current?x(activeTemperature):0)+
+      '" cy="'+(current?y(activePercent):0)+'" r="6" fill="#f2bd6d" '+
+      'stroke="#132535" stroke-width="2"/>'+
+    '<title data-curve-current-title>Current: '+currentLabel+'</title></g>';
+  return '<div class="w-curve-graph" data-curve-graph data-curve-axis-min="'+lo+
+    '" data-curve-axis-max="'+hi+'">'+
+    '<div class="w-curve-current-label"><span class="w-curve-current-swatch" aria-hidden="true"></span>'+
+    'Current: <strong data-curve-current-values>'+currentLabel+'</strong></div>'+
+    '<svg class="w-curve-plot" viewBox="0 0 460 205" role="group" aria-label="Fan speed by temperature; yellow marker indicates current temperature and calculated PWM">'+
     grid+'<line x1="44" y1="174" x2="436" y2="174" stroke="#7890a0"/>'+
     '<text x="44" y="194" fill="#98b2c4" font-size="11">'+lo+'°C</text>'+
     '<text x="436" y="194" text-anchor="end" fill="#98b2c4" font-size="11">'+hi+'°C</text>'+
     '<polyline points="'+poly+'" fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'+
-    pointsMarkup+marker+'</svg>';
+    marker+pointsMarkup+'</svg>'+
+    '<div class="w-curve-tooltip" role="tooltip" data-curve-tooltip hidden>'+
+    '<strong data-curve-tooltip-temp></strong><span data-curve-tooltip-duty></span></div></div>';
  };
+ // RPM estimates belong to a live fan profile's physical PWM channel.
  // A curve is a series of editable numeric rows, with one blank row always
  // available. Nothing is sent to the elevated collector until Save is clicked.
- const curvePointRow=(point=null)=>{
+ const curvePointRow=(point=null,S=null,curveId='',index=null)=>{
   const temp=point?.temperature==null?'':point.temperature;
   const percent=point?.percent==null?'':point.percent;
-  return '<tr data-curve-point-row>'+
+  return '<tr data-curve-point-row'+(index!=null?' data-curve-point-index="'+index+'"':'')+'>'+
    '<td><input type="number" min="-30" max="150" step="1" inputmode="decimal" '+
     'data-curve-temperature value="'+attr(temp)+'" placeholder="°C" aria-label="Curve point temperature in °C"></td>'+
    '<td><input type="number" min="0" max="100" step="1" inputmode="decimal" '+
     'data-curve-percentage value="'+attr(percent)+'" placeholder="%" aria-label="Curve point fan duty percentage"></td>'+
    '<td>'+button('remove-curve-point','×','aria-label="Remove curve point"')+'</td></tr>';
  };
- const curveTable=(curve)=>
+ const curveTable=(curve,S)=>
   '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
   '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th class="w-curve-actions-col"></th></tr></thead>'+
-  '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point)).join('')+curvePointRow()+'</tbody></table></div>'+
+  '<tbody>'+(curve.points||[]).map((point,index)=>curvePointRow(point,S,curve.id,index)).join('')+
+    curvePointRow(null,S,curve.id)+'</tbody></table></div>'+
+  '<p class="note">Temperature curves set PWM duty only. See Live fan profiles for estimated and measured RPM on the mapped hardware output.</p>'+
   '<p class="note">Use the empty row to add a point.</p>'+
   '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
- const readCurvePointRows=(table)=>{
+ const readCurvePointRows=(table,preserveRowOrder=false)=>{
   const rows=[...table.querySelectorAll('tbody tr[data-curve-point-row]')];
   const points=[];
   for(const row of rows){
@@ -273,10 +310,103 @@ const SDWorkspace = (() => {
   }
   if(points.length<2)throw Error('Enter at least two complete curve points.');
   if(points.length>16)throw Error('A curve can contain at most 16 points.');
-  points.sort((a,b)=>a.temperature-b.temperature);
-  if(points.some((p,i)=>i>0&&p.temperature===points[i-1].temperature))
+  const sorted=[...points].sort((a,b)=>a.temperature-b.temperature);
+  if(sorted.some((p,i)=>i>0&&p.temperature===sorted[i-1].temperature))
     throw Error('Each temperature must be unique.');
-  return points;
+  return preserveRowOrder?points:sorted;
+ };
+ // Reindex after insertion/removal; indices always refer to the displayed
+ // editor row, never to a sorted copy of the temperature points.
+ const indexCurveRows=(table)=>{
+  let pointIndex=0;
+  table.querySelectorAll('tbody tr[data-curve-point-row]').forEach(row=>{
+   const temperature=row.querySelector('[data-curve-temperature]')?.value.trim();
+   const percent=row.querySelector('[data-curve-percentage]')?.value.trim();
+   if(temperature!=='' && temperature!=null && percent!=='' && percent!=null)
+    row.dataset.curvePointIndex=String(pointIndex++);
+   else delete row.dataset.curvePointIndex;
+  });
+ };
+ const curvePointScope=element=>element?.closest?.('[data-fan-curve-editor]')||
+    element?.closest?.('.panel');
+ const clearCurvePoint=(scope)=>{
+  if(!scope)return;
+  scope.querySelectorAll('.w-curve-point-marker.is-active, tr[data-curve-point-row].is-active')
+   .forEach(node=>node.classList.remove('is-active'));
+  const tooltip=scope.querySelector('[data-curve-tooltip]');
+  if(tooltip)tooltip.hidden=true;
+ };
+ const activateCurvePoint=(origin,index)=>{
+  const scope=curvePointScope(origin);
+  if(!scope || !Number.isInteger(index) || index<0)return false;
+  const markers=[...scope.querySelectorAll('.w-curve-point-marker[data-curve-point-index]')];
+  const selected=markers.find(n=>Number(n.dataset.curvePointIndex)===index);
+  if(!selected){clearCurvePoint(scope);return false;}
+  const table=scope.querySelector('[data-curve-table]');
+  const rows=table?[...table.querySelectorAll('tbody tr[data-curve-point-row]')]:[];
+  markers.forEach(node=>node.classList.toggle('is-active',node===selected));
+  rows.forEach(row=>row.classList.toggle('is-active',
+     Number(row.dataset.curvePointIndex)===index &&
+     row.dataset.curvePointIndex!=null));
+  const tooltip=scope.querySelector('[data-curve-tooltip]');
+  const graph=selected.closest('.w-curve-graph');
+  if(tooltip && graph){
+   const temp=selected.dataset.curveDotTemperature;
+   const duty=selected.dataset.curveDotPercent;
+   const tempLabel=tooltip.querySelector('[data-curve-tooltip-temp]');
+   const dutyLabel=tooltip.querySelector('[data-curve-tooltip-duty]');
+   if(tempLabel)tempLabel.textContent=temp+' °C';
+   if(dutyLabel)dutyLabel.textContent=duty+'% fan speed';
+   // Position relative to the SVG viewport, not the document, and keep
+   // tooltips within the plot at narrow mobile widths.
+   const dot=selected.querySelector('.w-curve-point-dot')||selected;
+   const dotRect=dot.getBoundingClientRect();
+   const rect=graph.getBoundingClientRect();
+   const left=Math.max(84,Math.min(rect.width-84,
+     (dotRect.left+dotRect.right)/2-rect.left));
+   const y=dotRect.top-rect.top;
+   const below=y<65;
+   tooltip.style.left=left+'px';
+   tooltip.style.top=(below?dotRect.bottom-rect.top+12:y-12)+'px';
+   tooltip.classList.toggle('is-below',below);
+   tooltip.hidden=false;
+  }
+  return true;
+ };
+ const curvePointNode=event=>event.target?.closest?.(
+    '.w-curve-point-marker[data-curve-point-index],tr[data-curve-point-row][data-curve-point-index]');
+ const handleCurvePointEnter=event=>{
+  const node=curvePointNode(event);
+  if(!node)return false;
+  if(event.relatedTarget && node.contains(event.relatedTarget))return false;
+  return activateCurvePoint(node,Number(node.dataset.curvePointIndex));
+ };
+ const handleCurvePointExit=event=>{
+  const node=curvePointNode(event);
+  if(!node)return false;
+  if(event.relatedTarget && node.contains(event.relatedTarget))return false;
+  const scope=curvePointScope(node);
+  const focused=document.activeElement?.closest?.('[data-curve-point-index]');
+  if(focused && focused!==node && scope?.contains(focused)){
+   activateCurvePoint(focused,Number(focused.dataset.curvePointIndex));
+  }else clearCurvePoint(scope);
+  return true;
+ };
+ const handleCurvePointClick=event=>{
+  const dot=event.target?.closest?.('.w-curve-point-marker[data-curve-point-index]');
+  if(!dot)return false;
+  const scope=curvePointScope(dot);
+  const table=scope?.querySelector('[data-curve-table]');
+  if(!table)return false; // Read-only charts still have hover/focus tooltips.
+  const row=[...table.querySelectorAll('tbody tr[data-curve-point-row]')]
+    .find(r=>r.dataset.curvePointIndex===dot.dataset.curvePointIndex);
+  const input=row?.querySelector('[data-curve-temperature]');
+  if(!input)return false;
+  event.preventDefault();
+  input.focus({preventScroll:true});
+  row.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+  activateCurvePoint(row,Number(row.dataset.curvePointIndex));
+  return true;
  };
  const updateCurvePreview=(table,S)=>{
   const container=table.closest('.panel');
@@ -284,10 +414,13 @@ const SDWorkspace = (() => {
   const preview=container?.querySelector('[data-curve-preview]');
   if(!preview)return;
   try{
-   const points=readCurvePointRows(table);
+   const points=readCurvePointRows(table,true);
    const id=table.dataset.curveTable;
    const live=S.simulation?.results?.find(x=>x.id===id);
    preview.innerHTML=curveDiagram(points,live?.inputTemperature,null);
+   const focused=document.activeElement?.closest?.('[data-curve-point-row]');
+   if(focused && table.contains(focused) && focused.dataset.curvePointIndex!=null)
+    activateCurvePoint(focused,Number(focused.dataset.curvePointIndex));
    if(message)message.textContent='Preview updated · save to apply this curve to simulation.';
   }catch(e){
    if(message)message.textContent=e.message;
@@ -305,6 +438,7 @@ const SDWorkspace = (() => {
      rows.length<=16){
     last.insertAdjacentHTML('afterend',curvePointRow());
   }
+  indexCurveRows(table);
   updateCurvePreview(table,S);
   return true;
  };
@@ -356,7 +490,13 @@ const SDWorkspace = (() => {
  const renderLiveFanControl=(S)=>{
   const data=S.fanControl||{};
   const state=data.status||{};
-  const outputs=data.outputs||[];
+  const allOutputs=data.outputs||[];
+  const referenced=new Set([
+   ...(S.settings?.fanChannelMappings||[]).map(m=>m.channelId),
+   ...(S.settings?.fanProfiles||[]).flatMap(p=>p.channelIds||[]),
+   ...(data.persistent?.profiles||[]).flatMap(p=>p.channelIds||[])
+  ]);
+  const outputs=allOutputs.filter(o=>referenced.has(o.id)||!isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const active=state.state==='active'||state.state==='pending';
   const supported=outputs.filter(o=>o.writable);
   const rows=outputs.map(o=>
@@ -381,7 +521,7 @@ const SDWorkspace = (() => {
     '<div class="w-actions">'+
       '<label>Writable channel<select id="liveFanChannel">'+
       '<option value="">Choose an output</option>'+supported.map(o=>
-        '<option value="'+attr(o.id)+'">'+safe(o.device+' / '+o.name+' ('+o.mode+')')+'</option>').join('')+
+        '<option value="'+attr(o.id)+'">'+safe(o.device+' / '+o.name+' ('+o.mode+')'+(isHidden(S,S.byId.get(o.id))?' [Hidden]':''))+'</option>').join('')+
       '</select></label>'+
       '<label>Control mode<select id="liveFanMode"><option value="manual">Manual test</option>'+
       '<option value="curve">Saved temperature curve</option></select></label>'+
@@ -407,7 +547,10 @@ const SDWorkspace = (() => {
   const editing=!WorkspaceLocks.fan(S);
   const all=S.settings?.fanProfiles||[], approved=S.fanControl?.persistent||{};
   const active=approved.profiles||[], reports=approved.readings||[];
-  const outputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
+  const allOutputs=(S.fanControl?.outputs||[]).filter(o=>o.writable);
+  const outputsFor=p=>allOutputs.filter(o=>p.channelIds.includes(o.id)||
+   active.some(a=>(a.channelIds||[]).includes(o.id))||
+   !isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const curves=S.settings?.simulatedFanCurves||[];
   const mapping=id=>FanFeedback.mapping(S,id);
   const header=card('Live fan profiles','Automatic fan control',
@@ -424,7 +567,7 @@ const SDWorkspace = (() => {
           '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
         '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
           ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
-        FanFeedback.render(S,p.channelIds)+
+        FanFeedback.render(S,p.channelIds,p.id)+
         (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
       return FanControlUx.section(S,'profile:'+p.id,p.name,
@@ -445,13 +588,13 @@ const SDWorkspace = (() => {
         '<span>'+safe(c.name)+'<small>'+safe(displayName(S,S.byId.get(c.sourceSensorId)||{name:'Select source sensor'}))+'</small></span></label>').join(''):
         '<p class="note">Create a temperature curve below first.</p>')+
        '</div><div><h3>Hardware PWM channels</h3>'+
-       (outputs.length?outputs.map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
+       (outputsFor(p).length?outputsFor(p).map(o=>'<label class="w-profile-item"><input type="checkbox" data-profile-channel="'+attr(p.id)+'" value="'+attr(o.id)+'" '+(p.channelIds.includes(o.id)?'checked':'')+'>'+
         '<span>'+safe((mapping(o.id)?.label?mapping(o.id).label+' · ':'')+
-           o.device+' / '+o.name)+'<small>'+safe(
+           o.device+' / '+o.name+(isHidden(S,S.byId.get(o.id))?' [Hidden]':''))+'<small>'+safe(
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
-      FanFeedback.render(S,p.channelIds)+
+      FanFeedback.render(S,p.channelIds,p.id)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
@@ -470,7 +613,7 @@ const SDWorkspace = (() => {
  };
  const starterProfiles=async(action,S,h)=>{
    const cfg=S.settings;
-   const candidates=S.sensors.filter(s=>s.type==='Temperature');
+   const candidates=S.sensors.filter(s=>s.type==='Temperature'&&!isHidden(S,s));
    const pick=type=>{
      const qualified=candidates.filter(s=>type==='cpu'?/cpu|processor|ryzen/i.test(s.device+' '+s.deviceType):
        type==='gpu'?/gpu|radeon|geforce/i.test(s.device+' '+s.deviceType):
@@ -535,7 +678,7 @@ const SDWorkspace = (() => {
          '<label>Curve name<input data-curve-name="'+attr(scope)+'" value="'+attr(curve.name)+'"></label>'+
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
-       curveTable(curve)+
+       curveTable(curve,S)+
 
        '<div class="w-actions"><label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
          button('save-editor','Save curve','',false)+button('remove-curve','Delete','data-id="'+attr(scope)+'"')+'</div>'+
@@ -554,26 +697,21 @@ const SDWorkspace = (() => {
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
    const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
-   return controls+renderProfiles(S)+
-      FanControlUx.section(S,'quick','Temporary fan speed',
-        overrideCount?overrideCount+' active override'+(overrideCount===1?'':'s')+
-          ' · expand to return to curves':'On-demand adjustments · closed by default',
-        quickFans(S),false)+
+   return controls+
+      FanControlUx.section(S,'calibration','Fan control & calibration',
+        '1 · Identify and measure physical fan PWM/RPM before assigning temperature curves',
+        editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
+          '<p class="note">Fan calibration module unavailable.</p>'):
+          WorkspaceLocks.readonly('Fan control & calibration')+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',true)+
       FanControlUx.section(S,'curves','Temperature curves',
-        curves.length+' curve(s) · expand to edit',curveContent,false)+
-      FanControlUx.section(S,'advanced','Advanced setup & diagnostics','Only for hardware changes or troubleshooting',FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
-        'Hardware identification and measured RPM response',
-        editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):''):
-          WorkspaceLocks.readonly('Commissioning')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',false)+
-      FanControlUx.section(S,'manual','Manual fan test and diagnostics',
-        'Administrator-approved, time-limited direct PWM tests',
-        editing?renderLiveFanControl(S):
-          WorkspaceLocks.readonly('Manual tests')+
-          '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false)+
-      FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
-        'Resume recovery, commands, RPM feedback and errors',
-        FanControlDebug.render(S),false),false);
+        '2 · Define temperature-to-PWM demand · '+curves.length+' curve(s)',
+        curveContent,false)+
+      renderProfiles(S)+
+      FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
+        FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
+          'Resume recovery, commands, RPM feedback and errors',
+          FanControlDebug.render(S),false),false);
  };
  const saves=new WeakMap();
  const saveState=S=>{
@@ -863,6 +1001,7 @@ const SDWorkspace = (() => {
          if(!last || temperature || percent){
            table.querySelector('tbody')?.insertAdjacentHTML('beforeend',curvePointRow());
          }
+         indexCurveRows(table);
          updateCurvePreview(table,S);
        }
        return true;
@@ -919,11 +1058,11 @@ const SDWorkspace = (() => {
      }
      if(action==='add-tray'){
        const candidate=S.sensors.find(s=>s.value!=null&&!isHidden(S,s)&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
-       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors[0]?.id||'',label:'',color:'#62d5ce',decimals:0});
+       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',decimals:0});
      }
      if(action==='remove-tray')cfg.trayWidgets=cfg.trayWidgets.filter(w=>w.id!==id);
      if(action==='add-curve'){
-       cfg.simulatedFanCurves.push({id:uid(),name:'New simulated curve',sourceSensorId:S.sensors.find(s=>s.type==='Temperature')?.id||'',
+       cfg.simulatedFanCurves.push({id:uid(),name:'New simulated curve',sourceSensorId:S.sensors.find(s=>s.type==='Temperature'&&!isHidden(S,s))?.id||'',
          outputSensorId:'',maxSampleAgeSeconds:30,
          points:[{temperature:30,percent:25},{temperature:50,percent:55},{temperature:75,percent:100}]});
      }
@@ -1008,6 +1147,44 @@ const SDWorkspace = (() => {
  };
  const paintSimulation=(S)=>{
    const readings=S.simulation?.results||[];
+   // Update the live yellow marker in place every refresh, so its visible
+   // label cannot become stale while the simulation input changes.
+   document.querySelectorAll('[data-curve-preview]').forEach(preview=>{
+     const id=preview.dataset.curvePreview;
+     const sample=readings.find(r=>r.id===id);
+     const graph=preview.querySelector('[data-curve-graph]');
+     if(!graph)return;
+     const temperature=sample?.inputTemperature;
+     const percent=sample?.targetPercent;
+     const available=Number.isFinite(temperature)&&Number.isFinite(percent);
+     const label=graph.querySelector('[data-curve-current-values]');
+     const value=available?temperature.toFixed(1)+'°C → '+
+       percent.toFixed(1)+'% PWM':'—';
+     if(label&&label.textContent!==value)label.textContent=value;
+     const marker=graph.querySelector('[data-curve-current-marker]');
+     if(!marker)return;
+     marker.style.display=available?'':'none';
+     if(!available)return;
+     const min=Number(graph.dataset.curveAxisMin);
+     const max=Number(graph.dataset.curveAxisMax);
+     if(!(max>min))return;
+     const x=44+(temperature-min)/(max-min)*392;
+     const y=174-percent/100*148;
+     const line=marker.querySelector('[data-curve-current-line]');
+     const dot=marker.querySelector('[data-curve-current-dot]');
+     if(line){
+       line.setAttribute('x1',x.toFixed(1));
+       line.setAttribute('x2',x.toFixed(1));
+     }
+     if(dot){
+       dot.setAttribute('cx',x.toFixed(1));
+       dot.setAttribute('cy',y.toFixed(1));
+     }
+     marker.setAttribute('aria-label','Current: '+value);
+     const title=marker.querySelector('[data-curve-current-title]');
+     if(title&&title.textContent!=='Current: '+value)
+       title.textContent='Current: '+value;
+   });
    document.querySelectorAll('[data-sim]').forEach(el=>{
      const [id,key]=el.dataset.sim.split(':');const row=readings.find(r=>r.id===id);
      const out=key==='input'?(row?.inputTemperature==null?'—':row.inputTemperature.toFixed(1)+' °C'):
@@ -1015,5 +1192,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,quickInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
 })();

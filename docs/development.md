@@ -28,10 +28,10 @@ Routine servicing validation downloads the MSI artifact from the latest successf
 1. Inspect relevant implementation and tests; make a focused change on a branch from `Production`.
 2. Run appropriate local checks, review the diff, update documentation and add an ADR only for meaningful architectural decisions.
 3. Push and create/update a PR targeting `Production`. Its description states the problem, resulting behavior, validation and known limits.
-4. The **Windows MSI build** workflow runs automatically on PR creation and updates. Manual fallback: Actions → that workflow → Run workflow → select the PR branch.
-5. Wait for completion and inspect every job, failing step/log and expected MSI and installer-diagnostic artifacts. Confirm the run corresponds to the current PR head (or GitHub's merge ref for that head). Fix failures and repeat; a run for an older revision is insufficient.
-6. When tests and the full pipeline succeed, review the final diff, resolve required reviews, mark ready if needed, and merge using an expected-head check. The owner has authorized this step without repeated confirmation. Never bypass branch protection.
-7. Verify the PR merged and monitor the ensuing `Production` pipeline. Report the PR, validation result and any production-build failure. Investigate failures without representing the delivery as fully validated.
+4. The **Windows MSI build** workflow never runs automatically for feature branches, fix branches, or pull requests. When validation is explicitly requested or required before merge, use Actions → Windows MSI build → Run workflow → select the feature branch. The same workflow runs automatically on every push to `Production` (including merges).
+5. For a manually requested run, inspect every job, failing step/log and expected MSI and installer-diagnostic artifacts. Confirm it corresponds to the latest branch commit; if a subsequent change requires revalidation, deliberately dispatch a new run. Do not mistake an earlier successful run for validation of newer changes.
+6. Before merging, review the final diff and required checks. Where the delivery requires Windows CI, manually validate the final head and merge only after the required pipeline succeeds. Resolve reviews and merge using an expected-head check when authorized; never bypass branch protection. This workflow deliberately does not generate a PR check unless manually dispatched.
+7. Verify the PR merged and monitor the automatically triggered `Production` pipeline. Report the PR, validation result and any production-build failure. Investigate failures without representing the delivery as fully validated.
 
 The workflow uploads build artifacts; merging is not authorization to install on the owner's machine or perform physical fan commissioning. Live hardware validation is separate from hardware-free CI.
 

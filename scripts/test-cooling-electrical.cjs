@@ -94,6 +94,17 @@ assert.ok(!output.includes('NaN'));
 assert.ok(electrical.editor(S,fans,'component:main:fan1',true).includes('data-electrical-field="quantity"'));
 assert.ok(electrical.editor(S,fans,'component:main:fan1',true).includes('data-work="electrical-preset"'));
 assert.ok(electrical.editor(S,fans,'component:main:fan1',true).includes('data-electrical-field="powerSensorId"'));
+S.settings.hiddenSensorIds=['radDuty','radPower'];
+let filteredEditor=electrical.editor(S,fans,'component:main:fan1',true);
+assert.match(filteredEditor,/<option value="radDuty" selected>[^<]*\[Hidden\]/,
+ 'Existing hidden PWM measurement remains identified');
+assert.doesNotMatch(filteredEditor,/<option value="radPower"/,
+ 'Hidden unassigned power sensor is not offered for new selection');
+fans.electrical.powerSensorId='radPower';
+filteredEditor=electrical.editor(S,fans,'component:main:fan1',true);
+assert.match(filteredEditor,/<option value="radPower" selected>[^<]*\[Hidden\]/,
+ 'Existing hidden power measurement remains identified');
+S.settings.hiddenSensorIds=[];
 assert.ok(electrical.editor(S,pump,'component:main:pump1',true).includes('value="mcp355"'));
 const empty={id:'other',kind:'heat-source',sensorIds:[],name:'CPU'};
 assert.equal(electrical.editor(S,empty,'component:main:other',true),'');
