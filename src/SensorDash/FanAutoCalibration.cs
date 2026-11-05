@@ -6,10 +6,14 @@
 internal sealed class FanAutoCalibration
 {
     private static readonly int[] IdentificationDuties = [100,85,70];
-    private static readonly int[] ResponseDuties = [100,85,70,55,40,30,20,15,10];
-    // Nine speeds can legitimately need 30-60 seconds each to settle.
-    // Never accept an unstable RPM solely to satisfy a short timeout.
-    internal const int MaximumSeconds = 600;
+    // Descending 5% checkpoints retain denser low-speed information while
+    // allowing one common physical fan calibration for CPU/GPU MAX curves.
+    private static readonly int[] ResponseDuties = Enumerable.Range(0,19)
+        .Select(i=>100-5*i).ToArray();
+    // Nineteen checkpoints require at least 6m20s at 20s each.
+    // Most runs should take ~7-19 minutes, but provide bounded headroom.
+    // Abort rather than recording an unstable RPM at either timeout.
+    internal const int MaximumSeconds = 1500;
     internal const int MaximumStepSeconds = 60;
     internal const int MinimumSettleSeconds = 8;
     internal const int MinimumStageSeconds = 20;
