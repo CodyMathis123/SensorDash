@@ -71,6 +71,7 @@ public sealed class FanControlRuntime
     }
 
     public object DebugLog() => _trace.ReadRecent();
+    public FanRecoveryEvent[] DrainRecoveryEvents() => _profiles.DrainRecoveryEvents();
     
     public object Snapshot(DashboardSettings? settings = null)
     {
@@ -86,6 +87,17 @@ public sealed class FanControlRuntime
 
     public object Request(FanCommand? command, DashboardSettings settings)
     {
+        if(command!=null && command.Action is "calibrate" or "cancel-calibration")
+        {
+            IReadOnlyList<FanOutputInfo> known;
+            lock(_sync)
+            {
+                if(command.Action=="calibrate" && (_session!=null || _pending!=null))
+                    return new {accepted=false,message="Finish the existing manual session before calibration."};
+                known=_outputs.ToArray();
+            }
+            return _profiles.RequestCalibration(command,settings,known);
+        }
         if(command!=null && command.Action is "override" or "reset-override" or "reset-overrides")
         {
             IReadOnlyList<FanOutputInfo> known;
