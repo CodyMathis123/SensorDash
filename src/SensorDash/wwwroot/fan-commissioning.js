@@ -29,6 +29,18 @@ const FanCommissioning=(()=>{
   });
   if(!r.ok)throw Error((await r.text()).slice(0,150));
  };
+ const temperatureCells=p=>{
+  const items=(p?.temperatures||[]).filter(t=>Number.isFinite(t.celsius));
+  if(!items.length)return '<span class="note">Not recorded</span>';
+  return items.map(t=>'<span class="fc-temperature-reading" title="'+esc(t.sensorId||'')+'">'+
+    esc(t.sensorName||t.sensorId||'Temperature')+': '+
+    Number(t.celsius).toFixed(1)+'°C</span>').join('');
+ };
+ const measurementRows=points=>points.map(p=>'<tr><td>'+
+   Number(p.dutyPercent)+'% PWM</td><td>'+
+   Number(p.rpm).toFixed(0)+' RPM</td><td>'+
+   temperatureCells(p)+'</td><td>'+
+   esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
  const persist=async(S,draft,h,message)=>{
   await SDWorkspace.saveSettings(S,draft);
   h.toast(message);h.render();
@@ -66,17 +78,14 @@ const FanCommissioning=(()=>{
   const feedback=S.fanControl?.persistent?.pwmFeedback?.[selected];
   const register=S.sensors.find(x=>x.id===selected && x.type==='Control');
   const calSamples=calibrationHere?.measurements||[];
-  const autoRows=calSamples.map(p=>'<tr><td>'+Number(p.dutyPercent)+'% PWM</td><td>'+
-      Number(p.rpm).toFixed(0)+' RPM</td><td>'+esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
+  const autoRows=measurementRows(calSamples);
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
   const identifyReady=isFan && !!rpm && output.writable;
   const responseReady=identifyReady && verified;
-  const sampleRows=observations.length?observations.map(p=>
-   '<tr><td>'+p.dutyPercent+'% PWM</td><td>'+Number(p.rpm).toFixed(0)+' RPM</td><td>'+
-   esc(new Date(p.observedAt).toLocaleString())+'</td></tr>').join(''):
-   '<tr><td colspan="3">No verified RPM measurements yet</td></tr>';
+  const sampleRows=observations.length?measurementRows(observations):
+   '<tr><td colspan="4">No RPM measurements saved for this fan yet</td></tr>';
   const readOnly=owner?'An active profile owns this header. Short standalone manual tests are disabled, but guarded response calibration remains available.':'';
   return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan control & calibration</h2>'+
    '<p>Identify the physical fan and tachometer before configuring temperature curves</p></div>'+
