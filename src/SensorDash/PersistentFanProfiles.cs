@@ -537,13 +537,16 @@ public sealed class PersistentFanProfiles
         // before any temperature curve or persistent fan profile exists.
         // In that case, use the same single-threaded approved PWM writer for
         // ONE explicitly elevated, time-bounded channel, then restore firmware.
-        FanAutoCalibration? standalone;
+        // Hold the session lock while deciding and issuing each standalone
+        // command. A concurrent admin cancellation cannot race a lower-duty
+        // write after the user has already requested restoration.
         lock(_sync)
-            standalone=_calibration?.Running==true &&
-                !profiles.Any(p=>p.ChannelIds.Contains(_calibration.ChannelId))
-                ?_calibration:null;
-        if(standalone!=null)
         {
+          var standalone=_calibration?.Running==true &&
+              !profiles.Any(p=>p.ChannelIds.Contains(_calibration.ChannelId))
+              ?_calibration:null;
+          if(standalone!=null)
+          {
             var validMapping=settings?.FanChannelMappings?.Any(m=>
                 m.ChannelId==standalone.ChannelId && m.Kind=="fan" &&
                 m.RpmSensorId==standalone.RpmSensorId)==true;
@@ -561,11 +564,12 @@ public sealed class PersistentFanProfiles
                     standalone.Abort("PWM write failed: "+error);
                 else
                 {
-                    lock(_sync)_standaloneCalibrationOwned=true;
+                    _standaloneCalibrationOwned=true;
                     if(wasApplying)standalone.MarkApplied(now);
                     else standalone.Observe(frame,now);
                 }
             }
+          }
         }
         // Finalize once after a complete/aborted run. A standalone test must
         // relinquish its physical PWM output, even if settings were changed.
