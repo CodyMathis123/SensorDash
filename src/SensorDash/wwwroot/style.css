@@ -518,3 +518,25 @@
 .fc-saved-results th:nth-child(1),.fc-saved-results td:nth-child(1),
 .fc-saved-results th:nth-child(2),.fc-saved-results td:nth-child(2){white-space:nowrap}
 .fc-saved-results th:nth-child(3),.fc-saved-results td:nth-child(3){width:42%;min-width:180px}
+
+/* Calibration runs across all PWM channels as one exclusive collector session.
+   Keep a compact global indicator visible even when another fan is selected. */
+.fc-global-calibration{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+ margin:12px 0 14px;padding:11px 13px;border:1px solid #4b7580;
+ border-radius:9px;background:#14313e;color:#d6edf0}
+.fc-global-calibration-copy{display:flex;flex:1 1 240px;flex-direction:column;
+ min-width:0;gap:3px;font-size:12px}
+.fc-global-calibration-copy strong{font-size:13px;color:#a3ece0}
+.fc-global-calibration-copy span{line-height:1.45}
+.fc-global-calibration progress{flex:1 1 120px;max-width:220px;
+ height:10px;accent-color:#64d7cf}
+.fc-global-calibration button{white-space:normal}
+.fc-other-calibration{border:1px solid #52727c;border-radius:8px;
+ background:#19343f;padding:10px 12px;margin:0 0 12px;color:#d7edf1}
+.fc-other-calibration strong{display:block;margin-bottom:4px;font-size:13px}
+.fc-other-calibration p{font-size:12px;line-height:1.55;margin:0}
+.fc-calibration-status[data-status="busy"]{border-color:#557480;background:#17323f}
+@media(max-width:600px){
+ .fc-global-calibration progress{max-width:none;flex-basis:100%}
+ .fc-global-calibration button{width:100%}
+}
