@@ -10,7 +10,7 @@ const titles={
  events:['HISTORY','Event log','Alerts and recoveries'],
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
-const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Key',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
+const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Common types',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
  status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -38,10 +38,10 @@ function explorer(){
  const display=x=>SDWorkspace.displayName(S,x);
  const key=x=>x.deviceId||x.deviceType+'|'+x.device;
  const devices=[...new Map(S.sensors.map(x=>[key(x),x])).entries()].sort((a,b)=>a[1].device.localeCompare(b[1].device));
- const filterChoices=['Key','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
+ const filterChoices=['Common types','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
  const candidates=S.sensors.filter(x=>{
   const type=S.filter==='All'||S.filter==='In use'||S.filter==='Hidden'||
-   (S.filter==='Key'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
+   (S.filter==='Common types'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
    x.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(x.id));
   const visible=S.filter==='Hidden'?hidden(x):S.filter==='In use'?usage.has(x.id):S.showHidden||!hidden(x);
   return type&&visible&&(!S.deviceFilter||key(x)===S.deviceFilter);
@@ -90,7 +90,8 @@ function explorer(){
  }
  const tools='<div class="toolbar explorer-toolbar">'+
   '<input id="search" placeholder="Search sensor, ID, hardware or usage…" value="'+esc(S.search)+'">'+
-  filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'">'+
+  filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'"'+
+   (v==='Common types'?' title="Temperature, Fan, Control, Power and Load sensors" aria-label="Common types: Temperature, Fan, Control, Power and Load"':'')+'> '+
     esc(v)+(v==='In use'?' ('+counts.used+')':v==='Hidden'?' ('+counts.hidden+')':'')+'</button>').join('')+
   '</div><div class="explorer-tools">'+
   '<label>Hardware<select id="explorerDevice"><option value="">All devices</option>'+
