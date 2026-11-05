@@ -19,6 +19,10 @@ internal sealed class FanAutoCalibration
     internal const int MinimumStageSeconds = 20;
     internal const int StableWindowSeconds = 12;
     internal const int MinimumStableSamples = 8;
+    // Require distinct fresh tach reads over several seconds. One transient
+    // 0-RPM sample must never be mistaken for a low-duty fan cutoff.
+    internal const int ZeroConfirmSamples = 3;
+    internal const int ZeroConfirmSeconds = 3;
     private readonly List<FanCalibrationPoint> _measurements = [];
     private readonly List<(DateTimeOffset Time,double Rpm)> _recentRpm = [];
     private readonly Dictionary<string,double> _thermalBaseline = new(StringComparer.Ordinal);
@@ -30,6 +34,10 @@ internal sealed class FanAutoCalibration
     private readonly int[] _duties;
     private DateTimeOffset _stepStarted;
     private DateTimeOffset _lastRpmObserved;
+    private DateTimeOffset _lastZeroObserved;
+    private DateTimeOffset? _firstZeroObserved;
+    private int _zeroCount;
+    private FanCalibrationCutoff? _cutoff;
     private double? _observedRpm;
     private string _stability = "waiting";
     private int _index;
@@ -50,6 +58,7 @@ internal sealed class FanAutoCalibration
     internal string Stability => _stability;
     internal int StableSampleCount => _recentRpm.Count;
     internal IReadOnlyList<FanCalibrationPoint> Measurements => _measurements;
+    internal FanCalibrationCutoff? Cutoff => _cutoff;
     internal object Snapshot() => new
     {
         channelId=ChannelId,rpmSensorId=RpmSensorId,mode=Mode,
@@ -59,7 +68,8 @@ internal sealed class FanAutoCalibration
         observedRpm=_observedRpm,stability=_stability,
         stableSampleCount=_recentRpm.Count,
         requiredStableSamples=MinimumStableSamples,
-        measurements=_measurements.ToArray()
+        measurements=_measurements.ToArray(),
+        cutoff=_cutoff
     };
 
     internal FanAutoCalibration(string channelId,string rpmSensorId,
@@ -100,6 +110,9 @@ internal sealed class FanAutoCalibration
         _stepStarted=now;
         _lastRpmObserved=default;
         _recentRpm.Clear();
+        _zeroCount=0;
+        _firstZeroObserved=null;
+        _lastZeroObserved=default;
         _observedRpm=null;
         _stability="settling";
         Message="Applying "+CurrentDuty+"% fan speed; waiting for the fan to settle.";
@@ -222,11 +235,6 @@ internal sealed class FanAutoCalibration
         var duty=Fresh(frame,ChannelId,"Control",now);
         var tach=frame.Sensors.FirstOrDefault(s=>s.Id==RpmSensorId && s.Type=="Fan");
         var rpm=Fresh(frame,RpmSensorId,"Fan",now);
-        if(rpm is <=0)
-        {
-            Abort("Fan tachometer reported zero RPM; calibration stopped and previous control restored.");
-            return true;
-        }
         if(duty is not { } observedDuty || Math.Abs(observedDuty-CurrentDuty)>4 ||
             rpm is not { } measured || tach?.ObservedAt is not { } observedAt)
         {
@@ -238,7 +246,61 @@ internal sealed class FanAutoCalibration
         else
         {
             _observedRpm=measured;
-            if(stepSeconds<MinimumSettleSeconds)
+            if(measured<=0)
+            {
+                _recentRpm.Clear();
+                // Zero at high duty is a fault, not an operating cutoff.
+                // A low-duty stop only counts after many verified positive
+                // steps, a spin-down interval and repeated fresh 0 RPM
+                // observations. Any selected thermal guard remains active.
+                var canBeCutoff=Mode=="response"&&CurrentDuty<=40 &&
+                    _measurements.Count>=3 &&
+                    CurrentDuty<_measurements.Min(p=>p.DutyPercent);
+                if(!canBeCutoff)
+                {
+                    Abort("Fan tachometer reported zero RPM at "+
+                        CurrentDuty+"% PWM. Unexpected stop; prior fan control restored. "+
+                        "Previously settled RPM measurements remain available for review.");
+                    return true;
+                }
+                if(observedAt>_lastZeroObserved)
+                {
+                    _lastZeroObserved=observedAt;
+                    _firstZeroObserved??=observedAt;
+                    _zeroCount++;
+                }
+                if(stepSeconds>=MinimumSettleSeconds &&
+                   _zeroCount>=ZeroConfirmSamples &&
+                   _firstZeroObserved is { } began &&
+                   (observedAt-began).TotalSeconds>=ZeroConfirmSeconds)
+                {
+                    _cutoff=new FanCalibrationCutoff{
+                        DutyPercent=CurrentDuty,ObservedAt=now,
+                        Temperatures=CaptureTemperatures(frame,now)
+                    };
+                    State="cutoff";
+                    _stability="stopped";
+                    Message=$"Observed fan stop at {CurrentDuty}% PWM: "+
+                        $"0 RPM in {_zeroCount} distinct readings across "+
+                        $"{(observedAt-began).TotalSeconds:0}s. "+
+                        $"{_measurements.Count} stable higher-speed measurements are "+
+                        "available to save with this observed cutoff. "+
+                        "Previous fan control restored; this does not establish a restart threshold.";
+                    NeedsApply=false;
+                    return true;
+                }
+                _stability="checking-stop";
+                Message=$"At {CurrentDuty}% PWM, tachometer reads 0 RPM. "+
+                    $"Confirming a low-speed stop ({_zeroCount} fresh readings). "+
+                    "Thermal guards remain active.";
+            }
+            else
+            {
+                // Any positive tach reading cancels tentative stop detection.
+                _zeroCount=0;
+                _firstZeroObserved=null;
+                _lastZeroObserved=default;
+                if(stepSeconds<MinimumSettleSeconds)
             {
                 _stability="settling";
                 Message=$"Waiting for {CurrentDuty}% to settle: {measured:0} RPM "+
@@ -314,6 +376,7 @@ internal sealed class FanAutoCalibration
                     Message=$"At {CurrentDuty}%: {measured:0} RPM. "+
                         $"Checking stability ({_recentRpm.Count} readings over {window:0}s).";
                 }
+            }
             }
         }
         if(stepSeconds>=MaximumStepSeconds)
