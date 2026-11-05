@@ -1,6 +1,8 @@
 using System.Text.Json;
 using LibreHardwareMonitor.Hardware;
 
+internal sealed record FanRecoveryEvent(string Severity, string Sensor, string Message, double? Value);
+
 public sealed class PersistentFanProfiles
 {
     private readonly string _path;
@@ -8,6 +10,9 @@ public sealed class PersistentFanProfiles
     private Dictionary<string,ApprovedFanProfile> _approved = new(StringComparer.Ordinal);
     private readonly FanProfilePlanner _planner = new();
     private readonly FanPwmWriter _writer = new();
+    private readonly FanPwmFeedbackMonitor _feedback = new();
+    private readonly Queue<FanRecoveryEvent> _pendingEvents = new();
+    private FanAutoCalibration? _calibration;
     private readonly FanControlTrace? _trace;
     private DateTimeOffset? _lastTick;
     private DateTimeOffset? _postResumeRearmDue;
@@ -87,8 +92,66 @@ public sealed class PersistentFanProfiles
             overrides = _overrides.Values.Select(o=>new {
                 channelId=o.ChannelId,percent=o.Percent,expires=o.Expires
             }).ToArray(),
+            calibration = _calibration?.Snapshot(),
+            pwmFeedback = _feedback.Snapshot(),
             persistent = true
         };
+    }
+
+    internal FanRecoveryEvent[] DrainRecoveryEvents()
+    {
+        lock(_sync)
+        {
+            var events=_pendingEvents.ToArray();
+            _pendingEvents.Clear();
+            return events;
+        }
+    }
+
+    public object RequestCalibration(FanCommand command,DashboardSettings settings,
+        IReadOnlyList<FanOutputInfo> outputs)
+    {
+        lock(_sync)
+        {
+            if(command.Action=="cancel-calibration")
+            {
+                if(_calibration?.Running!=true)
+                    return new {accepted=false,message="No calibration is running."};
+                _calibration.Abort("Cancelled; approved fan curve restored.");
+                _trace?.Event("CALIBRATION","Cancelled by user; approved profile resumes.");
+                return new {accepted=true,message="Calibration cancelled; approved profile resumes on next poll."};
+            }
+            if(command.Action!="calibrate" || !command.ConfirmExclusiveOwnership)
+                return new {accepted=false,message="Explicit calibration authorization required."};
+            if(_calibration?.Running==true)
+                return new {accepted=false,message="Another calibration is active."};
+            var mapping=settings.FanChannelMappings?.FirstOrDefault(m=>m.ChannelId==command.ChannelId);
+            if(mapping?.Kind!="fan" || !mapping.VisuallyIdentified ||
+                string.IsNullOrWhiteSpace(mapping.RpmSensorId))
+                return new {accepted=false,message="Identify and physically confirm a fan with a matching RPM sensor first."};
+            if(_calibration?.Running==true && _calibration.ChannelId==command.ChannelId)
+                return new {accepted=false,message="Cancel automatic calibration before using manual override."};
+            var profile=_approved.Values.FirstOrDefault(p=>p.ChannelIds.Contains(command.ChannelId));
+            if(profile==null)
+                return new {accepted=false,message="Automatic calibration requires a running, approved fan profile."};
+            if(_overrides.ContainsKey(command.ChannelId))
+                return new {accepted=false,message="Return this fan to its automatic curve before calibration."};
+            var output=outputs.FirstOrDefault(o=>o.Id==command.ChannelId);
+            if(output?.Writable!=true)
+                return new {accepted=false,message="The approved PWM output is not available."};
+            try
+            {
+                _calibration=new FanAutoCalibration(command.ChannelId,mapping.RpmSensorId,
+                    Math.Max(profile.MinimumPercent,Math.Max(10,output.Minimum)),
+                    Math.Min(100,output.Maximum),DateTimeOffset.UtcNow);
+                _trace?.Event("CALIBRATION","Authorized bounded calibration on "+command.ChannelId);
+                return new {accepted=true,message="Automatic calibration authorized; monitor your fans until complete."};
+            }
+            catch(ArgumentException ex)
+            {
+                return new {accepted=false,message=ex.Message};
+            }
+        }
     }
 
     public object RequestOverride(FanCommand command, DashboardSettings settings,
