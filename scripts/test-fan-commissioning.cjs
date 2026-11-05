@@ -181,5 +181,55 @@ async function click(action,duty){
  assert.match(afterRestart,/CPU package: 38.5°C/,
   'Saved RPM and guard-temperature observations must remain visible after session ends');
  assert.doesNotMatch(afterRestart,/Current run · 3 measured speeds/);
- console.log('PASS: independent PWM calibration, saved measurements, thermal guard history and persistent fan UI');
+ S.settings.aliases={temp1:'My CPU Guard'};
+ let aliased=controller.render(S);
+ assert.match(aliased,/My CPU Guard: 38.5°C/,
+  'Stored calibration points should respect current sensor aliases even if renamed later');
+ assert.doesNotMatch(aliased,/CPU package: 38.5°C/,
+  'Do not show the unaliased hardware sensor name in saved measurement rows');
+ assert.match(aliased,/My CPU Guard<\/option>/,
+  'Guard temperature dropdown should show the configured sensor alias');
+
+ // A running calibration on fan A blocks fan B with a clear explanation,
+ // not just a mysterious disabled button. The progress remains visible.
+ S.fanControl.outputs.push({id:'channel2',name:'NVMe PWM',device:'Mainboard',
+  mode:'Undefined',minimum:0,maximum:100,writable:true});
+ S.settings.fanChannelMappings.push({channelId:'channel2',label:'NVMe Fan',
+  kind:'fan',rpmSensorId:'tach2',visuallyIdentified:true,
+  verifiedAt:new Date().toISOString(),measurements:[
+   {dutyPercent:70,rpm:900},{dutyPercent:100,rpm:1700}]});
+ S.sensors.push({id:'tach2',type:'Fan',name:'NVMe tach',device:'Mainboard',
+  value:1200,observedAt:new Date().toISOString()});
+ S.fanControl.persistent.calibration={
+  channelId:'channel1',rpmSensorId:'tach1',mode:'response',
+  state:'running',completedSteps:12,totalSteps:19,currentDuty:40,
+  message:'Settling at 40%',measurements:[]
+ };
+ const onOwner=controller.render(S);
+ assert.match(onOwner,/Calibration in progress/);
+ assert.match(onOwner,/12 of 19 stable speeds measured/);
+ assert.match(onOwner,/Cancel and restore control/);
+ assert.equal(controller.change({target:{id:'fcChannel',value:'channel2'}},S,h),true);
+ const onOther=controller.render(S);
+ assert.match(onOther,/Another calibration is running/);
+ assert.match(onOther,/Right radiator bank is currently being calibrated/);
+ assert.match(onOther,/Calibration unavailable for this fan/);
+ assert.match(onOther,/data-commissioning="start-auto" disabled title=/);
+ assert.match(onOther,/data-commissioning="start-identify" disabled title=/);
+ assert.match(onOther,/data-commissioning="view-active-calibration"/);
+ assert.match(onOther,/12 of 19 stable speeds measured/);
+ assert.match(onOther,/40% PWM/);
+ const requestCount=requests.length;
+ await click('start-auto');
+ assert.equal(requests.length,requestCount,
+  'Other fan calibration must be blocked before attempting elevation');
+ await click('view-active-calibration');
+ const returned=controller.render(S);
+ assert.match(returned,/Cancel and restore control/,
+  'View active calibration should select the running fan');
+ assert.doesNotMatch(returned,/Calibration unavailable for this fan/);
+ S.fanControl.persistent.calibration=null;
+ assert.doesNotMatch(controller.render(S),/id="fcGlobalCalibration"/,
+  'Global progress indicator should disappear after calibration ends');
+ console.log('PASS: single active fan calibration status, alias-aware guards and saved RPM history');
 })().catch(e=>{console.error(e);process.exitCode=1});
