@@ -70,6 +70,14 @@ S.settings.fanChannelMappings[0].measurements=[
 S.fanControl.persistent.readings[0].targetPercent=10;
 assert.equal(api.FanFeedback.estimate(S,'pwm',10).text,'Not calibrated at 10%',
   'High-duty-only calibration cannot estimate low-duty fan RPM');
+S.settings.fanChannelMappings[0].cutoff={
+ dutyPercent:10,observedAt:new Date().toISOString(),temperatures:[]};
+assert.equal(api.FanFeedback.estimate(S,'pwm',10).text,'0 RPM observed at 10%',
+  'Observed zero RPM must be visible as a fan-stop event, not extrapolated from running speeds');
+assert.match(api.FanFeedback.estimate(S,'pwm',10).hint,/not a tested startup/i);
+assert.equal(api.FanFeedback.estimate(S,'pwm',5).text,'Below observed stop',
+  'No RPM estimate may be invented for speeds below an observed fan stop');
+S.settings.fanChannelMappings[0].cutoff=null;
 assert.match(api.FanFeedback.render(S,['pwm'],'profile'),/Not calibrated at 10%/);
 const priorActiveProfiles=S.fanControl.persistent.profiles;
 S.fanControl.persistent.profiles=[];
