@@ -509,3 +509,12 @@
 .w-curve-current-marker{cursor:help;outline:none}
 .w-curve-current-marker:focus-visible [data-curve-current-dot]{
  stroke:#fff3da;stroke-width:3}
+
+/* Calibration observations: saved data is clearly separate from the
+   in-progress session; long sensor names wrap rather than crush RPM values. */
+.fc-temperature-reading{display:block;white-space:normal;line-height:1.55;
+ font-size:12px;font-variant-numeric:tabular-nums;color:#b6d8de}
+.fc-saved-results,.fc-advanced-toggle table{min-width:570px;width:100%}
+.fc-saved-results th:nth-child(1),.fc-saved-results td:nth-child(1),
+.fc-saved-results th:nth-child(2),.fc-saved-results td:nth-child(2){white-space:nowrap}
+.fc-saved-results th:nth-child(3),.fc-saved-results td:nth-child(3){width:42%;min-width:180px}
