@@ -52,6 +52,28 @@ assert.match(api.FanFeedback.render(S,['pwm']),/Radiator bank/);
 assert.match(api.FanFeedback.render(S,['pwm']),/734 RPM/);
 assert.equal(api.FanFeedback.reading(S,'pwm').mapped,true);
 assert.equal(api.FanFeedback.label(S,'pwm'),'Radiator bank');
+S.settings.fanChannelMappings[0].measurements=[
+ {dutyPercent:10,rpm:490},{dutyPercent:40,rpm:1050},{dutyPercent:100,rpm:1980}];
+S.fanControl.persistent.readings=[{id:'profile',targetPercent:40,state:'running'}];
+assert.equal(api.FanFeedback.target(S,'profile','pwm').percent,40);
+assert.equal(api.FanFeedback.estimate(S,'pwm',40).text,'≈1,050 RPM');
+let profileFeedback=api.FanFeedback.render(S,['pwm'],'profile');
+assert.match(profileFeedback,/Target PWM/);
+assert.match(profileFeedback,/Estimated RPM/);
+assert.match(profileFeedback,/Measured RPM/);
+assert.match(profileFeedback,/≈1,050 RPM/);
+S.fanControl.persistent.readings[0].targetPercent=25;
+assert.equal(api.FanFeedback.estimate(S,'pwm',25).text,'≈770 RPM',
+  'Calibrated physical fan interpolation follows live MAX profile target');
+S.settings.fanChannelMappings[0].measurements=[
+ {dutyPercent:70,rpm:1474},{dutyPercent:85,rpm:1718},{dutyPercent:100,rpm:1962}];
+S.fanControl.persistent.readings[0].targetPercent=10;
+assert.equal(api.FanFeedback.estimate(S,'pwm',10).text,'Not calibrated at 10%',
+  'High-duty-only calibration cannot estimate low-duty fan RPM');
+assert.match(api.FanFeedback.render(S,['pwm'],'profile'),/Not calibrated at 10%/);
+S.fanControl.persistent.profiles=[];
+assert.equal(api.FanFeedback.target(S,'profile','pwm'),null,
+  'Stopped profile must not present stale curve targets as live PWM');
 S.sensors[0].value=undefined;
 assert.equal(api.FanFeedback.reading(S,'pwm').text,'RPM unavailable');
 S.settings.fanControlLocked=true;
@@ -67,7 +89,9 @@ const program=read('src/SensorDash/Program.cs');
 const bridge=read('src/SensorDash/ServiceBridge.cs');
 const profiles=read('src/SensorDash/PersistentFanProfiles.cs');
 const model=read('src/SensorDash/WorkspaceModels.cs');
-assert.ok(workspace.includes('FanFeedback.render(S,p.channelIds)'));
+assert.ok(workspace.includes('FanFeedback.render(S,p.channelIds,p.id)'));
+assert.ok(!workspace.includes('data-curve-estimated-rpm'),
+  'Reusable temperature curves must not display RPM for an unassigned fan');
 assert.ok(!workspace.includes('Optional related tachometer/control reading'));
 assert.ok(workspace.includes('toggle-cooling-lock')&&workspace.includes('toggle-fan-lock'));
 assert.ok(workspace.includes('data-fan-unsaved'));
