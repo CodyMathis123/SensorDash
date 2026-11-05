@@ -200,12 +200,13 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
             context.Request.Body,JsonSerializerOptions.Web,context.RequestAborted);
     }
     catch(JsonException){return Results.BadRequest("Invalid control request.");}
-    if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all" or "override" or "reset-override" or "reset-overrides") ||
+    if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all" or "override" or "reset-override" or "reset-overrides" or "calibrate" or "cancel-calibration") ||
        command.ChannelId.Length>256 || command.CurveId.Length>80 ||
        command.DurationSeconds is < 15 or > PersistentFanProfiles.MaxOverrideSeconds ||
-       (command.Action!="override" && command.DurationSeconds>FanControlRuntime.MaxSessionSeconds) ||
+       (command.Action is not ("override" or "calibrate") &&
+        command.DurationSeconds>FanControlRuntime.MaxSessionSeconds) ||
        !double.IsFinite(command.Percent) ||
-       ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override") &&
+       ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override" || command.Action=="calibrate") &&
            !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
     try
@@ -704,6 +705,17 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                         pausedDevices);
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
+                // Fan control must never depend on local SQLite recording.
+                // Emit bounded cooling events only AFTER a recovery attempt.
+                foreach(var evt in controls.DrainRecoveryEvents())
+                {
+                    try { db.Event(evt.Severity,evt.Sensor,evt.Message,evt.Value); }
+                    catch(Exception eventError)
+                    {
+                        logger.LogWarning(eventError,
+                            "Could not archive PWM recovery event; fan control is unaffected.");
+                    }
+                }
                 state.Publish(frame);
                 if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
                     db.Record(frame, cfg);
