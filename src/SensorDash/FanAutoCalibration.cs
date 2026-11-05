@@ -115,17 +115,47 @@ internal sealed class FanAutoCalibration
         if(!Running)return false;
         foreach(var id in _thermalGuards)
         {
-            var temp=Fresh(frame,id,"Temperature",now);
-            if(temp is not { } value || value>=_temperatureLimit)
+            // Give the operator a concrete reason for an aborted sweep.
+            // The distinction between a hot component and missing/stale
+            // telemetry is important; neither is safe to ignore.
+            var sensor=frame.Sensors.FirstOrDefault(s=>s.Id==id && s.Type=="Temperature");
+            var label=string.IsNullOrWhiteSpace(sensor?.Name)?id:sensor.Name;
+            if(sensor==null)
             {
-                Abort("Temperature guard is stale, absent or too hot; restoring prior control.");
+                Abort($"Temperature monitor {label} ({id}) was not found in the latest sensor collection. Calibration stopped; prior fan control restored.");
+                return false;
+            }
+            if(sensor.ObservedAt is not { } observed)
+            {
+                Abort($"Temperature monitor {label} ({id}) has no reading timestamp. Calibration stopped; prior fan control restored.");
+                return false;
+            }
+            var age=(now-observed).TotalSeconds;
+            // A short hiccup in LHM polling should not invalidate an entire
+            // 19-point sweep, but never use readings older than ten seconds
+            // to authorize a lower fan speed.
+            if(age>10 || age< -4)
+            {
+                var last=sensor.Value is { } oldValue && double.IsFinite(oldValue)
+                    ?$" Last temperature: {oldValue:0.0}°C.":"";
+                Abort($"Temperature monitor {label} ({id}) has stale data (last sample {age:0.0}s ago).{last} Calibration stopped; prior fan control restored.");
+                return false;
+            }
+            if(sensor.Value is not { } value || !double.IsFinite(value))
+            {
+                Abort($"Temperature monitor {label} ({id}) has no valid temperature value. Calibration stopped; prior fan control restored.");
+                return false;
+            }
+            if(value>=_temperatureLimit)
+            {
+                Abort($"Temperature monitor {label} reached {value:0.0}°C (configured stop limit {_temperatureLimit:0.0}°C). Calibration stopped; prior fan control restored.");
                 return false;
             }
             if(!_thermalBaseline.TryGetValue(id,out var baseline))
                 _thermalBaseline[id]=baseline=value;
             if(value>baseline+6)
             {
-                Abort("Temperature increased by more than 6°C during calibration; restoring prior control.");
+                Abort($"Temperature monitor {label} increased from {baseline:0.0}°C to {value:0.0}°C (+{value-baseline:0.0}°C), exceeding the 6°C rise limit. Calibration stopped; prior fan control restored.");
                 return false;
             }
         }
