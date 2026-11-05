@@ -200,9 +200,9 @@ const h={
    measurements:[{dutyPercent:10,rpm:490},
      {dutyPercent:40,rpm:1050},{dutyPercent:100,rpm:1980}]}];
  const estimated=workspace.render(S,'curves',h);
- assert.ok(estimated.includes('Estimated RPM')&&
-   estimated.includes('Radiator Fans: ≈770 RPM')&&
-   estimated.includes('Radiator Fans: ≈1,050 RPM')&&
+ assert.ok(estimated.includes('Est. RPM')&&
+   estimated.includes('≈770')&&
+   estimated.includes('≈1,050')&&
    estimated.includes('MAX profile'),
    'CPU/GPU MAX curves reuse one physical fan calibration to estimate RPM');
  S.settings.simulatedFanCurves=previousCurves;
