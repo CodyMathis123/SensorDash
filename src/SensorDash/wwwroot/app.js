@@ -17,6 +17,9 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
 const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'—';
+const perfNumber=(value,unit='',digits=1)=>Number.isFinite(value)?Number(value).toFixed(digits)+unit:'—';
+const perfUptime=seconds=>Number.isFinite(seconds)?
+ Math.floor(seconds/3600)+'h '+Math.floor((seconds%3600)/60)+'m':'—';
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>{
  const alias=S.settings?.aliases?.[s?.id];
@@ -314,11 +317,24 @@ function settingsView(){
   '<div class="stat-row"><label>Working set</label><strong>'+formatMb(p?.workingSetBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Private memory</label><strong>'+formatMb(p?.privateBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
-  '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'
+  '<div class="stat-row"><label>GC committed memory</label><strong>'+formatMb(p?.gcCommittedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Process uptime</label><strong>'+perfUptime(p?.uptimeSeconds)+'</strong></div>'+
+  '<div class="stat-row"><label>Total allocations since start</label><strong>'+formatMb(p?.totalAllocatedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Allocation rate</label><strong>'+perfNumber(Number.isFinite(p?.allocationBytesPerSecond)?p.allocationBytesPerSecond/1048576:null,' MB/s',3)+'</strong></div>'+
+  '<div class="stat-row"><label>GC collections · Gen 0 / 1 / 2</label><strong>'+[p?.gen0Collections,p?.gen1Collections,p?.gen2Collections].map(v=>Number.isFinite(v)?v:'—').join(' / ')+'</strong></div>'+
+  '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'+
+  '<div class="stat-row"><label>Handles</label><strong>'+(p?.handleCount??'—')+'</strong></div>'+
+  '<div class="stat-row"><label>CPU · one logical core</label><strong>'+perfNumber(p?.cpuPercentOneCore,'%',2)+'</strong></div>'+
+  (name==='Elevated collector'?'<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
+    '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'+
+    '<div class="stat-row"><label>IPC serialization · mean</label><strong>'+perfNumber(p?.ipcSerializationMeanMs,' ms',2)+'</strong></div>'+
+    '<div class="stat-row"><label>IPC response · mean</label><strong>'+perfNumber(Number.isFinite(p?.ipcResponseMeanBytes)?p.ipcResponseMeanBytes/1024:null,' KiB',1)+'</strong></div>':'')
  ).join('')+
  '<h3 class="sensor-used-title">Historical analysis</h3>'+
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
-  '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
+  '<p class="note">Memory-first diagnostics: private memory reflects committed process-private virtual memory, while working set includes resident shared pages. GC committed is not interchangeable with total native memory. Samples are taken once per minute, held only in memory for up to 24 hours (maximum 1,440 per process) and reset on restart. CPU is shown as one-core equivalent; no collection is forced.</p>'+
+ '<div class="w-actions"><button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>'+
+ '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
  '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
@@ -378,6 +394,31 @@ async function loadStatus(shouldRender=false){
   S.status=await fetchJSON('/api/status');
   if(shouldRender&&S.view==='settings')render();
  }catch(e){console.warn('Desktop process status unavailable:',e.message)}
+}
+async function exportPerformance(){
+ try{
+  const data=await fetchJSON('/api/performance-history');
+  const fields=['timestamp','uptimeSeconds','workingSetBytes','privateBytes',
+   'managedHeapBytes','gcCommittedBytes','totalAllocatedBytes',
+   'cpuPercentOneCore','allocationBytesPerSecond','gen0Collections',
+   'gen1Collections','gen2Collections','threadCount','handleCount',
+   'collectorCycleMeanMs','hardwareScanMeanMs','ipcSerializationMeanMs',
+   'ipcResponseMeanBytes','collectorCycles','ipcResponses'];
+  const cell=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const rows=[['process',...fields].map(cell).join(',')];
+  for(const [kind,samples] of [['desktop',data.desktop],['collector',data.collector]]){
+   if(!Array.isArray(samples))continue;
+   for(const sample of samples)
+    rows.push([kind,...fields.map(field=>sample[field])].map(cell).join(','));
+  }
+  const blob=new Blob([rows.join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='SensorDash-performance-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Performance history exported');
+ }catch(e){toast('Could not export performance history: '+e.message);}
 }
 async function loadDiagnostics(shouldRender=true){
  try {
@@ -583,6 +624,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
  const removeAlias=e.target.closest('[data-remove-alias]');
  if(removeAlias){removeAlias.closest('.alias-row').querySelector('[data-alias]').value='';saveSettings();return}
  const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
+ if(e.target.closest('#exportPerformance')){void exportPerformance();return;}
  if(e.target.closest('#refreshDiagnostics')){
   Promise.all([loadStatus(false),loadDiagnostics(false)]).then(()=>{if(S.view==='settings')render()});
   return;
