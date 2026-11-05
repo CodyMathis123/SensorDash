@@ -77,7 +77,10 @@ public sealed class PersistentFanProfiles
         double.IsFinite(p.HysteresisDegrees) && p.HysteresisDegrees is >=0 and <=10;
 
     public bool HasActiveProfiles { get { lock(_sync)return _approved.Count>0; } }
-    public bool HasCalibrationRunning { get {lock(_sync)return _calibration?.Running==true;} }
+    // Keep the fast hardware poll until firmware/profile restoration actually
+    // completes, even if the UI has already requested cancellation.
+    public bool HasCalibrationRunning { get {lock(_sync)return _calibration?.Running==true ||
+        !_calibrationFinalized;} }
     public void CancelCalibration(string reason)
     {
         lock(_sync)
@@ -264,7 +267,7 @@ public sealed class PersistentFanProfiles
                 return new {accepted=false,message="Confirm exclusive fan-control ownership."};
             var configured=settings.FanProfiles.FirstOrDefault(p=>p.Id==command.ProfileId);
             if(configured==null)return new {accepted=false,message="Save the fan profile first."};
-            if(_calibration?.Running==true &&
+            if(!_calibrationFinalized && _calibration!=null &&
                 configured.ChannelIds.Contains(_calibration.ChannelId))
                 return new {accepted=false,message="Complete or cancel the fan calibration before assigning this output to a live profile."};
             if(configured.CurveIds.Count==0 || configured.ChannelIds.Count==0)
