@@ -363,9 +363,14 @@ public sealed class PersistentFanProfiles
         lock(_sync)_latest=readouts;
     }
 
-    public void ReleaseBeforeClose(Dictionary<string,IControl> controls)
+    public void ReleaseBeforeClose(Dictionary<string,IControl> controls) =>
+        ReleaseBeforeClose(FanPwmChannelAdapter.Wrap(controls));
+
+    // The same hardware-free release path is exercised by resume regression
+    // tests using fake PWM outputs; no real Super I/O writes in CI.
+    internal void ReleaseBeforeClose(IReadOnlyDictionary<string,IFanPwmChannel> controls)
     {
-        _writer.ReleaseAll(FanPwmChannelAdapter.Wrap(controls));
+        _writer.ReleaseAll(controls);
         _planner.Clear();
         lock(_sync)
         {
