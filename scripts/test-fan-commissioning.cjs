@@ -142,10 +142,10 @@ async function click(action,duty){
  assert.deepEqual(Array.from(requests[2].payload.temperatureSensorIds),['temp1']);
  assert.equal(requests[2].payload.confirmExclusiveOwnership,true);
  const enabled=controller.render(S);
- assert.match(enabled,/Auto-identify PWM\/RPM pairing/);
- assert.match(enabled,/Calibrate full PWM\/RPM response/);
+ assert.match(enabled,/Verify fan and RPM pairing/);
+ assert.match(enabled,/Run full calibration/);
  assert.match(enabled,/Primary thermal guard/);
  assert.match(enabled,/PWM register/);
- assert.match(enabled,/before or after a temperature curve/);
+ assert.match(enabled,/Before or after a temperature curve/i);
  console.log('PASS: calibration before curves, elevated pairing verification, guarded response sweep, pump exclusion and PWM diagnostics');
 })().catch(e=>{console.error(e);process.exitCode=1});
