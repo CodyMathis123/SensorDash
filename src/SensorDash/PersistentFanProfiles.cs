@@ -13,6 +13,8 @@ public sealed class PersistentFanProfiles
     private readonly FanPwmFeedbackMonitor _feedback = new();
     private readonly Queue<FanRecoveryEvent> _pendingEvents = new();
     private FanAutoCalibration? _calibration;
+    private bool _calibrationFinalized=true;
+    private bool _standaloneCalibrationOwned;
     private readonly FanControlTrace? _trace;
     private DateTimeOffset? _lastTick;
     private DateTimeOffset? _postResumeRearmDue;
@@ -117,35 +119,41 @@ public sealed class PersistentFanProfiles
             {
                 if(_calibration?.Running!=true)
                     return new {accepted=false,message="No calibration is running."};
-                _calibration.Abort("Cancelled; approved fan curve restored.");
-                _trace?.Event("CALIBRATION","Cancelled by user; approved profile resumes.");
-                return new {accepted=true,message="Calibration cancelled; approved profile resumes on next poll."};
+                _calibration.Abort("Cancelled; restoring approved curve or firmware control.");
+                return new {accepted=true,message="Calibration cancellation queued; previous control will be restored."};
             }
             if(command.Action!="calibrate" || !command.ConfirmExclusiveOwnership)
-                return new {accepted=false,message="Explicit calibration authorization required."};
-            if(_calibration?.Running==true)
-                return new {accepted=false,message="Another calibration is active."};
-            var mapping=settings.FanChannelMappings?.FirstOrDefault(m=>m.ChannelId==command.ChannelId);
-            if(mapping?.Kind!="fan" || !mapping.VisuallyIdentified ||
-                string.IsNullOrWhiteSpace(mapping.RpmSensorId))
-                return new {accepted=false,message="Identify and physically confirm a fan with a matching RPM sensor first."};
-            if(_calibration?.Running==true && _calibration.ChannelId==command.ChannelId)
-                return new {accepted=false,message="Cancel automatic calibration before using manual override."};
+                return new {accepted=false,message="Explicit administrator authorization required."};
+            if(_calibration?.Running==true || !_calibrationFinalized)
+                return new {accepted=false,message="Finish the previous calibration before starting another."};
+            var map=settings.FanChannelMappings?.FirstOrDefault(m=>m.ChannelId==command.ChannelId);
+            if(map?.Kind!="fan" || string.IsNullOrWhiteSpace(map.RpmSensorId))
+                return new {accepted=false,message="Identify a fan output and its RPM sensor before testing it."};
+            if(command.CalibrationMode=="response" &&
+                (!map.VisuallyIdentified || !FanCommissioningRules.HasVerifiedResponse(map)))
+                return new {accepted=false,message="Verify the physical fan/RPM pairing at high duty before full calibration."};
+            if(command.CalibrationMode=="response" &&
+                (command.TemperatureSensorIds?.Length??0)<1)
+                return new {accepted=false,message="Select at least one temperature guard for the low-duty response sweep."};
             var profile=_approved.Values.FirstOrDefault(p=>p.ChannelIds.Contains(command.ChannelId));
-            if(profile==null)
-                return new {accepted=false,message="Automatic calibration requires a running, approved fan profile."};
             if(_overrides.ContainsKey(command.ChannelId))
-                return new {accepted=false,message="Return this fan to its automatic curve before calibration."};
+                return new {accepted=false,message="Return this fan to its curve before calibration."};
             var output=outputs.FirstOrDefault(o=>o.Id==command.ChannelId);
             if(output?.Writable!=true)
-                return new {accepted=false,message="The approved PWM output is not available."};
+                return new {accepted=false,message="The selected PWM output is no longer writable."};
             try
             {
-                _calibration=new FanAutoCalibration(command.ChannelId,mapping.RpmSensorId,
-                    Math.Max(profile.MinimumPercent,Math.Max(10,output.Minimum)),
-                    Math.Min(100,output.Maximum),DateTimeOffset.UtcNow);
-                _trace?.Event("CALIBRATION","Authorized bounded calibration on "+command.ChannelId);
-                return new {accepted=true,message="Automatic calibration authorized; monitor your fans until complete."};
+                var minDuty=Math.Max(output.Minimum,profile?.MinimumPercent??10);
+                _calibration=new FanAutoCalibration(command.ChannelId,map.RpmSensorId,
+                    minDuty,Math.Min(100,output.Maximum),DateTimeOffset.UtcNow,
+                    command.CalibrationMode,command.TemperatureSensorIds,
+                    command.TemperatureLimit);
+                _calibrationFinalized=false;
+                _standaloneCalibrationOwned=false;
+                _trace?.Event("CALIBRATION",
+                    "Authorized "+command.CalibrationMode+" PWM/RPM sweep on "+command.ChannelId+
+                    (profile==null?" before curve assignment":" with an approved profile"));
+                return new {accepted=true,message="Supervised calibration authorized; observe fans and temperatures until complete."};
             }
             catch(ArgumentException ex)
             {
