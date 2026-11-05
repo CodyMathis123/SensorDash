@@ -18,7 +18,10 @@ const nodes=new Map([
  ['fcLabel',{value:'Right radiator bank'}],
  ['fcKind',{value:'fan'}],
  ['fcRpm',{value:'tach1'}],
- ['fcVisual',{checked:false}]
+ ['fcVisual',{checked:false}],
+ ['fcGuardPrimary',{value:'temp1'}],
+ ['fcGuardSecondary',{value:''}],
+ ['fcGuardLimit',{value:'85'}]
 ]);
 const scope={
  WorkspaceLocks:{fan:()=>false},
@@ -39,7 +42,9 @@ const S={
  view:'curves',
  frame:{timestamp:new Date().toISOString()},
  sensors:[{id:'tach1',type:'Fan',name:'Radiator tach',device:'Mainboard',value:1100,
-  observedAt:new Date().toISOString()}],
+  observedAt:new Date().toISOString()},
+  {id:'temp1',type:'Temperature',name:'CPU package',device:'CPU',value:38,
+   observedAt:new Date().toISOString()}],
  settings:{fanChannelMappings:[{channelId:'channel1',label:'Right radiator bank',
   kind:'pump',rpmSensorId:'tach1',measurements:[],visuallyIdentified:false,verifiedAt:null}]},
  fanControl:{outputs:[{id:'channel1',name:'PWM 1',device:'Mainboard',
@@ -110,25 +115,36 @@ async function click(action,duty){
   page.includes('/fan-commissioning.js') &&
   backend.includes('FanCommissioningSelfTest.Run()'),
   'Commissioning must integrate into the existing dashboard and executable self-test');
- // An approved fan with physical identification can start a single
- // administrator-authorized sweep without separate per-step elevation.
- S.fanControl.persistent.profiles=[{
-   id:'p',channelIds:['channel1'],minimumPercent:10
- }];
- S.settings.fanChannelMappings[0].visuallyIdentified=true;
- await click('start-auto');
- assert.equal(requests.length,1,'Auto calibration requires exclusive-ownership acknowledgment');
+ // Fan/RPM identification must be available before a curve exists.
+ S.fanControl.persistent.profiles=[];
+ S.settings.fanChannelMappings[0].visuallyIdentified=false;
+ await click('start-identify');
+ assert.equal(requests.length,1,'Identification still requires ownership acknowledgment');
  nodes.get('fcExclusive').checked=true;
- await click('start-auto');
+ await click('start-identify');
  assert.equal(requests.length,2);
  assert.equal(requests[1].payload.action,'calibrate');
+ assert.equal(requests[1].payload.calibrationMode,'identify');
  assert.equal(requests[1].payload.channelId,'channel1');
- assert.equal(requests[1].payload.durationSeconds,240);
  assert.equal(requests[1].payload.confirmExclusiveOwnership,true);
+ assert.equal(requests[1].payload.durationSeconds,240);
+ // Once the high-duty response is physically verified, a guarded full
+ // calibration may run even without a configured or approved profile.
+ S.settings.fanChannelMappings[0].visuallyIdentified=true;
+ S.settings.fanChannelMappings[0].verifiedAt=new Date().toISOString();
+ S.settings.fanChannelMappings[0].measurements=[
+  {dutyPercent:70,rpm:700},{dutyPercent:85,rpm:1050},{dutyPercent:100,rpm:1600}];
+ await click('start-auto');
+ assert.equal(requests.length,3);
+ assert.equal(requests[2].payload.calibrationMode,'response');
+ assert.equal(requests[2].payload.temperatureLimit,85);
+ assert.deepEqual(Array.from(requests[2].payload.temperatureSensorIds),['temp1']);
+ assert.equal(requests[2].payload.confirmExclusiveOwnership,true);
  const enabled=controller.render(S);
- assert.match(enabled,/Start auto calibration/);
- assert.match(enabled,/Approved profile/);
- assert.match(enabled,/Apply for 5 minutes/);
+ assert.match(enabled,/Auto-identify PWM\/RPM pairing/);
+ assert.match(enabled,/Calibrate full PWM\/RPM response/);
+ assert.match(enabled,/Primary thermal guard/);
  assert.match(enabled,/PWM register/);
- console.log('PASS: consolidated fan control, one elevated auto-sweep, pump exclusion, calibration data validation and PWM feedback');
+ assert.match(enabled,/before or after a temperature curve/);
+ console.log('PASS: calibration before curves, elevated pairing verification, guarded response sweep, pump exclusion and PWM diagnostics');
 })().catch(e=>{console.error(e);process.exitCode=1});
