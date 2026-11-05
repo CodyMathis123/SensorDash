@@ -356,9 +356,9 @@ internal static class FanFeedbackCalibrationSelfTest
             // Full physical calibration must start at 100%, descend to 10%
             // regardless of the enabled profile's 30% minimum or its 100%
             // temperature demand. Only selected thermal guards may abort.
-            var verified=settings.FanChannelMappings.Single(m=>m.ChannelId=="pwm");
-            verified.VerifiedAt=now;
-            verified.Measurements=[
+            var verifiedMapping=settings.FanChannelMappings.Single(m=>m.ChannelId=="pwm");
+            verifiedMapping.VerifiedAt=now;
+            verifiedMapping.Measurements=[
                 new(){DutyPercent=70,Rpm=1400,ObservedAt=now},
                 new(){DutyPercent=85,Rpm=1700,ObservedAt=now},
                 new(){DutyPercent=100,Rpm=1980,ObservedAt=now}
