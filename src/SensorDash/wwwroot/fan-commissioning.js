@@ -117,31 +117,42 @@ const FanCommissioning=(()=>{
    '<span id="fcLiveRpm">RPM: —</span></div>'+
    '<div class="w-actions"><button class="btn secondary" data-commissioning="capture" '+
     (!isFan||!rpm?'disabled':'')+'>Capture current RPM</button><span class="note" id="fcCaptureHelp">'+
-   (rpm?'Requires matching active manual test and fresh, settled RPM':'Select and save an RPM sensor to record measurements')+
+   (rpm?'Requires a matching authorized manual test or override, fresh PWM readback and settled RPM':'Select and save an RPM sensor to record measurements')+
    '</span></div>'+
    '<div class="w-live-status">PWM register: <b id="fcLivePwm">'+
    (Number.isFinite(register?.value)?Number(register.value).toFixed(1)+'%':'—')+
    '</b> · Feedback check: '+esc(feedback?.state||'waiting')+'</div>'+
    '<div class="table-container"><table class="w-output-table"><thead><tr><th>Command</th><th>Observed tachometer</th><th>Recorded</th></tr></thead><tbody>'+
     sampleRows+'</tbody></table></div></div>'+
-   '<div><h3>4 · Automatic PWM/RPM calibration</h3>'+
-   '<p class="note">For a visually identified fan with an enabled profile, run a single bounded sweep from high to low duty, measuring PWM readback and settled RPM at each step. The scan stops if cooling demand rises, feedback fails, or RPM reaches zero. Only an approved fan output is touched.</p>'+
-   '<div class="w-actions"><button class="btn" data-commissioning="start-auto" '+
-   (!owner||!isFan||!map?.visuallyIdentified||!rpm||!output.writable||calibration?.state==='running'?'disabled':'')+
-   '>Start auto calibration</button>'+
-   (calibrationHere?.state==='running'?'<button class="btn secondary" data-commissioning="cancel-auto">Cancel and restore curve</button>':'')+
+   '<div><h3>4 · Calibration (before or after a temperature curve)</h3>'+
+   '<p class="note">First verify that this PWM output changes the correct tachometer. This identification sweep uses 100%, 85% and 70% only, so no fan curve is required. Watch the physical fan group throughout.</p>'+
+   '<div class="w-actions"><button class="btn" data-commissioning="start-identify" '+
+     (!identifyReady||calibration?.state==='running'?'disabled':'')+
+     '>Auto-identify PWM/RPM pairing</button></div>'+
+   '<p class="note">For a full lower-speed PWM/RPM response sweep, first save a verified high-duty pairing. Select the independent CPU/GPU temperature monitors that protect the cooled components; the scan aborts if data becomes stale, temperature rises sharply, or the selected limit is reached.</p>'+
+   '<div class="w-actions">'+
+     guardSelect('fcGuardPrimary','Primary thermal guard',guardDefaults.first,false)+
+     guardSelect('fcGuardSecondary','Additional thermal guard',guardDefaults.second,true)+
+     '<label>Maximum temperature (°C)<input type="number" id="fcGuardLimit" min="35" max="100" step="1" value="'+esc(guardDefaults.limit)+'"></label></div>'+
+   '<div class="w-actions"><button class="btn secondary" data-commissioning="start-auto" '+
+     (!responseReady||calibration?.state==='running'?'disabled':'')+
+     '>Calibrate full PWM/RPM response</button>'+
+   (calibrationHere?.state==='running'?
+      '<button class="btn secondary" data-commissioning="cancel-auto">Cancel and restore control</button>':'')+
    (calibrationHere?.state==='complete'?
-      '<button class="btn secondary" data-commissioning="save-auto">Save measured response</button>':'')+
+      '<button class="btn secondary" data-commissioning="save-auto">Save '+(calibrationHere.mode==='identify'?
+        'verified pairing':'RPM calibration')+'</button>':'')+
    '</div>'+
    '<p class="note" id="fcAutoStatus">'+esc(calibrationHere?.message||
-      (owner?'Ready when identification and RPM mapping are confirmed.':
-       'Enable an approved fan profile to calibrate below 70%.'))+'</p>'+
+      (verified?'Fan/RPM pairing verified. Full response calibration is optional.':
+       'Identify and verify the physical output and tach before sweeping low-duty PWM.'))+'</p>'+
    '<p class="note" id="fcAutoProgress">'+(calibrationHere?
       calibrationHere.completedSteps+' / '+calibrationHere.totalSteps+
-      ' measured points · '+calibrationHere.state:'')+'</p>'+
-   (calSamples.length?'<div class="table-container"><table><thead><tr><th>PWM</th><th>RPM</th><th>Measured</th></tr></thead><tbody>'+
-      autoRows+'</tbody></table></div>':'')+'</div>'+
-   '<div><h3>5 · Verify response</h3>'+
+      ' settled points · '+calibrationHere.state:'')+'</p>'+
+   (calSamples.length?'<div class="table-container"><table><thead><tr><th>PWM</th><th>Settled observed RPM</th><th>Measured</th></tr></thead><tbody>'+
+      autoRows+'</tbody></table></div>':'')+
+   '<p class="note">Calibration records the physical fan/PWM response only. It never rewrites the CPU or GPU temperature curves, and a shared hub tachometer does not prove every fan is spinning.</p></div>'+
+   '<div><h3>5 · Confirm physical pairing</h3>'+
    '<p class="note">Capture two different test speeds and confirm the intended fans respond. Enable automatic control separately.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcVisual"><span>I personally confirmed that this PWM output drives the named fan or fan bank, not a pump.</span></label>'+
    '<div class="w-actions"><button class="btn secondary" data-commissioning="confirm-identity" '+
