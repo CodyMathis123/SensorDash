@@ -302,7 +302,7 @@ internal static class FanFeedbackCalibrationSelfTest
                 }],
                 FanProfiles=[new FanProfileConfig{
                     Id="radiator",Name="Radiators",CurveIds=["cpu"],
-                    ChannelIds=["pwm"],MinimumPercent=10,
+                    ChannelIds=["pwm"],MinimumPercent=30,
                     ResponseSeconds=10
                 }],
                 FanChannelMappings=[new FanChannelMapping{
@@ -342,11 +342,52 @@ internal static class FanFeedbackCalibrationSelfTest
                 "high-duty identification moves to 85 percent after stable 100 percent RPM");
             profiles.Tick(channels,Frame(now.AddSeconds(22),85,1650,80),
                 now.AddSeconds(22),settings);
-            Check(fake.SoftwareValue>=99,
-                "high temperature demand aborts lower calibration duty and invokes failsafe");
+            Check(fake.SoftwareValue==85 && profiles.HasCalibrationRunning,
+                "live temperature curve demanding 100% must NOT interrupt calibration at 85%");
+            Check(CoolingEventRecorder.Accepted(profiles.RequestCalibration(
+                new FanCommand("cancel-calibration",ChannelId:"pwm"),
+                settings,outputs)),
+                "manual cancellation must remain possible during calibration");
+            profiles.Tick(channels,Frame(now.AddSeconds(23),85,1650,80),
+                now.AddSeconds(23),settings);
+            Check(fake.SoftwareValue>=99 && !profiles.HasCalibrationRunning,
+                "manual cancellation restores the approved live curve");
+
+            // Full physical calibration must start at 100%, descend to 10%
+            // regardless of the enabled profile's 30% minimum or its 100%
+            // temperature demand. Only selected thermal guards may abort.
+            var verified=settings.FanChannelMappings.Single(m=>m.ChannelId=="pwm");
+            verified.VerifiedAt=now;
+            verified.Measurements=[
+                new(){DutyPercent=70,Rpm=1400,ObservedAt=now},
+                new(){DutyPercent=85,Rpm=1700,ObservedAt=now},
+                new(){DutyPercent=100,Rpm=1980,ObservedAt=now}
+            ];
+            Check(CoolingEventRecorder.Accepted(profiles.RequestCalibration(
+                new FanCommand("calibrate",ChannelId:"pwm",
+                    CalibrationMode:"response",TemperatureSensorIds:["temp"],
+                    TemperatureLimit:85,ConfirmExclusiveOwnership:true),
+                settings,outputs)),
+                "verified fan full calibration must work while profile is active");
+            var run=System.Text.Json.JsonSerializer.Serialize(profiles.Snapshot(settings));
+            Check(run.Contains("\"totalSteps\":19"),
+                "live profile's 30% minimum must not truncate physical 10-100% sweep");
+            profiles.Tick(channels,Frame(now.AddSeconds(24),100,1980,80),
+                now.AddSeconds(24),settings);
+            for(var second=32;second<=44;second++)
+                profiles.Tick(channels,Frame(now.AddSeconds(second),100,1980,80),
+                    now.AddSeconds(second),settings);
+            profiles.Tick(channels,Frame(now.AddSeconds(45),100,1980,80),
+                now.AddSeconds(45),settings);
+            Check(fake.SoftwareValue==95 && profiles.HasCalibrationRunning,
+                "full calibration must descend despite live curve requesting 100%");
+            profiles.Tick(channels,Frame(now.AddSeconds(46),95,1860,90),
+                now.AddSeconds(46),settings);
+            Check(fake.SoftwareValue>=99 && !profiles.HasCalibrationRunning,
+                "selected thermal guard over limit must stop calibration and restore live curve");
             var snapshot=System.Text.Json.JsonSerializer.Serialize(profiles.Snapshot(settings));
-            Check(snapshot.Contains("aborted"),
-                "calibration abort visible in read-only runtime status");
+            Check(snapshot.Contains("aborted") && snapshot.Contains("90.0"),
+                "thermal-guard abort reason must be shown in read-only status");
             var pumpSettings=new DashboardSettings {
                 FanChannelMappings=[new FanChannelMapping{
                     ChannelId="pwm",Kind="pump",RpmSensorId="rpm",
