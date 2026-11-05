@@ -158,13 +158,13 @@ const h={
    curvesView.includes('Temperature curves'),
    'Fan control, identification and calibration share one workspace');
  assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
-   curvesView.indexOf('data-fan-fold="profiles"') <
-     curvesView.indexOf('data-fan-fold="calibration"') &&
    curvesView.indexOf('data-fan-fold="calibration"') <
      curvesView.indexOf('data-fan-fold="curves"') &&
+   curvesView.indexOf('data-fan-fold="curves"') <
+     curvesView.indexOf('data-fan-fold="profiles"') &&
    !curvesView.includes('data-fan-fold="manual"') &&
    !curvesView.includes('data-fan-fold="quick"'),
-   'Only the consolidated manual control/calibration section may appear');
+   'Physical fan calibration precedes temperature curves and profile association');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
