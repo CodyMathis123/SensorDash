@@ -138,6 +138,13 @@ app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
 app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("diagnostics"), ct));
+// Read-only, bounded performance history. Browser download never contains sensor readings,
+// settings, paths, tokens or device identifiers.
+app.MapGet("/api/performance-history", async (CancellationToken ct) =>
+{
+    var collector = await CollectorClient.AskAsync(new PipeCommand("performanceHistory"), ct);
+    return Results.Ok(new { desktop = ProcessTelemetry.History(), collector });
+});
 app.MapGet("/api/settings", async (CancellationToken ct) =>
     await ProxyAsync(new PipeCommand("settings"), ct));
 app.MapGet("/api/collection-groups", async (CancellationToken ct) =>
