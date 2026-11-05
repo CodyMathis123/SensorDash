@@ -7,7 +7,14 @@ internal sealed class FanAutoCalibration
 {
     private static readonly int[] IdentificationDuties = [100,85,70];
     private static readonly int[] ResponseDuties = [100,85,70,55,40,30,20,15,10];
-    internal const int MaximumSeconds = 240;
+    // Nine speeds can legitimately need 30-60 seconds each to settle.
+    // Never accept an unstable RPM solely to satisfy a short timeout.
+    internal const int MaximumSeconds = 600;
+    internal const int MaximumStepSeconds = 60;
+    internal const int MinimumSettleSeconds = 8;
+    internal const int MinimumStageSeconds = 20;
+    internal const int StableWindowSeconds = 12;
+    internal const int MinimumStableSamples = 8;
     private readonly List<FanCalibrationPoint> _measurements = [];
     private readonly List<(DateTimeOffset Time,double Rpm)> _recentRpm = [];
     private readonly Dictionary<string,double> _thermalBaseline = new(StringComparer.Ordinal);
@@ -16,6 +23,8 @@ internal sealed class FanAutoCalibration
     private readonly int[] _duties;
     private DateTimeOffset _stepStarted;
     private DateTimeOffset _lastRpmObserved;
+    private double? _observedRpm;
+    private string _stability = "waiting";
     private int _index;
 
     internal string ChannelId { get; }
@@ -30,6 +39,9 @@ internal sealed class FanAutoCalibration
     internal int StepCount => _duties.Length;
     internal int CompletedSteps => _index;
     internal int CurrentDuty => _duties[Math.Min(_index, _duties.Length-1)];
+    internal double? ObservedRpm => _observedRpm;
+    internal string Stability => _stability;
+    internal int StableSampleCount => _recentRpm.Count;
     internal IReadOnlyList<FanCalibrationPoint> Measurements => _measurements;
     internal object Snapshot() => new
     {
@@ -37,6 +49,9 @@ internal sealed class FanAutoCalibration
         state=State,message=Message,startedAt=StartedAt,
         expiresAt=ExpiresAt,currentDuty=CurrentDuty,
         completedSteps=CompletedSteps,totalSteps=StepCount,
+        observedRpm=_observedRpm,stability=_stability,
+        stableSampleCount=_recentRpm.Count,
+        requiredStableSamples=MinimumStableSamples,
         measurements=_measurements.ToArray()
     };
 
@@ -72,7 +87,9 @@ internal sealed class FanAutoCalibration
         _stepStarted=now;
         _lastRpmObserved=default;
         _recentRpm.Clear();
-        Message="Settling at "+CurrentDuty+"% PWM.";
+        _observedRpm=null;
+        _stability="settling";
+        Message="Applying "+CurrentDuty+"% fan speed; waiting for the fan to settle.";
     }
 
     private static double? Fresh(SensorFrame frame,string id,string kind,
@@ -111,71 +128,122 @@ internal sealed class FanAutoCalibration
         return true;
     }
 
-    // Three successive fresh tach samples must be stable after a settle
-    // period, and the independent Super I/O readback must agree with the duty.
+    // A step is accepted only after:
+    // - a minimum spin-up delay (no early readings are counted),
+    // - >= 8 DISTINCT tachometer observations spanning >= 10 seconds,
+    // - a bounded RPM range AND no meaningful rising/falling trend.
+    // A missed sample or register mismatch invalidates that stability window.
+    // Each stage can wait up to a minute; never save a speculative RPM.
     internal bool Observe(SensorFrame frame,DateTimeOffset now)
     {
         if(!Running || NeedsApply)return false;
         if(now>=ExpiresAt)
         {
-            Abort("Calibration timed out; restoring prior control.");
+            Abort("Calibration timed out before all speeds were stable; the fan curve has been restored.");
             return true;
         }
         if(!GuardsSafe(frame,now))return true;
-        if((now-_stepStarted).TotalSeconds<6)return false;
+        var stepSeconds=(now-_stepStarted).TotalSeconds;
         var duty=Fresh(frame,ChannelId,"Control",now);
+        var tach=frame.Sensors.FirstOrDefault(s=>s.Id==RpmSensorId && s.Type=="Fan");
         var rpm=Fresh(frame,RpmSensorId,"Fan",now);
         if(rpm is <=0)
         {
-            Abort("Zero RPM observed; calibration stopped immediately.");
+            Abort("Fan tachometer reported zero RPM; calibration stopped and previous control restored.");
             return true;
         }
         if(duty is not { } observedDuty || Math.Abs(observedDuty-CurrentDuty)>4 ||
-            rpm is not { } measured)
+            rpm is not { } measured || tach?.ObservedAt is not { } observedAt)
         {
-            if((now-_stepStarted).TotalSeconds>=22)
-            {
-                Abort("PWM/RPM feedback did not match or become available; restoring control.");
-                return true;
-            }
             _recentRpm.Clear();
-            return false;
+            _stability="feedback-unavailable";
+            Message="Waiting for matching, fresh fan-speed and PWM readings at "+
+                CurrentDuty+"%.";
         }
-        if(now>_lastRpmObserved)
+        else
         {
-            _lastRpmObserved=now;
-            _recentRpm.Add((now,measured));
-            if(_recentRpm.Count>4)_recentRpm.RemoveAt(0);
-        }
-        if(_recentRpm.Count>=3)
-        {
-            var values=_recentRpm.TakeLast(3).Select(p=>p.Rpm).ToArray();
-            var mean=values.Average();
-            if(values.Max()-values.Min()<=Math.Max(100,mean*0.08))
+            _observedRpm=measured;
+            if(stepSeconds<MinimumSettleSeconds)
             {
-                _measurements.Add(new FanCalibrationPoint{
-                    DutyPercent=CurrentDuty,Rpm=mean,ObservedAt=now
-                });
-                _index++;
-                _recentRpm.Clear();
-                if(_index==_duties.Length)
+                _stability="settling";
+                Message=$"Waiting for {CurrentDuty}% to settle: {measured:0} RPM "+
+                    $"({Math.Max(0,MinimumSettleSeconds-stepSeconds):0}s initial delay remaining).";
+            }
+            else
+            {
+                // Distinct hardware observations, not repeated UI/collector polls.
+                if(observedAt>_lastRpmObserved)
                 {
-                    State="complete";
-                    Message=Mode=="identify"
-                        ?"High-duty pairing measured. Confirm the physical fans and save the mapping."
-                        :"PWM/RPM response measured. Save it before assigning temperature curves.";
+                    _lastRpmObserved=observedAt;
+                    _recentRpm.Add((observedAt,measured));
+                    _recentRpm.RemoveAll(p=>
+                        (observedAt-p.Time).TotalSeconds>StableWindowSeconds+2);
+                }
+                var window=_recentRpm.Count>=2
+                    ?(_recentRpm[^1].Time-_recentRpm[0].Time).TotalSeconds:0;
+                if(_recentRpm.Count>=MinimumStableSamples &&
+                    window>=StableWindowSeconds-2 && stepSeconds>=MinimumStageSeconds)
+                {
+                    var values=_recentRpm.Select(p=>p.Rpm).ToArray();
+                    var mean=values.Average();
+                    var rpmRange=values.Max()-values.Min();
+                    var times=_recentRpm.Select(p=>
+                        (p.Time-_recentRpm[0].Time).TotalSeconds).ToArray();
+                    var meanTime=times.Average();
+                    var denominator=times.Sum(t=>(t-meanTime)*(t-meanTime));
+                    var slope=denominator<=0?0:
+                        times.Select((t,i)=>(t-meanTime)*(values[i]-mean)).Sum()/
+                            denominator;
+                    var halfway=values.Length/2;
+                    var halfDrift=Math.Abs(values.Take(halfway).Average()-
+                        values.Skip(halfway).Average());
+                    var maxRange=Math.Max(45,mean*0.035);
+                    var maxSlope=Math.Max(2,mean*0.0015);
+                    var maxHalfDrift=Math.Max(24,mean*0.015);
+                    var stable=rpmRange<=maxRange &&
+                        Math.Abs(slope)<=maxSlope && halfDrift<=maxHalfDrift;
+                    if(stable)
+                    {
+                        _stability="stable";
+                        _measurements.Add(new FanCalibrationPoint{
+                            DutyPercent=CurrentDuty,Rpm=mean,ObservedAt=now
+                        });
+                        _index++;
+                        _recentRpm.Clear();
+                        if(_index==_duties.Length)
+                        {
+                            State="complete";
+                            Message=Mode=="identify"
+                                ?"Fan pairing measured at stable speeds. Confirm the physical fans and save."
+                                :"Full fan-speed calibration complete. Review and save the measured RPM values.";
+                        }
+                        else
+                        {
+                            NeedsApply=true;
+                            Message=$"Saved settled {mean:0} RPM. Next speed: {CurrentDuty}%.";
+                        }
+                        return true;
+                    }
+                    _stability=Math.Abs(slope)>maxSlope?
+                        slope>0?"rising":"falling":"unstable";
+                    Message=_stability=="rising"
+                        ?$"At {CurrentDuty}%: {measured:0} RPM and still increasing; waiting for stable speed."
+                        :_stability=="falling"
+                        ?$"At {CurrentDuty}%: {measured:0} RPM and still decreasing; waiting for stable speed."
+                        :$"At {CurrentDuty}%: {measured:0} RPM fluctuating; waiting for stable readings.";
                 }
                 else
                 {
-                    NeedsApply=true;
-                    Message="Moving to "+CurrentDuty+"% PWM.";
+                    _stability="collecting";
+                    Message=$"At {CurrentDuty}%: {measured:0} RPM. "+
+                        $"Checking stability ({_recentRpm.Count} readings over {window:0}s).";
                 }
-                return true;
             }
         }
-        if((now-_stepStarted).TotalSeconds>=22)
+        if(stepSeconds>=MaximumStepSeconds)
         {
-            Abort("RPM failed to settle within 22 seconds; restoring control.");
+            Abort($"Fan speed did not stabilize at {CurrentDuty}% within "+
+                $"{MaximumStepSeconds} seconds. No RPM estimate was saved for this speed; previous control restored.");
             return true;
         }
         return false;
