@@ -38,7 +38,7 @@ const SDWorkspace = (() => {
  const value=(s)=>s?.value==null?'—':Number(s.value).toLocaleString(undefined,{maximumFractionDigits:s.type==='Fan'?0:1});
  const unit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Voltage:'V',Flow:'L/h',Clock:'MHz',Throughput:'B/s',Data:'GiB'}[t]||'');
  const defaultSensors=(S,group,n=4)=>S.sensors.filter(s=>
-     s.value!=null &&(group==='all'||s.type===group)
+     s.value!=null && !isHidden(S,s) &&(group==='all'||s.type===group)
      ).slice(0,n);
  const isHidden=(S,s)=>{
   const cfg=S.settings||{};
@@ -91,7 +91,7 @@ const SDWorkspace = (() => {
   const current=new Set(assigned);
   return '<div class="w-chips">'+assigned.map(id=>{
    const reading=S.byId.get(id);
-   return '<span class="w-chip">'+safe(S.settings?.aliases?.[id]||reading?.name||id)+
+   return '<span class="w-chip">'+safe((S.settings?.aliases?.[id]||reading?.name||id)+(reading&&isHidden(S,reading)?' [Hidden]':''))+
     (reading?'<b data-live-reading="'+attr(id)+'" data-live-format="unit" data-live-unit="'+attr(unit(reading.type))+'">'+
       value(reading)+' '+unit(reading.type)+'</b>':'')+
     button('remove-sensor','×','data-scope="'+attr(scope)+'" data-sensor="'+attr(id)+'"')+'</span>';
@@ -603,7 +603,7 @@ const SDWorkspace = (() => {
  };
  const starterProfiles=async(action,S,h)=>{
    const cfg=S.settings;
-   const candidates=S.sensors.filter(s=>s.type==='Temperature');
+   const candidates=S.sensors.filter(s=>s.type==='Temperature'&&!isHidden(S,s));
    const pick=type=>{
      const qualified=candidates.filter(s=>type==='cpu'?/cpu|processor|ryzen/i.test(s.device+' '+s.deviceType):
        type==='gpu'?/gpu|radeon|geforce/i.test(s.device+' '+s.deviceType):
@@ -1048,11 +1048,11 @@ const SDWorkspace = (() => {
      }
      if(action==='add-tray'){
        const candidate=S.sensors.find(s=>s.value!=null&&!isHidden(S,s)&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
-       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors[0]?.id||'',label:'',color:'#62d5ce',decimals:0});
+       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',decimals:0});
      }
      if(action==='remove-tray')cfg.trayWidgets=cfg.trayWidgets.filter(w=>w.id!==id);
      if(action==='add-curve'){
-       cfg.simulatedFanCurves.push({id:uid(),name:'New simulated curve',sourceSensorId:S.sensors.find(s=>s.type==='Temperature')?.id||'',
+       cfg.simulatedFanCurves.push({id:uid(),name:'New simulated curve',sourceSensorId:S.sensors.find(s=>s.type==='Temperature'&&!isHidden(S,s))?.id||'',
          outputSensorId:'',maxSampleAgeSeconds:30,
          points:[{temperature:30,percent:25},{temperature:50,percent:55},{temperature:75,percent:100}]});
      }
