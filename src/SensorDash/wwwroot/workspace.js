@@ -240,11 +240,27 @@ const SDWorkspace = (() => {
       '<circle class="w-curve-point-dot" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
        '" r="4.5" fill="#60d6cf"/>'+
       '</g>').join('');
-  const marker=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent)
-    ?'<circle cx="'+x(activeTemperature)+'" cy="'+y(activePercent)+'" r="6" fill="#f2bd6d" stroke="#132535" stroke-width="2"></circle>'+
-     '<line x1="'+x(activeTemperature)+'" y1="20" x2="'+x(activeTemperature)+'" y2="180" stroke="#f2bd6d" stroke-dasharray="4 4"/>':'';
-  return '<div class="w-curve-graph">'+
-    '<svg class="w-curve-plot" viewBox="0 0 460 205" role="group" aria-label="Fan speed by temperature; hover or focus a point to see its values">'+
+  const current=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent);
+  const currentLabel=current
+    ?activeTemperature.toFixed(1)+'°C → '+activePercent.toFixed(1)+'% PWM'
+    :'—';
+  // Always create the marker so changing sensor values can move it without
+  // rebuilding the entire SVG (which would steal focus/hover in the editor).
+  const marker='<g class="w-curve-current-marker" data-curve-current-marker tabindex="0" '+
+    'role="img" aria-label="Current temperature and calculated PWM"'+
+    (current?'':' style="display:none"')+'>'+
+    '<line data-curve-current-line x1="'+(current?x(activeTemperature):0)+
+      '" x2="'+(current?x(activeTemperature):0)+'" y1="20" y2="180" '+
+      'stroke="#f2bd6d" stroke-dasharray="4 4"/>'+
+    '<circle data-curve-current-dot cx="'+(current?x(activeTemperature):0)+
+      '" cy="'+(current?y(activePercent):0)+'" r="6" fill="#f2bd6d" '+
+      'stroke="#132535" stroke-width="2"/>'+
+    '<title data-curve-current-title>Current: '+currentLabel+'</title></g>';
+  return '<div class="w-curve-graph" data-curve-graph data-curve-axis-min="'+lo+
+    '" data-curve-axis-max="'+hi+'">'+
+    '<div class="w-curve-current-label"><span class="w-curve-current-swatch" aria-hidden="true"></span>'+
+    'Current: <strong data-curve-current-values>'+currentLabel+'</strong></div>'+
+    '<svg class="w-curve-plot" viewBox="0 0 460 205" role="group" aria-label="Fan speed by temperature; yellow marker indicates current temperature and calculated PWM">'+
     grid+'<line x1="44" y1="174" x2="436" y2="174" stroke="#7890a0"/>'+
     '<text x="44" y="194" fill="#98b2c4" font-size="11">'+lo+'°C</text>'+
     '<text x="436" y="194" text-anchor="end" fill="#98b2c4" font-size="11">'+hi+'°C</text>'+
@@ -1121,6 +1137,44 @@ const SDWorkspace = (() => {
  };
  const paintSimulation=(S)=>{
    const readings=S.simulation?.results||[];
+   // Update the live yellow marker in place every refresh, so its visible
+   // label cannot become stale while the simulation input changes.
+   document.querySelectorAll('[data-curve-preview]').forEach(preview=>{
+     const id=preview.dataset.curvePreview;
+     const sample=readings.find(r=>r.id===id);
+     const graph=preview.querySelector('[data-curve-graph]');
+     if(!graph)return;
+     const temperature=sample?.inputTemperature;
+     const percent=sample?.targetPercent;
+     const available=Number.isFinite(temperature)&&Number.isFinite(percent);
+     const label=graph.querySelector('[data-curve-current-values]');
+     const value=available?temperature.toFixed(1)+'°C → '+
+       percent.toFixed(1)+'% PWM':'—';
+     if(label&&label.textContent!==value)label.textContent=value;
+     const marker=graph.querySelector('[data-curve-current-marker]');
+     if(!marker)return;
+     marker.style.display=available?'':'none';
+     if(!available)return;
+     const min=Number(graph.dataset.curveAxisMin);
+     const max=Number(graph.dataset.curveAxisMax);
+     if(!(max>min))return;
+     const x=44+(temperature-min)/(max-min)*392;
+     const y=174-percent/100*148;
+     const line=marker.querySelector('[data-curve-current-line]');
+     const dot=marker.querySelector('[data-curve-current-dot]');
+     if(line){
+       line.setAttribute('x1',x.toFixed(1));
+       line.setAttribute('x2',x.toFixed(1));
+     }
+     if(dot){
+       dot.setAttribute('cx',x.toFixed(1));
+       dot.setAttribute('cy',y.toFixed(1));
+     }
+     marker.setAttribute('aria-label','Current: '+value);
+     const title=marker.querySelector('[data-curve-current-title]');
+     if(title&&title.textContent!=='Current: '+value)
+       title.textContent='Current: '+value;
+   });
    document.querySelectorAll('[data-sim]').forEach(el=>{
      const [id,key]=el.dataset.sim.split(':');const row=readings.find(r=>r.id===id);
      const out=key==='input'?(row?.inputTemperature==null?'—':row.inputTemperature.toFixed(1)+' °C'):
