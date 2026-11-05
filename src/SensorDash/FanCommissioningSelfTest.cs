@@ -24,10 +24,20 @@ internal static class FanCommissioningSelfTest
         Check(items.Count==1 && items[0].Label=="Radiator A" &&
             items[0].VerifiedAt.HasValue,"normalization and deduplication");
 
-        fan.Measurements.Add(new FanCalibrationPoint{DutyPercent=30,Rpm=100,ObservedAt=now});
+        fan.Measurements.Add(new FanCalibrationPoint{DutyPercent=5,Rpm=100,ObservedAt=now});
         fan.Measurements.Add(new FanCalibrationPoint{DutyPercent=100,Rpm=double.NaN,ObservedAt=now});
         var cleaned=FanCommissioningRules.Normalize([fan])[0];
         Check(cleaned.Measurements.Count==3,"discard unsafe/invalid samples");
+        var lowDuty=new FanChannelMapping{
+            ChannelId="low",Kind="fan",RpmSensorId="rpm",VisuallyIdentified=true,
+            Measurements=[
+                new(){DutyPercent=10,Rpm=490,ObservedAt=now},
+                new(){DutyPercent=40,Rpm=1050,ObservedAt=now},
+                new(){DutyPercent=100,Rpm=1980,ObservedAt=now}
+            ]
+        };
+        Check(FanCommissioningRules.HasVerifiedResponse(lowDuty),
+            "approved low-duty PWM/RPM calibration may be verified");
 
         var pump=new FanChannelMapping{
             ChannelId="pump",Kind="pump",RpmSensorId="rpm",
