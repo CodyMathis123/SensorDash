@@ -141,7 +141,8 @@ public sealed class PersistentFanProfiles
             if(map?.Kind!="fan" || string.IsNullOrWhiteSpace(map.RpmSensorId))
                 return new {accepted=false,message="Identify a fan output and its RPM sensor before testing it."};
             if(command.CalibrationMode=="response" &&
-                (!map.VisuallyIdentified || !FanCommissioningRules.HasVerifiedResponse(map)))
+                (!map.VisuallyIdentified || !map.VerifiedAt.HasValue ||
+                    !FanCommissioningRules.HasVerifiedResponse(map)))
                 return new {accepted=false,message="Verify the physical fan/RPM pairing at high duty before full calibration."};
             if(command.CalibrationMode=="response" &&
                 (command.TemperatureSensorIds?.Length??0)<1)
