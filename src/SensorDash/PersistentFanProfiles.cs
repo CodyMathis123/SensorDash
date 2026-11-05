@@ -458,7 +458,9 @@ public sealed class PersistentFanProfiles
                     settings.FanChannelMappings.Any(m=>m.ChannelId==id && m.Kind=="fan"))
                 {
                     (bool Rearm,bool Recovered,string Message) check;
-                    lock(_sync)check=_feedback.Check(id,_writer.LastDuty(id),frame,now);
+                    lock(_sync)check=_feedback.Check(id,_writer.LastDuty(id),frame,now,
+                        settings.FanChannelMappings.FirstOrDefault(m=>
+                            m.ChannelId==id && m.Kind=="fan"));
                     if(check.Message.Length>0)
                     {
                         _trace?.Event(check.Rearm?"PWM-DRIFT":
