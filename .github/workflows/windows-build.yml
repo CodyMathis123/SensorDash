@@ -270,7 +270,13 @@ jobs:
           $msis = @(Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse)
           if ($msis.Count -ne 1) { throw "Expected exactly one MSI; found $($msis.Count)" }
           $msi = $msis[0]
-          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation' -and $msi.Name -notmatch '-workstation-gc\.msi
+          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation' -and !$msi.Name.EndsWith('-workstation-gc.msi')) {
+            throw 'Experimental MSI must be clearly labeled workstation-gc.'
+          }
+          if ($env:SENSORDASH_GC_PROFILE -eq 'baseline' -and $msi.Name.EndsWith('-workstation-gc.msi')) {
+            throw 'Normal MSI must not be labeled as a GC experiment.'
+          }
+          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes); GC profile: $env:SENSORDASH_GC_PROFILE"
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
         run: |
