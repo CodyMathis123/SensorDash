@@ -146,6 +146,6 @@ async function click(action,duty){
  assert.match(enabled,/Run full calibration/);
  assert.match(enabled,/Primary thermal guard/);
  assert.match(enabled,/PWM register/);
- assert.match(enabled,/Before or after a temperature curve/i);
+ assert.match(enabled,/these measurements belong to the physical fan output/i);
  console.log('PASS: calibration before curves, elevated pairing verification, guarded response sweep, pump exclusion and PWM diagnostics');
 })().catch(e=>{console.error(e);process.exitCode=1});
