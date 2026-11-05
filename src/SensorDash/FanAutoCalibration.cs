@@ -246,7 +246,13 @@ internal sealed class FanAutoCalibration
         else
         {
             _observedRpm=measured;
-            if(measured<=0)
+            if(measured<0)
+            {
+                Abort("Fan tachometer returned an invalid negative RPM value at "+
+                    CurrentDuty+"%; previous control restored.");
+                return true;
+            }
+            if(measured==0)
             {
                 _recentRpm.Clear();
                 // Zero at high duty is a fault, not an operating cutoff.
