@@ -55,9 +55,16 @@ internal static class FanFeedbackCalibrationSelfTest
         Check(monitor.Snapshot()["pwm"].State=="unavailable",
             "missing feedback is unknown, not a good PWM match");
 
-        var sweep=new FanAutoCalibration("pwm","rpm",10,100,now);
+        var sweep=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
         Check(sweep.StepCount>=7 && sweep.CurrentDuty==100,
             "bounded auto sweep should start high and include approved minimum");
+        sweep.MarkApplied(now);
+        Check(!sweep.GuardsSafe(Frame(now,10,490,95),now) &&
+            sweep.State=="aborted",
+            "temperature guard must abort a low-duty sweep before commanding hardware");
+        sweep=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
         sweep.MarkApplied(now);
         Check(!sweep.Observe(Frame(now.AddSeconds(2),100,1960),now.AddSeconds(2)),
             "no calibration samples before settling time");
