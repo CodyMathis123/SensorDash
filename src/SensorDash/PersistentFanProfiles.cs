@@ -10,6 +10,12 @@ public sealed class PersistentFanProfiles
     private readonly FanPwmWriter _writer = new();
     private readonly FanControlTrace? _trace;
     private DateTimeOffset? _lastTick;
+    private DateTimeOffset? _postResumeRearmDue;
+    // The first takeover immediately after resume can race the motherboard's
+    // Super I/O initialization. Reissue the *same approved* duty once after
+    // the hardware settles, without starting new channels or changing curves.
+    internal void SchedulePostResumeRearm(DateTimeOffset reopenedAt) =>
+        _postResumeRearmDue = reopenedAt.AddSeconds(20);
     // Admin requests enqueue changes. Only the collection thread mutates the evaluator and writer.
     private readonly HashSet<string> _pendingReleases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingProfileResets = new(StringComparer.Ordinal);
@@ -253,6 +259,16 @@ public sealed class PersistentFanProfiles
         var previouslyApproved=profiles.SelectMany(p=>p.ChannelIds)
             .Distinct(StringComparer.Ordinal).ToArray();
         var previousTick=_lastTick;
+        if (profiles.Length == 0) _postResumeRearmDue = null;
+        if (previousTick.HasValue && _postResumeRearmDue is { } due && now >= due
+            && profiles.Length > 0)
+        {
+            _postResumeRearmDue = null;
+            _writer.ForceRearm(previouslyApproved);
+            _trace?.Event("POST-RESUME-REARM",
+                "Delayed second takeover after hardware reopen; retrying approved PWM outputs: "
+                + string.Join(",", previouslyApproved), now);
+        }
         if(FanResumePolicy.NeedsRearm(previousTick,now,profiles.Length>0))
         {
             _trace?.ResumeGap(now-previousTick!.Value,previouslyApproved,now);
@@ -308,7 +324,7 @@ public sealed class PersistentFanProfiles
                 {
                     problems.Add(id+" missing");
                     _trace?.Observe(profile.Id,id,"missing",demand.Percent,null,false,
-                        null,null,now);
+                        null,null,null,now);
                     continue;
                 }
                 var error=_writer.Apply(id,channel,applied,
@@ -323,10 +339,19 @@ public sealed class PersistentFanProfiles
                         s.ObservedAt.HasValue &&
                         Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
                         s.Value is double v && double.IsFinite(v));
+                    // Distinct from IControl.SoftwareValue (command-side cache):
+                    // the Control sensor reports the last Super I/O register
+                    // readback from hardware.Update() on this collection tick.
+                    // It is sampled before this tick's PWM write.
+                    var registerDuty=frame.Sensors.FirstOrDefault(s=>
+                        s.Id==id && s.Type=="Control" &&
+                        s.ObservedAt.HasValue &&
+                        Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
+                        s.Value is double v && double.IsFinite(v))?.Value;
                     _trace.Observe(profile.Id,id,error!=null?"degraded":
                         demand.Failsafe?"failsafe":manual!=null?"override":"running",applied.Percent,
                         _writer.LastDuty(id),channel.IsSoftwareMode,
-                        mapped?.RpmSensorId,reading?.Value,now);
+                        registerDuty,mapped?.RpmSensorId,reading?.Value,now);
                 }
             }
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
@@ -338,9 +363,14 @@ public sealed class PersistentFanProfiles
         lock(_sync)_latest=readouts;
     }
 
-    public void ReleaseBeforeClose(Dictionary<string,IControl> controls)
+    public void ReleaseBeforeClose(Dictionary<string,IControl> controls) =>
+        ReleaseBeforeClose(FanPwmChannelAdapter.Wrap(controls));
+
+    // The same hardware-free release path is exercised by resume regression
+    // tests using fake PWM outputs; no real Super I/O writes in CI.
+    internal void ReleaseBeforeClose(IReadOnlyDictionary<string,IFanPwmChannel> controls)
     {
-        _writer.ReleaseAll(FanPwmChannelAdapter.Wrap(controls));
+        _writer.ReleaseAll(controls);
         _planner.Clear();
         lock(_sync)
         {
@@ -348,6 +378,7 @@ public sealed class PersistentFanProfiles
             _overrides.Clear();
         }
         _lastTick=null;
+        _postResumeRearmDue=null;
         // Persistent approval survives clean shutdown; firmware restore is best-effort.
         // A process crash cannot invoke a software recovery callback.
     }
