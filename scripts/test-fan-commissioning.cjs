@@ -168,7 +168,7 @@ async function click(action,duty){
   ]
  };
  const during=controller.render(S);
- assert.match(during,/Current run · 3 measured speeds/);
+ assert.match(during,/Current run · 3 settled running speeds/);
  assert.match(during,/CPU package: 38.5°C/);
  await click('save-auto');
  const saved=requests.at(-1);
@@ -180,7 +180,7 @@ async function click(action,duty){
  assert.match(afterRestart,/Saved calibration/);
  assert.match(afterRestart,/CPU package: 38.5°C/,
   'Saved RPM and guard-temperature observations must remain visible after session ends');
- assert.doesNotMatch(afterRestart,/Current run · 3 measured speeds/);
+ assert.doesNotMatch(afterRestart,/Current run · 3 settled running speeds/);
  S.settings.aliases={temp1:'My CPU Guard'};
  let aliased=controller.render(S);
  assert.match(aliased,/My CPU Guard: 38.5°C/,
