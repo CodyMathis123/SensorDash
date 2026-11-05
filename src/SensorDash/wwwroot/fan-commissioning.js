@@ -76,11 +76,11 @@ const FanCommissioning=(()=>{
    '<tr><td>'+p.dutyPercent+'% PWM</td><td>'+Number(p.rpm).toFixed(0)+' RPM</td><td>'+
    esc(new Date(p.observedAt).toLocaleString())+'</td></tr>').join(''):
    '<tr><td colspan="3">No verified RPM measurements yet</td></tr>';
-  const readOnly=owner?'This channel belongs to an enabled profile. Stop the profile before a commissioning test.':'';
-  return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan output commissioning</h2>'+
-   '<p>Identify and test your fans</p></div>'+
-   '<span class="pill '+(verified?'':'warn')+'">'+(verified?'Response verified':'Unverified')+'</span></div>'+
-   '<div class="help">These are guided, time-limited observations — not automatic fan or pump detection. Never test an essential pump channel. Do not depend on SensorDash to recover from a crash or power loss.</div>'+
+  const readOnly=owner?'An active profile owns this header. Short standalone manual tests are disabled, but guarded response calibration remains available.':'';
+  return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan control & calibration</h2>'+
+   '<p>Identify the physical fan and tachometer before configuring temperature curves</p></div>'+
+   '<span class="pill '+(verified?'':'warn')+'">'+(verified?(observations.length>=7?'Full RPM response saved':'PWM/RPM pairing verified'):'Unverified pairing')+'</span></div>'+
+   '<div class="help">Calibration belongs to the physical PWM header, not a CPU/GPU curve. The first sweep identifies its tachometer; the optional full sweep builds a PWM-to-RPM table. Both require local administrator authorization and supervision. Never test a pump.</div>'+
    '<div class="w-actions"><label>1 · Physical PWM output<select id="fcChannel">'+
    outputs.map(o=>choice(o.id,o.device+' / '+o.name+' ['+o.id+']',selected)).join('')+
    '</select></label><label>Type of connected equipment<select id="fcKind">'+
@@ -153,13 +153,13 @@ const FanCommissioning=(()=>{
       autoRows+'</tbody></table></div>':'')+
    '<p class="note">Calibration records the physical fan/PWM response only. It never rewrites the CPU or GPU temperature curves, and a shared hub tachometer does not prove every fan is spinning.</p></div>'+
    '<div><h3>5 · Confirm physical pairing</h3>'+
-   '<p class="note">Capture two different test speeds and confirm the intended fans respond. Enable automatic control separately.</p>'+
+   '<p class="note">Confirm the correct physical fan bank actually moved during testing. RPM response alone cannot establish the wiring, especially for a shared PWM hub.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcVisual"><span>I personally confirmed that this PWM output drives the named fan or fan bank, not a pump.</span></label>'+
    '<div class="w-actions"><button class="btn secondary" data-commissioning="confirm-identity" '+
    (!isFan?'disabled':'')+'>Confirm physical fan identity</button>'+
    '<button class="btn" data-commissioning="verify" '+(!isFan?'disabled':'')+
    '>Verify mapping</button><span class="note">'+(verified?'Last verified '+esc(new Date(map.verifiedAt).toLocaleString()):
-    'Not verified · no operating minimum has been established')+'</span></div></div></div></section>';
+    'Unverified physical fan/RPM pairing')+'</span></div></div></div></section>';
  };
  const paint=S=>{
   if(S.view!=='curves'||!byId('fcStatus'))return;
