@@ -82,8 +82,14 @@ internal static class FanFeedbackCalibrationSelfTest
 
         var sweep=new FanAutoCalibration("pwm","rpm",10,100,now,
             "response",["temp"],85);
-        Check(sweep.StepCount>=7 && sweep.CurrentDuty==100,
-            "bounded auto sweep should start high and include approved minimum");
+        Check(sweep.StepCount==19 && sweep.CurrentDuty==100 &&
+            sweep.ExpiresAt==now.AddSeconds(1500),
+            "full response calibration must cover 100 through 10 in 5 percent steps with a 25-minute cap");
+        Check(new FanAutoCalibration("pwm","rpm",70,100,now).StepCount==3,
+            "high-duty identification remains a short separate three-point test");
+        Check(new FanAutoCalibration("pwm","rpm",30,100,now,
+            "response",["temp"],85).StepCount==15,
+            "response sweep never tests below the selected channel minimum");
         sweep.MarkApplied(now);
         Check(!sweep.GuardsSafe(Frame(now,10,490,95),now) &&
             sweep.State=="aborted",
@@ -102,10 +108,10 @@ internal static class FanFeedbackCalibrationSelfTest
         for(var second=14;second<=20;second++)
             sweep.Observe(Frame(now.AddSeconds(second),100,1960),
                 now.AddSeconds(second));
-        Check(sweep.CompletedSteps==1 && sweep.CurrentDuty==85 &&
-            sweep.NeedsApply,"stable fresh RPM should advance to the next step");
+        Check(sweep.CompletedSteps==1 && sweep.CurrentDuty==95 &&
+            sweep.NeedsApply,"full response sweep advances in five percent increments");
         sweep.MarkApplied(now.AddSeconds(21));
-        Check(sweep.Observe(Frame(now.AddSeconds(28),85,0),now.AddSeconds(28)) &&
+        Check(sweep.Observe(Frame(now.AddSeconds(28),95,0),now.AddSeconds(28)) &&
             sweep.State=="aborted","stalled fan aborts calibration");
         Check(sweep.Measurements.Count==1,
             "aborted calibration retains observations for diagnostics only");
@@ -150,6 +156,24 @@ internal static class FanFeedbackCalibrationSelfTest
         Check(timeout.Observe(Frame(now.AddSeconds(61),10,1600),
             now.AddSeconds(61)) && timeout.State=="aborted",
             "register mismatch must abort instead of saving corrupted data");
+
+        // Retaining a full 19-point response in settings is as important as
+        // gathering it; normalization previously discarded points after 12.
+        var points=Enumerable.Range(0,19).Select(i=>new FanCalibrationPoint{
+            DutyPercent=100-i*5,
+            Rpm=2000-i*70,ObservedAt=now
+        }).ToList();
+        var allPoints=new FanChannelMapping {
+            ChannelId="pwm-all",Kind="fan",Label="Calibrated radiator bank",
+            RpmSensorId="rpm",VisuallyIdentified=true,VerifiedAt=now,
+            Measurements=points
+        };
+        var normalized=FanCommissioningRules.Normalize([allPoints]).Single();
+        Check(normalized.Measurements.Count==19 &&
+              normalized.Measurements[0].DutyPercent==10 &&
+              normalized.Measurements[^1].DutyPercent==100 &&
+              normalized.VerifiedAt.HasValue,
+            "save/settings normalization must preserve all 19 RPM calibration points");
 
         // A fan must be discoverable and calibratable BEFORE any temperature
         // curve or live profile exists. Only the elevated, timed session may
@@ -278,9 +302,9 @@ internal static class FanFeedbackCalibrationSelfTest
                     now.AddSeconds(second),settings);
             profiles.Tick(channels,Frame(now.AddSeconds(21),100,1980),
                 now.AddSeconds(21),settings);
-            Check(fake.SoftwareValue==85,
-                "calibration walks to 85 percent after stable 100 percent RPM");
-            profiles.Tick(channels,Frame(now.AddSeconds(22),85,1650,80),
+            Check(fake.SoftwareValue==95,
+                "full calibration moves to 95 percent after stable 100 percent RPM");
+            profiles.Tick(channels,Frame(now.AddSeconds(22),95,1850,80),
                 now.AddSeconds(22),settings);
             Check(fake.SoftwareValue>=99,
                 "high temperature demand aborts lower calibration duty and invokes failsafe");
