@@ -300,6 +300,16 @@ jobs:
               } catch { }
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
+            if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
+              if ($status.process.serverGc -ne $false) {
+                throw 'Experimental desktop process is not using Workstation GC.'
+              }
+              $diagnostics = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/diagnostics' -TimeoutSec 8
+              if ($diagnostics.process.serverGc -ne $false) {
+                throw 'Experimental collector process is not using Workstation GC.'
+              }
+              Write-Host 'PASS: both processes report Workstation GC in the actual published executable.'
+            }
             $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
             $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
             if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }
