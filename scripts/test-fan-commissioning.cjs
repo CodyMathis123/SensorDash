@@ -27,7 +27,7 @@ const scope={
  WorkspaceLocks:{fan:()=>false},
  document:{getElementById:id=>nodes.get(id)||null},
  fetch:async(url,opts)=>{requests.push({url,payload:JSON.parse(opts.body)});
-  return {ok:true,json:async()=>({})};},
+  return {ok:true,json:async()=>url==='/api/settings'?JSON.parse(opts.body):{}};},
  confirm:()=>true,
  structuredClone,
  console,
@@ -151,5 +151,35 @@ async function click(action,duty){
  assert.match(enabled,/Primary thermal guard/);
  assert.match(enabled,/PWM register/);
  assert.match(enabled,/Calibration belongs to the physical PWM header/i);
- console.log('PASS: calibration before curves, elevated pairing verification, guarded response sweep, pump exclusion and PWM diagnostics');
+ assert.match(enabled,/Saved calibration/);
+ assert.match(enabled,/70–100% PWM/);
+ assert.match(enabled,/3 points/);
+ const sampleAt=new Date().toISOString();
+ S.fanControl.persistent.calibration={
+  channelId:'channel1',rpmSensorId:'tach1',mode:'response',
+  state:'complete',completedSteps:3,totalSteps:3,currentDuty:70,
+  message:'Completed calibration',measurements:[
+   {dutyPercent:70,rpm:700,observedAt:sampleAt,
+    temperatures:[{sensorId:'temp1',sensorName:'CPU package',celsius:38.5,observedAt:sampleAt}]},
+   {dutyPercent:85,rpm:1050,observedAt:sampleAt,
+    temperatures:[{sensorId:'temp1',sensorName:'CPU package',celsius:39.0,observedAt:sampleAt}]},
+   {dutyPercent:100,rpm:1600,observedAt:sampleAt,
+    temperatures:[{sensorId:'temp1',sensorName:'CPU package',celsius:40.0,observedAt:sampleAt}]}
+  ]
+ };
+ const during=controller.render(S);
+ assert.match(during,/Current run · 3 measured speeds/);
+ assert.match(during,/CPU package: 38.5°C/);
+ await click('save-auto');
+ const saved=requests.at(-1);
+ assert.equal(saved.url,'/api/settings');
+ assert.equal(saved.payload.fanChannelMappings[0].measurements.length,3);
+ assert.equal(saved.payload.fanChannelMappings[0].measurements[0].temperatures[0].celsius,38.5);
+ S.fanControl.persistent.calibration=null;
+ const afterRestart=controller.render(S);
+ assert.match(afterRestart,/Saved calibration/);
+ assert.match(afterRestart,/CPU package: 38.5°C/,
+  'Saved RPM and guard-temperature observations must remain visible after session ends');
+ assert.doesNotMatch(afterRestart,/Current run · 3 measured speeds/);
+ console.log('PASS: independent PWM calibration, saved measurements, thermal guard history and persistent fan UI');
 })().catch(e=>{console.error(e);process.exitCode=1});
