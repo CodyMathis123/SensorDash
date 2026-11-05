@@ -6,7 +6,9 @@ const context={structuredClone,console,setInterval(){},setTimeout(){},clearTimeo
  document:{addEventListener(){},getElementById:id=>nodes[id]||null,querySelectorAll:selector=>fields.filter(f=>selector===f.selector)},
  window:{addEventListener(){}},confirm:()=>true,
  DriverStatus:{details:()=>''},
- SDWorkspace:{saveSettings:async(S,cfg)=>{S.settings=structuredClone(cfg);writes.push(structuredClone(cfg));}}
+ SDWorkspace:{isHidden:(S,s)=>(S.settings?.hiddenSensorIds||[]).includes(s.id)||
+  (S.settings?.hiddenDeviceIds||[]).includes(s.deviceId)||
+  (S.settings?.hiddenHardwareTypes||[]).includes(s.deviceType),saveSettings:async(S,cfg)=>{S.settings=structuredClone(cfg);writes.push(structuredClone(cfg));}}
 };
 const source=fs.readFileSync('src/SensorDash/wwwroot/app.js','utf8').replace(/bootstrap\(\);\s*$/,'');
 const app=vm.runInNewContext(source+'\nrender=()=>{};toast=()=>{};({S,settingsView,settingsCandidates,addAlias,changeThreshold,saveSettings});',context);
@@ -14,6 +16,10 @@ const S=app.S;S.view='settings';S.collectionGroups=[];
 S.settings={aliases:{cpu:'Processor'},highThresholds:{cpu:0},disabledCollectionGroups:[],disabledCollectionDeviceIds:[],excludedHistoryHardwareTypes:[]};
 S.sensors=[{id:'cpu',name:'CPU core',device:'CPU',type:'Temperature',value:40},{id:'fan',name:'Fan <2>',device:'Board',type:'Fan',value:500},{id:'volt',name:'Voltage',device:'Board',type:'Voltage',value:12},{id:'drive',name:'Drive temperature',device:'NVMe',type:'Temperature',value:45}];S.byId=new Map(S.sensors.map(s=>[s.id,s]));
 const ids=field=>Array.from(app.settingsCandidates(field),s=>s.id);
+ S.settings.hiddenSensorIds=['drive'];
+ assert.ok(!ids('aliases').includes('drive')&&!ids('highThresholds').includes('drive'),
+  'Hidden readings must not be offered for new aliases or thresholds');
+ S.settings.hiddenSensorIds=[];
 assert.deepEqual(ids('aliases'),['drive','fan','volt']);
 assert.deepEqual(ids('highThresholds'),['drive','fan'],'Zero threshold still counts as configured; voltage excluded');
 let html=app.settingsView();
