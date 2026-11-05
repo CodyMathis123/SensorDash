@@ -29,17 +29,21 @@ const FanCommissioning=(()=>{
   });
   if(!r.ok)throw Error((await r.text()).slice(0,150));
  };
- const temperatureCells=p=>{
+ const sensorLabel=(S,id,fallback)=>{
+  const alias=S.settings?.aliases?.[id];
+  return typeof alias==='string'&&alias.trim()?alias.trim():fallback||id||'Temperature';
+ };
+ const temperatureCells=(p,S)=>{
   const items=(p?.temperatures||[]).filter(t=>Number.isFinite(t.celsius));
   if(!items.length)return '<span class="note">Not recorded</span>';
   return items.map(t=>'<span class="fc-temperature-reading" title="'+esc(t.sensorId||'')+'">'+
-    esc(t.sensorName||t.sensorId||'Temperature')+': '+
+    esc(sensorLabel(S,t.sensorId,t.sensorName))+': '+
     Number(t.celsius).toFixed(1)+'°C</span>').join('');
  };
- const measurementRows=points=>points.map(p=>'<tr><td>'+
+ const measurementRows=(points,S)=>points.map(p=>'<tr><td>'+
    Number(p.dutyPercent)+'% PWM</td><td>'+
    Number(p.rpm).toFixed(0)+' RPM</td><td>'+
-   temperatureCells(p)+'</td><td>'+
+   temperatureCells(p,S)+'</td><td>'+
    esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
  const persist=async(S,draft,h,message)=>{
   await SDWorkspace.saveSettings(S,draft);
@@ -88,7 +92,7 @@ const FanCommissioning=(()=>{
   const feedback=S.fanControl?.persistent?.pwmFeedback?.[selected];
   const register=S.sensors.find(x=>x.id===selected && x.type==='Control');
   const calSamples=calibrationHere?.measurements||[];
-  const autoRows=measurementRows(calSamples);
+  const autoRows=measurementRows(calSamples,S);
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
@@ -102,7 +106,7 @@ const FanCommissioning=(()=>{
     ' · '+savedCount+' points · '+savedRange:'No saved RPM measurements';
   const identifyReady=isFan && !!rpm && output.writable;
   const responseReady=identifyReady && verified;
-  const sampleRows=observations.length?measurementRows(observations):
+  const sampleRows=observations.length?measurementRows(observations,S):
    '<tr><td colspan="4">No RPM measurements saved for this fan yet</td></tr>';
   const readOnly=owner?'An active profile owns this header. Short standalone manual tests are disabled, but guarded response calibration remains available.':'';
   return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan control & calibration</h2>'+
@@ -397,7 +401,7 @@ const FanCommissioning=(()=>{
      const age=Date.now()-Date.parse(sensor?.observedAt||'');
      if(!Number.isFinite(sensor?.value)||!Number.isFinite(age)||age>10000||
         age< -4000||sensor.value>=limit)
-      throw Error('Temperature guard '+(sensor?.name||id)+
+      throw Error('Temperature guard '+sensorLabel(S,id,sensor?.name)+
         ' must have a valid reading less than 10 seconds old and below '+
         limit+'°C before calibration starts.');
     }
