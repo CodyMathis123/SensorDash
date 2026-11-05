@@ -363,7 +363,7 @@ public static class ProcessTelemetry
         var timings = CollectorPerformance.Drain();
         lock (Gate)
         {
-            var elapsed = (now - _previousTimestamp).TotalSeconds;
+            var elapsed = _previousTimestamp == default ? 0 : (now - _previousTimestamp).TotalSeconds;
             var cpuPercent = elapsed > 0 ? Math.Max(0, (cpu - _previousCpuSeconds) / elapsed * 100) : (double?)null;
             var allocationRate = elapsed > 0 ? Math.Max(0, (allocated - _previousAllocatedBytes) / elapsed) : (double?)null;
             var uptime = Math.Max(0, (now.UtcDateTime - process.StartTime.ToUniversalTime()).TotalSeconds);
@@ -378,6 +378,8 @@ public static class ProcessTelemetry
             _previousAllocatedBytes = allocated;
             Samples.Add(sample);
             // Both bounds matter when long sleep/resume gaps occur.
+            // One sample a minute is sufficient for memory trends. Never allow
+            // this history to grow indefinitely when the desktop stays open.
             while (Samples.Count > 1440 || (Samples.Count > 1 &&
                 now - Samples[0].Timestamp > TimeSpan.FromHours(24)))
                 Samples.RemoveAt(0);
