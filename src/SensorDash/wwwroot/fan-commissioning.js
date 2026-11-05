@@ -3,6 +3,7 @@
 // Never owns PWM: every timed write goes through the existing UAC-only endpoint.
 const FanCommissioning=(()=>{
  let selected='',seenKey='',activeSince=0;
+ const calibrationGuards=new Map();
  const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const byId=id=>document.getElementById(id);
  const mappings=S=>S.settings?.fanChannelMappings||[];
@@ -43,6 +44,19 @@ const FanCommissioning=(()=>{
   const status=S.fanControl?.status||{};
   const calibration=S.fanControl?.persistent?.calibration;
   const calibrationHere=calibration?.channelId===selected?calibration:null;
+  const temperatures=S.sensors.filter(x=>x.type==='Temperature');
+  const linkedProfileDrafts=(S.settings?.fanProfiles||[])
+    .filter(p=>(p.channelIds||[]).includes(selected));
+  const linkedCurveIds=new Set(linkedProfileDrafts.flatMap(p=>p.curveIds||[]));
+  const linkedTemps=(S.settings?.simulatedFanCurves||[])
+    .filter(c=>linkedCurveIds.has(c.id)).map(c=>c.sourceSensorId)
+    .filter(id=>temperatures.some(t=>t.id===id));
+  const guardDefaults=calibrationGuards.get(selected)||{
+    first:linkedTemps[0]||'',second:linkedTemps[1]||'',limit:'85'};
+  const guardSelect=(id,label,selectedId,optional)=>'<label>'+label+
+    '<select id="'+id+'">'+choice('',optional?'None':'Choose a temperature sensor',selectedId)+
+    temperatures.map(t=>choice(t.id,S.settings?.aliases?.[t.id]||
+      (t.device+' / '+t.name),selectedId)).join('')+'</select></label>';
   const activeOverride=(S.fanControl?.persistent?.overrides||[]).find(x=>x.channelId===selected);
   const profile=(S.fanControl?.persistent?.profiles||[])
     .find(p=>(p.channelIds||[]).includes(selected));
@@ -56,6 +70,8 @@ const FanCommissioning=(()=>{
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
+  const identifyReady=isFan && !!rpm && output.writable;
+  const responseReady=identifyReady && verified;
   const sampleRows=observations.length?observations.map(p=>
    '<tr><td>'+p.dutyPercent+'% PWM</td><td>'+Number(p.rpm).toFixed(0)+' RPM</td><td>'+
    esc(new Date(p.observedAt).toLocaleString())+'</td></tr>').join(''):
