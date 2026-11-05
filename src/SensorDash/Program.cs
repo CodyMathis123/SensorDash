@@ -202,7 +202,9 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
     catch(JsonException){return Results.BadRequest("Invalid control request.");}
     if(command is null || command.Action is not ("arm" or "release" or "start-profile" or "stop-profile" or "stop-all" or "override" or "reset-override" or "reset-overrides" or "calibrate" or "cancel-calibration") ||
        command.ChannelId.Length>256 || command.CurveId.Length>80 ||
-       command.DurationSeconds is < 15 or > PersistentFanProfiles.MaxOverrideSeconds ||
+       command.DurationSeconds < 15 ||
+       command.DurationSeconds > (command.Action=="calibrate"?
+           FanAutoCalibration.MaximumSeconds:PersistentFanProfiles.MaxOverrideSeconds) ||
        (command.Action is not ("override" or "calibrate") &&
         command.DurationSeconds>FanControlRuntime.MaxSessionSeconds) ||
        !double.IsFinite(command.Percent) ||
