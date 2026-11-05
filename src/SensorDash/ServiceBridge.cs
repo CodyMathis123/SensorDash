@@ -1,6 +1,7 @@
 using System.Windows.Forms;
 using System.Drawing;
 using System.IO.Pipes;
+using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -103,6 +104,7 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                     "fanOutputs" => liveFan.Snapshot(state.Settings),
                     "fanDebug" => liveFan.DebugLog(),
                     "diagnostics" => Diagnostics(),
+                    "performanceHistory" => ProcessTelemetry.History(),
                     "status" => new
                     {
                         app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "service",
@@ -113,7 +115,11 @@ public sealed class CollectorPipeServer(DashboardState state, HistoryStore db, S
                     },
                     _ => new { rpcError = "Unknown or unsupported collector command." }
                 };
-                await writer.WriteLineAsync(JsonSerializer.Serialize(response, PipeProtocol.Json).AsMemory(), deadline.Token);
+                var serializationStarted = Stopwatch.GetTimestamp();
+                var serialized = JsonSerializer.Serialize(response, PipeProtocol.Json);
+                CollectorPerformance.ObserveIpcResponse(Encoding.UTF8.GetByteCount(serialized),
+                    Stopwatch.GetElapsedTime(serializationStarted).TotalMilliseconds);
+                await writer.WriteLineAsync(serialized.AsMemory(), deadline.Token);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
