@@ -250,7 +250,7 @@ const FanCommissioning=(()=>{
     }
    }
    await command({action:'calibrate',channelId:selected,percent:100,
-     durationSeconds:240,calibrationMode:identifying?'identify':'response',
+     durationSeconds:600,calibrationMode:identifying?'identify':'response',
      temperatureSensorIds:guards,temperatureLimit:limit,
      confirmExclusiveOwnership:true});
    h.toast('Approve elevation to '+(identifying?
