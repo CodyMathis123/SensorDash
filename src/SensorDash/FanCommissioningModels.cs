@@ -19,15 +19,15 @@ public sealed class FanChannelMapping
 
 public static class FanCommissioningRules
 {
-    // A calibration is a measured high-duty response curve, NOT a lower
-    // operating limit, a tachometer mapping guarantee, or a safe-to-run proof.
+    // A calibration is an observed duty/RPM response curve, NOT a guaranteed
+    // safe operating floor or proof that every fan on a hub is spinning.
     public static bool HasVerifiedResponse(FanChannelMapping mapping)
     {
         if(mapping.Kind!="fan" || !mapping.VisuallyIdentified ||
            string.IsNullOrWhiteSpace(mapping.RpmSensorId))return false;
         var sorted=mapping.Measurements.OrderBy(p=>p.DutyPercent).ToArray();
         if(sorted.Length<2 || sorted[^1].DutyPercent-sorted[0].DutyPercent<10 ||
-           sorted.Any(p => p.DutyPercent is <70 or >100 ||
+           sorted.Any(p => p.DutyPercent is <10 or >100 ||
                 !double.IsFinite(p.Rpm) || p.Rpm<=0))return false;
         // Permit small tachometer noise; strongly decreasing intermediate
         // readings contradict the claimed response even if endpoints rise.
@@ -49,12 +49,12 @@ public static class FanCommissioningRules
                     m.RpmSensorId.Length<=256)?m.RpmSensorId:"";
                 m.Measurements=(m.Kind=="fan" && m.RpmSensorId.Length>0
                     ?(m.Measurements??[]).Where(p=>p!=null &&
-                        p.DutyPercent is >=70 and <=100 &&
+                        p.DutyPercent is >=10 and <=100 &&
                         double.IsFinite(p.Rpm) && p.Rpm>0 && p.Rpm<=100000 &&
                         p.ObservedAt>new DateTimeOffset(2020,1,1,0,0,0,TimeSpan.Zero) &&
                         p.ObservedAt<=DateTimeOffset.UtcNow.AddMinutes(5))
                         .OrderByDescending(p=>p.ObservedAt).DistinctBy(p=>p.DutyPercent)
-                        .Take(8).OrderBy(p=>p.DutyPercent).ToList()
+                        .Take(12).OrderBy(p=>p.DutyPercent).ToList()
                     :[]);
                 if(m.Kind!="fan" || !HasVerifiedResponse(m))
                     m.VerifiedAt=null;
