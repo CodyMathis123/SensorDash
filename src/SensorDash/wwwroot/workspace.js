@@ -236,9 +236,39 @@ const SDWorkspace = (() => {
     '<polyline points="'+poly+'" fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'+
     pointsMarkup+marker+'</svg>';
  };
+ // A fan's measured response belongs to its physical PWM output, not
+ // to any of the CPU/GPU temperature curves that select a duty for it.
+ // Multiple curves in a MAX profile deliberately share this calibration.
+ const estimatedFanRpm=(S,curveId,percent)=>{
+  if(!S||!Number.isFinite(percent))return '—';
+  const channelIds=[...new Set((S.settings?.fanProfiles||[])
+    .filter(p=>(p.curveIds||[]).includes(curveId))
+    .flatMap(p=>p.channelIds||[]))];
+  const estimates=[];
+  for(const id of channelIds){
+   const m=(S.settings?.fanChannelMappings||[]).find(m=>m.channelId===id);
+   if(m?.kind!=='fan'||!m.verifiedAt)continue;
+   const points=[...(m.measurements||[])]
+     .filter(p=>Number.isFinite(p.dutyPercent)&&Number.isFinite(p.rpm)&&p.rpm>0)
+     .sort((a,b)=>a.dutyPercent-b.dutyPercent);
+   if(points.length<2)continue;
+   const name=m.label||id;
+   if(percent<points[0].dutyPercent||percent>points.at(-1).dutyPercent){
+    estimates.push(name+': outside calibrated range');
+    continue;
+   }
+   const index=points.findIndex(p=>p.dutyPercent>=percent);
+   const upper=points[Math.max(0,index)],lower=points[Math.max(0,index-1)];
+   const rpm=upper.dutyPercent===lower.dutyPercent?upper.rpm:
+     lower.rpm+(upper.rpm-lower.rpm)*(percent-lower.dutyPercent)/
+       (upper.dutyPercent-lower.dutyPercent);
+   estimates.push(name+': ≈'+Math.round(rpm).toLocaleString()+' RPM');
+  }
+  return estimates.join(' · ')||'—';
+ };
  // A curve is a series of editable numeric rows, with one blank row always
  // available. Nothing is sent to the elevated collector until Save is clicked.
- const curvePointRow=(point=null)=>{
+ const curvePointRow=(point=null,S=null,curveId='')=>{
   const temp=point?.temperature==null?'':point.temperature;
   const percent=point?.percent==null?'':point.percent;
   return '<tr data-curve-point-row>'+
@@ -246,12 +276,16 @@ const SDWorkspace = (() => {
     'data-curve-temperature value="'+attr(temp)+'" placeholder="°C" aria-label="Curve point temperature in °C"></td>'+
    '<td><input type="number" min="0" max="100" step="1" inputmode="decimal" '+
     'data-curve-percentage value="'+attr(percent)+'" placeholder="%" aria-label="Curve point fan duty percentage"></td>'+
+   '<td data-curve-estimated-rpm>'+safe(percent===''?'—':
+     estimatedFanRpm(S,curveId,Number(percent)))+'</td>'+
    '<td>'+button('remove-curve-point','×','aria-label="Remove curve point"')+'</td></tr>';
  };
- const curveTable=(curve)=>
+ const curveTable=(curve,S)=>
   '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
-  '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th class="w-curve-actions-col"></th></tr></thead>'+
-  '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point)).join('')+curvePointRow()+'</tbody></table></div>'+
+  '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th>Estimated RPM · calibrated fan</th><th class="w-curve-actions-col"></th></tr></thead>'+
+  '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point,S,curve.id)).join('')+
+    curvePointRow(null,S,curve.id)+'</tbody></table></div>'+
+  '<p class="note">Estimated RPM comes from the physical fan output’s saved calibration; it never changes the PWM duty. For a MAX profile, another temperature curve may request a higher speed. Values outside the measured duty range are not extrapolated.</p>'+
   '<p class="note">Use the empty row to add a point.</p>'+
   '<div class="w-curve-feedback" data-curve-feedback="'+attr(curve.id)+'" aria-live="polite"></div>';
  const readCurvePointRows=(table)=>{
@@ -288,6 +322,11 @@ const SDWorkspace = (() => {
    const id=table.dataset.curveTable;
    const live=S.simulation?.results?.find(x=>x.id===id);
    preview.innerHTML=curveDiagram(points,live?.inputTemperature,null);
+   for(const row of table.querySelectorAll('tbody tr[data-curve-point-row]')){
+    const val=row.querySelector('[data-curve-percentage]')?.value.trim()||'';
+    const cell=row.querySelector('[data-curve-estimated-rpm]');
+    if(cell)cell.textContent=val===''?'—':estimatedFanRpm(S,id,Number(val));
+   }
    if(message)message.textContent='Preview updated · save to apply this curve to simulation.';
   }catch(e){
    if(message)message.textContent=e.message;
@@ -535,7 +574,7 @@ const SDWorkspace = (() => {
          '<label>Curve name<input data-curve-name="'+attr(scope)+'" value="'+attr(curve.name)+'"></label>'+
          '<label>Temperature input '+select(S,curve.sourceSensorId,s=>s.type==='Temperature','Select input sensor',
             'data-curve-input="'+attr(scope)+'"')+'</label></div>'+
-       curveTable(curve)+
+       curveTable(curve,S)+
 
        '<div class="w-actions"><label>Stale after (seconds)<input type="number" min="3" max="300" data-curve-age="'+attr(scope)+'" value="'+attr(curve.maxSampleAgeSeconds)+'"></label>'+
          button('save-editor','Save curve','',false)+button('remove-curve','Delete','data-id="'+attr(scope)+'"')+'</div>'+
