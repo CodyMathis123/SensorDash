@@ -105,6 +105,31 @@ internal static class FanResumeSelfTest
                   "Short wake has a distinct tagged hardware reopening event");
             Check(trace.ResumeRearms==2,"Only real rearm/reopen events advance counter");
 
+            // Reproduce the November 5 symptom: on the first post-reopen
+            // tick LHM accepts 10% but physical RPM can still be elevated.
+            // The software-mode cache must not suppress a second takeover
+            // once the motherboard has had time to initialize.
+            profiles.ReleaseBeforeClose(channels);
+            profiles.SchedulePostResumeRearm(now.AddSeconds(70));
+            var beforeWakeWrites=fake.Writes;
+            var beforeWakeResets=fake.Resets;
+            profiles.Tick(channels,Frame(now.AddSeconds(70)),now.AddSeconds(70));
+            Check(fake.Writes==beforeWakeWrites+1 &&
+                  fake.Resets==beforeWakeResets+1,
+                "First post-reopen poll reasserts approved PWM");
+            profiles.Tick(channels,Frame(now.AddSeconds(79)),now.AddSeconds(79));
+            Check(fake.Writes==beforeWakeWrites+1,
+                "Delayed recovery must not fire before hardware settle interval");
+            profiles.Tick(channels,Frame(now.AddSeconds(95)),now.AddSeconds(95));
+            Check(fake.Writes==beforeWakeWrites+2 &&
+                  fake.Resets==beforeWakeResets+2,
+                "Delayed recovery performs SetDefault and SetSoftware once");
+            profiles.Tick(channels,Frame(now.AddSeconds(96)),now.AddSeconds(96));
+            Check(fake.Writes==beforeWakeWrites+2,
+                "Stable approved PWM must not be repeatedly reasserted");
+            Check(JsonSerializer.Serialize(trace.ReadRecent()).Contains("POST-RESUME-REARM"),
+                "Delayed recovery must appear in diagnostics");
+
             // A duplicate/other controller cannot receive a new authorization
             // merely because the resume policy was triggered.
             Check(!FanResumePolicy.NeedsRearm(now,now.AddSeconds(40),false),
