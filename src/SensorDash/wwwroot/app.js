@@ -446,7 +446,7 @@ async function loadFanControl(){
     enabled?enabled+' enabled fan profile'+(enabled===1?'':'s'):
     data.status?.state==='active'?'Manual test active':'Firmware/default';
   if(changed&&S.view==='curves')render();
-  else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);}
+  else {SDWorkspace.paintFanControl(S);SDWorkspace.paintProfiles(S);FanFeedback.paint(S);}
   FanCommissioning.paint(S);
   FanFeedback.paint(S);
  }catch(e){console.warn('Live fan channel inventory:',e.message);}
