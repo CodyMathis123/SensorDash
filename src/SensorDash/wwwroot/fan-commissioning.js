@@ -153,8 +153,19 @@ const FanCommissioning=(()=>{
    '<small id="fcAutoProgress">'+(calibrationHere?
      calibrationHere.completedSteps+' of '+calibrationHere.totalSteps+' stable speeds measured':
      'No calibration running')+'</small></div>'+
-   (calSamples.length?'<details class="fc-advanced-toggle" open><summary>Measurements ('+calSamples.length+')</summary><div class="table-container"><table><thead><tr><th>PWM</th><th>Settled observed RPM</th><th>Measured</th></tr></thead><tbody>'+
-      autoRows+'</tbody></table></div></details>':'')+
+   (calSamples.length?'<details class="fc-advanced-toggle" open><summary>Current run · '+
+      calSamples.length+' measured speeds</summary><div class="table-container"><table><thead><tr>'+
+      '<th>PWM</th><th>Settled RPM</th><th>Guard temperatures when measured</th><th>Measured at</th>'+
+      '</tr></thead><tbody>'+autoRows+'</tbody></table></div></details>':'')+
+   '<details class="fc-advanced-toggle" data-fc-saved open><summary>Saved calibration · '+
+     esc(savedDescription)+'</summary><div>'+
+     '<p class="note">'+(savedCount?
+       'These readings are saved to this physical fan mapping in SensorDash settings. They persist after changing fans or restarting the service. Verification: '+
+       esc(map?.verifiedAt?new Date(map.verifiedAt).toLocaleString():'not verified'):
+       'No calibration saved for this fan output yet. A completed run needs an explicit Save RPM calibration action.')+
+     '</p><div class="table-container"><table class="fc-saved-results"><thead><tr>'+
+     '<th>PWM</th><th>Settled RPM</th><th>Guard temperatures when measured</th><th>Measured at</th>'+
+     '</tr></thead><tbody>'+sampleRows+'</tbody></table></div></div></details>'+
    '<p class="fc-setup-details">Calibration measures this fan output only; your CPU and GPU curves remain unchanged. A single RPM sensor cannot verify every fan on a shared hub.</p></div>'+
    '<details class="fc-advanced-toggle"><summary>Manual speed controls & diagnostics</summary><div>'+
    '<p class="note">Run a 30-second test (70–100%) for unapproved channels, or temporarily override an approved fan curve. All changes require Windows elevation.</p>'+
@@ -183,8 +194,7 @@ const FanCommissioning=(()=>{
    '<div class="w-live-status">PWM register: <b id="fcLivePwm">'+
    (Number.isFinite(register?.value)?Number(register.value).toFixed(1)+'%':'—')+
    '</b> · Feedback check: '+esc(feedback?.state||'waiting')+'</div>'+
-   '<div class="table-container"><table class="w-output-table"><thead><tr><th>Command</th><th>Observed tachometer</th><th>Recorded</th></tr></thead><tbody>'+
-    sampleRows+'</tbody></table></div></div>'+
+   '<p class="note">Previously saved PWM/RPM measurements are displayed above under Saved calibration. Manual tests can add an observation; they do not automatically replace the last calibration.</p></div>'+
    '</details>'+
    '<details class="fc-advanced-toggle"><summary>Confirm physical fan identification</summary><div>'+
    '<p class="note">Confirm the correct physical fan bank actually moved during testing. RPM response alone cannot establish the wiring, especially for a shared PWM hub.</p>'+
@@ -370,7 +380,7 @@ const FanCommissioning=(()=>{
    entry.verifiedAt=new Date().toISOString();
    return persist(S,draft,h,result.mode==='identify'?
      'PWM/RPM pairing verified. A full low-duty sweep can now be performed before assigning a temperature curve.':
-     'Full fan PWM/RPM response saved; temperature curves can now display estimated RPM.');
+     'Full fan PWM/RPM response saved to this fan output; its live fan profile can now show estimated RPM.');
   }
   if(action==='override'){
    if(!map||map.kind!=='fan'||!activeProfile(S,selected))
