@@ -100,8 +100,8 @@ const FanCommissioning=(()=>{
     first:linkedTemps[0]||'',second:linkedTemps[1]||'',limit:'85'};
   const guardSelect=(id,label,selectedId,optional)=>'<label>'+label+
     '<select id="'+id+'">'+choice('',optional?'None':'Choose a temperature sensor',selectedId)+
-    temperatures.map(t=>choice(t.id,S.settings?.aliases?.[t.id]||
-      (t.device+' / '+t.name)+(sensorHidden(S,t)?' [Hidden]':''),selectedId)).join('')+'</select></label>';
+    temperatures.map(t=>choice(t.id,(S.settings?.aliases?.[t.id]||
+      (t.device+' / '+t.name))+(sensorHidden(S,t)?' [Hidden]':''),selectedId)).join('')+'</select></label>';
   const activeOverride=(S.fanControl?.persistent?.overrides||[]).find(x=>x.channelId===selected);
   const profile=(S.fanControl?.persistent?.profiles||[])
     .find(p=>(p.channelIds||[]).includes(selected));
