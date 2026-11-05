@@ -3,6 +3,7 @@
 // Never owns PWM: every timed write goes through the existing UAC-only endpoint.
 const FanCommissioning=(()=>{
  let selected='',seenKey='',activeSince=0;
+ let pendingCalibration=null,calibrationNotice='';
  const calibrationGuards=new Map();
  const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const byId=id=>document.getElementById(id);
@@ -195,10 +196,44 @@ const FanCommissioning=(()=>{
   if(byId('fcLivePwm'))byId('fcLivePwm').textContent=Number.isFinite(pwm?.value)?
     Number(pwm.value).toFixed(1)+'%':'—';
   const cal=S.fanControl?.persistent?.calibration;
+  const banner=byId('fcCalibrationBanner');
+  const heading=byId('fcCalibrationHeading');
+  const message=byId('fcAutoStatus');
+  const progress=byId('fcCalibrationProgress');
+  const details=byId('fcAutoProgress');
   if(cal?.channelId===selected){
-   if(byId('fcAutoStatus'))byId('fcAutoStatus').textContent=cal.message;
-   if(byId('fcAutoProgress'))byId('fcAutoProgress').textContent=
-     cal.completedSteps+' / '+cal.totalSteps+' measured points · '+cal.state;
+   pendingCalibration=null;
+   calibrationNotice='';
+   if(banner)banner.dataset.status=cal.state;
+   if(heading)heading.textContent=cal.state==='running'?
+     'Calibrating fan speed':cal.state==='complete'?
+     'Calibration complete':cal.state==='aborted'?
+     'Calibration stopped':'Calibration status';
+   if(message)message.textContent=cal.message;
+   if(details)details.textContent=cal.completedSteps+' of '+
+     cal.totalSteps+' stable speeds measured · '+Math.round(cal.currentDuty)+'% duty'+
+     (Number.isFinite(cal.observedRpm)?' · '+Math.round(cal.observedRpm)+' RPM':'');
+   if(progress){
+    progress.hidden=cal.state==='aborted';
+    progress.max=Math.max(1,cal.totalSteps);
+    progress.value=cal.completedSteps;
+   }
+  }else if(pendingCalibration){
+   if(Date.now()-pendingCalibration.started>30000){
+    pendingCalibration=null;
+    calibrationNotice='No calibration started within 30 seconds. Check whether Windows requested approval; the collector may have rejected the request.';
+   }else{
+    if(banner)banner.dataset.status='pending';
+    if(heading)heading.textContent='Waiting for Windows approval';
+    if(message)message.textContent='Waiting for Windows approval and the fan-control service to start.';
+    if(details)details.textContent='No fan-speed measurements yet';
+   }
+  }
+  if(calibrationNotice){
+   if(banner)banner.dataset.status='error';
+   if(heading)heading.textContent='Calibration did not start';
+   if(message)message.textContent=calibrationNotice;
+   if(details)details.textContent='No changes were made by this request';
   }
  };
  const doAction=async(action,el,S,h)=>{
@@ -265,12 +300,32 @@ const FanCommissioning=(()=>{
       throw Error('Guard temperatures must be fresh and below the configured limit.');
     }
    }
-   await command({action:'calibrate',channelId:selected,percent:100,
-     durationSeconds:600,calibrationMode:identifying?'identify':'response',
-     temperatureSensorIds:guards,temperatureLimit:limit,
-     confirmExclusiveOwnership:true});
-   h.toast('Approve elevation to '+(identifying?
-     'verify the physical fan/RPM pairing.':'measure the guarded fan response.'));
+   const label=identifying?'verify the fan/RPM pairing':'run the full fan speed calibration';
+   if(!confirm('Start '+label+' on '+(map.label||channel.name)+
+      '? SensorDash will change fan speed and monitor temperatures. '+
+      'You can cancel, and the prior fan control will be restored.'))return;
+   calibrationNotice='';
+   pendingCalibration={started:Date.now(),mode:identifying?'identify':'response'};
+   if(byId('fcCalibrationBanner')){
+    byId('fcCalibrationBanner').dataset.status='pending';
+    byId('fcCalibrationHeading').textContent='Requesting Windows approval';
+    byId('fcAutoStatus').textContent='Submitting the request to Windows. Calibration will begin only after the fan-control service accepts it.';
+    byId('fcAutoProgress').textContent='No measurements recorded yet';
+   }
+   try{
+    await command({action:'calibrate',channelId:selected,percent:100,
+      durationSeconds:600,calibrationMode:identifying?'identify':'response',
+      temperatureSensorIds:guards,temperatureLimit:limit,
+      confirmExclusiveOwnership:true});
+   }catch(error){
+    pendingCalibration=null;
+    throw error;
+   }
+   if(byId('fcCalibrationHeading'))
+     byId('fcCalibrationHeading').textContent='Waiting for Windows approval';
+   if(byId('fcAutoStatus'))
+     byId('fcAutoStatus').textContent=
+       'Windows elevation requested. Awaiting the collector to confirm calibration started.';
    return;
   }
   if(action==='cancel-auto'){
@@ -401,7 +456,16 @@ const FanCommissioning=(()=>{
    return true;
   }
   void doAction(action.dataset.commissioning,action,S,h)
-   .catch(error=>h.toast(error.message));
+   .catch(error=>{
+    if(['start-auto','start-identify','cancel-auto','save-auto'].includes(action.dataset.commissioning)){
+     pendingCalibration=null;
+     calibrationNotice=error.message;
+     const banner=byId('fcCalibrationBanner');
+     if(banner)banner.dataset.status='error';
+     if(byId('fcCalibrationHeading'))byId('fcCalibrationHeading').textContent='Calibration did not start';
+     if(byId('fcAutoStatus'))byId('fcAutoStatus').textContent=error.message;
+    }else h.toast(error.message);
+   });
   return true;
  };
  const change=(e,S,h)=>{
