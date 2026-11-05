@@ -302,9 +302,12 @@ internal static class FanFeedbackCalibrationSelfTest
                     now.AddSeconds(second),settings);
             profiles.Tick(channels,Frame(now.AddSeconds(21),100,1980),
                 now.AddSeconds(21),settings);
-            Check(fake.SoftwareValue==95,
-                "full calibration moves to 95 percent after stable 100 percent RPM");
-            profiles.Tick(channels,Frame(now.AddSeconds(22),95,1850,80),
+            // This test starts the default high-duty *identification*
+            // phase; the separate pure response test above verifies all
+            // 19 five-percent steps independently of temperature curves.
+            Check(fake.SoftwareValue==85,
+                "high-duty identification moves to 85 percent after stable 100 percent RPM");
+            profiles.Tick(channels,Frame(now.AddSeconds(22),85,1650,80),
                 now.AddSeconds(22),settings);
             Check(fake.SoftwareValue>=99,
                 "high temperature demand aborts lower calibration duty and invokes failsafe");
