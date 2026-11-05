@@ -10,6 +10,12 @@ public sealed class PersistentFanProfiles
     private readonly FanPwmWriter _writer = new();
     private readonly FanControlTrace? _trace;
     private DateTimeOffset? _lastTick;
+    private DateTimeOffset? _postResumeRearmDue;
+    // The first takeover immediately after resume can race the motherboard's
+    // Super I/O initialization. Reissue the *same approved* duty once after
+    // the hardware settles, without starting new channels or changing curves.
+    internal void SchedulePostResumeRearm(DateTimeOffset reopenedAt) =>
+        _postResumeRearmDue = reopenedAt.AddSeconds(20);
     // Admin requests enqueue changes. Only the collection thread mutates the evaluator and writer.
     private readonly HashSet<string> _pendingReleases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pendingProfileResets = new(StringComparer.Ordinal);
@@ -253,6 +259,16 @@ public sealed class PersistentFanProfiles
         var previouslyApproved=profiles.SelectMany(p=>p.ChannelIds)
             .Distinct(StringComparer.Ordinal).ToArray();
         var previousTick=_lastTick;
+        if (profiles.Length == 0) _postResumeRearmDue = null;
+        if (previousTick.HasValue && _postResumeRearmDue is { } due && now >= due
+            && profiles.Length > 0)
+        {
+            _postResumeRearmDue = null;
+            _writer.ForceRearm(previouslyApproved);
+            _trace?.Event("POST-RESUME-REARM",
+                "Delayed second takeover after hardware reopen; retrying approved PWM outputs: "
+                + string.Join(",", previouslyApproved), now);
+        }
         if(FanResumePolicy.NeedsRearm(previousTick,now,profiles.Length>0))
         {
             _trace?.ResumeGap(now-previousTick!.Value,previouslyApproved,now);
@@ -348,6 +364,7 @@ public sealed class PersistentFanProfiles
             _overrides.Clear();
         }
         _lastTick=null;
+        _postResumeRearmDue=null;
         // Persistent approval survives clean shutdown; firmware restore is best-effort.
         // A process crash cannot invoke a software recovery callback.
     }
