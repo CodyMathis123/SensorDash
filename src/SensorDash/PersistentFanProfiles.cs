@@ -155,7 +155,11 @@ public sealed class PersistentFanProfiles
                 return new {accepted=false,message="The selected PWM output is no longer writable."};
             try
             {
-                var minDuty=Math.Max(output.Minimum,profile?.MinimumPercent??10);
+                // The calibration range belongs to the physical PWM output.
+                // An active temperature curve's minimum is irrelevant here.
+                // Only the hardware limit, 10% test floor, RPM monitoring
+                // and explicitly selected temperature guards constrain sweep.
+                var minDuty=Math.Max(10,output.Minimum);
                 _calibration=new FanAutoCalibration(command.ChannelId,map.RpmSensorId,
                     minDuty,Math.Min(100,output.Maximum),DateTimeOffset.UtcNow,
                     command.CalibrationMode,command.TemperatureSensorIds,
@@ -425,6 +429,12 @@ public sealed class PersistentFanProfiles
                     _writer.ResetProfile([id]);
                     manual=null;
                 }
+                // Calibration temporarily owns this fan output. Never
+                // compare its duty against a live curve's requested duty:
+                // doing so makes fan hardware impossible to calibrate below
+                // the normal fan-curve target. Only explicit thermal guards,
+                // mapping identity, tach/PWM integrity and bounded timeout
+                // may interrupt a supervised sweep.
                 FanAutoCalibration? calibrating;
                 lock(_sync)
                 {
@@ -439,28 +449,12 @@ public sealed class PersistentFanProfiles
                             _trace?.Event("CALIBRATION",calibrating.Message,now);
                             calibrating=null;
                         }
-                        else if(demand.Failsafe)
-                        {
-                            calibrating.Abort("Calibration stopped because the live "+
-                                $"profile '{profile.Name}' entered its 100% cooling failsafe: "+
-                                demand.Reason+" Approved fan curve restored.");
-                        }
                         else if(settings?.FanChannelMappings?.Any(m=>m.ChannelId==id &&
                             m.Kind=="fan" && m.VisuallyIdentified &&
                             m.RpmSensorId==calibrating.RpmSensorId)!=true)
                         {
                             calibrating.Abort("Fan-to-RPM sensor mapping changed during "+
                                 "calibration. Approved fan curve restored.");
-                        }
-                        else if(demand.Percent>calibrating.CurrentDuty+0.1)
-                        {
-                            // The user's ordinary profile needs more airflow
-                            // than the next calibration speed. Respect that
-                            // demand instead of trying to override it.
-                            calibrating.FinishPartial(
-                                $"Calibration stopped before {calibrating.CurrentDuty}% "+
-                                $"because profile '{profile.Name}' currently requires "+
-                                $"{demand.Percent:0.#}% PWM. Approved fan curve restored.");
                         }
                         if(calibrating!=null && !calibrating.Running)
                         {
