@@ -379,7 +379,8 @@ const FanCommissioning=(()=>{
    const updated={channelId:channel.id,label,kind,rpmSensorId,
     visuallyIdentified:changed?false:(map?.visuallyIdentified||false),
     verifiedAt:changed?null:(map?.verifiedAt||null),
-    measurements:changed?[]:(map?.measurements||[])};
+    measurements:changed?[]:(map?.measurements||[]),
+    cutoff:changed?null:(map?.cutoff||null)};
    draft.fanChannelMappings=[...others,updated];
    return persist(S,draft,h,'Identification saved; no hardware command was sent.');
   }
@@ -471,24 +472,51 @@ const FanCommissioning=(()=>{
   }
   if(action==='save-auto'){
    const result=S.fanControl?.persistent?.calibration;
-   if(!result||result.channelId!==selected||result.state!=='complete'||
+   if(!result||result.channelId!==selected||
+      !['complete','cutoff','aborted'].includes(result.state)||
       !map||map.kind!=='fan'||result.rpmSensorId!==map.rpmSensorId)
-    throw Error('Only a completed calibration of this fan and RPM sensor can be saved.');
+    throw Error('No finished PWM/RPM calibration results are available for this fan.');
+   if(result.mode==='identify'&&result.state!=='complete')
+    throw Error('Fan identification must complete before saving or verifying a pairing.');
    if(result.mode==='identify'&&!byId('fcVisual')?.checked)
     throw Error('Visually confirm that the selected output drives these fans before verifying the pairing.');
    if(result.mode==='response'&&(!map.verifiedAt||!map.visuallyIdentified))
-    throw Error('A verified physical pairing is required before saving a full response.');
+    throw Error('A verified physical pairing is required before saving measured fan response.');
    const sample=result.measurements||[];
    if(!qualifyResponse({...map,visuallyIdentified:true,measurements:sample}))
-    throw Error('Measured RPM response is inconsistent; previous calibration was preserved.');
+    throw Error('Measured RPM response is inconsistent or incomplete; previous calibration was preserved.');
+   const stopped=result.state==='cutoff'&&result.mode==='response'?
+     result.cutoff:null;
+   if(result.state==='cutoff'&&
+      (!stopped||!Number.isInteger(stopped.dutyPercent)||
+       stopped.dutyPercent<10||stopped.dutyPercent>40||
+       stopped.dutyPercent>=Math.min(...sample.map(p=>p.dutyPercent))))
+    throw Error('The reported fan-stop duty is inconsistent; previous calibration was preserved.');
+   if(result.mode==='response'&&result.state!=='complete'){
+    const stopText=stopped?' and an observed 0-RPM stop at '+stopped.dutyPercent+'%':'';
+    const previous=(map?.measurements||[]).length;
+    if(!confirm('Save '+sample.length+' settled PWM/RPM points'+stopText+
+       ' for '+(map.label||channel.name)+'? '+
+       'This replaces the '+previous+' previously saved RPM points. '+
+       'Only measured running speeds will be used for RPM estimates. '+
+       'An observed stop does not establish a safe restart duty.'))return;
+   }
    const draft=structuredClone(S.settings);
    const entry=draft.fanChannelMappings.find(m=>m.channelId===selected);
    if(result.mode==='identify')entry.visuallyIdentified=true;
    entry.measurements=sample;
+   // A confirmed cutoff is separate diagnostic metadata, not a positive
+   // RPM sample and never a guarantee of a safe minimum/startup duty.
+   entry.cutoff=stopped||null;
    entry.verifiedAt=new Date().toISOString();
    return persist(S,draft,h,result.mode==='identify'?
-     'PWM/RPM pairing verified. A full low-duty sweep can now be performed before assigning a temperature curve.':
-     'Full fan PWM/RPM response saved to this fan output; its live fan profile can now show estimated RPM.');
+     'PWM/RPM pairing verified. You can now calibrate the full fan-speed response.':
+     stopped?
+     'Saved '+sample.length+' measured running speeds and the observed fan stop at '+
+       stopped.dutyPercent+'%. Fan control remains on its approved profile.':
+     result.state==='aborted'?
+     'Saved '+sample.length+' valid partial RPM measurements. Unmeasured speeds are not estimated.':
+     'Full fan PWM/RPM response saved to this output; the live fan profile can show estimated RPM.');
   }
   if(action==='override'){
    if(!map||map.kind!=='fan'||!activeProfile(S,selected))
