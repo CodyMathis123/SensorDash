@@ -45,6 +45,11 @@ const FanCommissioning=(()=>{
    Number(p.rpm).toFixed(0)+' RPM</td><td>'+
    temperatureCells(p,S)+'</td><td>'+
    esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
+ const cutoffRow=(cutoff,S)=>cutoff?
+   '<tr class="fc-cutoff-row"><td>'+Number(cutoff.dutyPercent)+
+   '% PWM · observed stop</td><td>0 RPM (confirmed)</td><td>'+
+   temperatureCells(cutoff,S)+'</td><td>'+
+   esc(new Date(cutoff.observedAt).toLocaleTimeString())+'</td></tr>':'';
  const persist=async(S,draft,h,message)=>{
   await SDWorkspace.saveSettings(S,draft);
   h.toast(message);h.render();
@@ -92,7 +97,8 @@ const FanCommissioning=(()=>{
   const feedback=S.fanControl?.persistent?.pwmFeedback?.[selected];
   const register=S.sensors.find(x=>x.id===selected && x.type==='Control');
   const calSamples=calibrationHere?.measurements||[];
-  const autoRows=measurementRows(calSamples,S);
+  const runCutoff=calibrationHere?.cutoff||null;
+  const autoRows=measurementRows(calSamples,S)+cutoffRow(runCutoff,S);
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
@@ -102,11 +108,14 @@ const FanCommissioning=(()=>{
     Math.max(...observations.map(p=>p.dutyPercent))+'% PWM':'';
   const fullSaved=savedCount>=19&&observations.some(p=>p.dutyPercent<=10);
   const savedDescription=savedCount?
-    (fullSaved?'Full calibration':'Saved RPM measurements')+
-    ' · '+savedCount+' points · '+savedRange:'No saved RPM measurements';
+    (savedCutoff?'Fan stop observed at '+savedCutoff.dutyPercent+'%':
+      fullSaved?'Full calibration':'Saved RPM measurements')+
+    ' · '+savedCount+' running-speed points · '+savedRange:'No saved RPM measurements';
   const identifyReady=isFan && !!rpm && output.writable;
   const responseReady=identifyReady && verified;
-  const sampleRows=observations.length?measurementRows(observations,S):
+  const savedCutoff=map?.cutoff||null;
+  const sampleRows=observations.length?
+   measurementRows(observations,S)+cutoffRow(savedCutoff,S):
    '<tr><td colspan="4">No RPM measurements saved for this fan yet</td></tr>';
   const readOnly=owner?'An active profile owns this header. Short standalone manual tests are disabled, but guarded response calibration remains available.':'';
   return '<section class="panel fc-panel"><div class="panel-head"><div><h2>Fan control & calibration</h2>'+
@@ -159,16 +168,24 @@ const FanCommissioning=(()=>{
      '>Run full calibration</button>'+
    (calibrationHere?.state==='running'?
       '<button class="btn secondary" data-commissioning="cancel-auto">Cancel and restore control</button>':'')+
-   (calibrationHere?.state==='complete'?
-      '<button class="btn secondary" data-commissioning="save-auto">Save '+(calibrationHere.mode==='identify'?
-        'verified pairing':'RPM calibration')+'</button>':'')+
+   (calibrationHere?.state==='complete'||
+      (calibrationHere?.mode==='response'&&calibrationHere?.state==='cutoff')||
+      (calibrationHere?.mode==='response'&&calibrationHere?.state==='aborted'&&calSamples.length>=2)?
+      '<button class="btn secondary" data-commissioning="save-auto">Save '+
+        (calibrationHere.state==='cutoff'?
+          calSamples.length+' RPM points + observed stop':
+          calibrationHere.state==='aborted'?
+          calSamples.length+' valid RPM points (partial)':
+          calibrationHere.mode==='identify'?'verified pairing':'RPM calibration')+
+        '</button>':'')+
    '</div>'+
    '<div class="fc-calibration-status" id="fcCalibrationBanner" role="status" aria-live="polite" data-status="'+
    (otherRunning?'busy':calibrationHere?.state||(pendingCalibration?'pending':calibrationNotice?'error':'idle'))+'">'+
    '<strong id="fcCalibrationHeading">'+(otherRunning?'Another calibration is running':
      calibrationHere?.state==='running'?'Calibrating fan speed':
      calibrationHere?.state==='complete'?'Calibration complete':
-     calibrationHere?.state==='aborted'?'Calibration stopped':
+     calibrationHere?.state==='cutoff'?'Fan stop observed · results ready to save':
+    calibrationHere?.state==='aborted'?'Calibration stopped':
      pendingCalibration?'Waiting for Windows approval':
      calibrationNotice?'Calibration did not start':
      savedCount?'Saved RPM measurements: '+savedCount:'Ready to calibrate')+'</strong>'+
@@ -185,19 +202,31 @@ const FanCommissioning=(()=>{
      calibrationHere?calibrationHere.completedSteps+' of '+calibrationHere.totalSteps+' stable speeds measured':
      'No calibration running')+'</small></div>'+
    (calSamples.length?'<details class="fc-advanced-toggle" open><summary>Current run · '+
-      calSamples.length+' measured speeds</summary><div class="table-container"><table><thead><tr>'+
+      calSamples.length+' settled running speeds'+
+      (runCutoff?' + observed stop at '+runCutoff.dutyPercent+'%':'')+
+      '</summary><div class="table-container"><table><thead><tr>'+
       '<th>PWM</th><th>Settled RPM</th><th>Guard temperatures when measured</th><th>Measured at</th>'+
-      '</tr></thead><tbody>'+autoRows+'</tbody></table></div></details>':'')+
+      '</tr></thead><tbody>'+autoRows+'</tbody></table></div>'+
+      (runCutoff?'<p class="fc-cutoff-note">The fan stopped at '+
+        runCutoff.dutyPercent+'% during this downward sweep. The lowest measured'+
+        ' running duty is '+Math.min(...calSamples.map(p=>p.dutyPercent))+
+        '%. This does not establish the duty required to restart a stopped fan.</p>':'')+
+      '</details>':'')+
    '<details class="fc-advanced-toggle" data-fc-saved open><summary>Saved calibration · '+
      esc(savedDescription)+'</summary><div>'+
      '<p class="note">'+(savedCount?
        'These readings are saved to this physical fan mapping in SensorDash settings. They persist after changing fans or restarting the service. Verification: '+
        esc(map?.verifiedAt?new Date(map.verifiedAt).toLocaleString():'not verified'):
        'No calibration saved for this fan output yet. A completed run needs an explicit Save RPM calibration action.')+
-     '</p><div class="table-container"><table class="fc-saved-results"><thead><tr>'+
+     '</p>'+
+     (savedCutoff?'<p class="fc-cutoff-note">Observed stop at '+
+       savedCutoff.dutyPercent+'% PWM. Lowest measured running speed: '+
+       Math.min(...observations.map(p=>p.dutyPercent))+
+       '% PWM. A restart threshold was not measured.</p>':'')+
+     '<div class="table-container"><table class="fc-saved-results"><thead><tr>'+
      '<th>PWM</th><th>Settled RPM</th><th>Guard temperatures when measured</th><th>Measured at</th>'+
      '</tr></thead><tbody>'+sampleRows+'</tbody></table></div></div></details>'+
-   '<p class="fc-setup-details">Calibration measures this fan output only; your CPU and GPU curves remain unchanged. A single RPM sensor cannot verify every fan on a shared hub.</p></div>'+
+   '<p class="fc-setup-details">An observed 0-RPM cutoff is saved separately from stable running RPM samples; it does not establish a restart threshold. Calibration measures this fan output only; your CPU and GPU curves remain unchanged. A single RPM sensor cannot verify every fan on a shared hub.</p></div>'+
    '<details class="fc-advanced-toggle"><summary>Manual speed controls & diagnostics</summary><div>'+
    '<p class="note">Run a 30-second test (70–100%) for unapproved channels, or temporarily override an approved fan curve. All changes require Windows elevation.</p>'+
 
