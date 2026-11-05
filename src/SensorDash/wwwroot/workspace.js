@@ -216,7 +216,11 @@ const SDWorkspace = (() => {
       (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
  const curveDiagram=(points,activeTemperature,activePercent)=>{
-  const sorted=[...points].filter(p=>Number.isFinite(p.temperature)&&Number.isFinite(p.percent))
+  // Keep source-row identity when sorting graph points by temperature.
+  // This allows either the graph or the editable table to select the same
+  // physical point even while a draft is being edited out of order.
+  const sorted=[...points].map((p,index)=>({...p,index}))
+    .filter(p=>Number.isFinite(p.temperature)&&Number.isFinite(p.percent))
     .sort((a,b)=>a.temperature-b.temperature);
   if(sorted.length<2)return '';
   const lo=Math.min(0,sorted[0].temperature-5),hi=Math.max(85,sorted[sorted.length-1].temperature+5);
@@ -224,17 +228,29 @@ const SDWorkspace = (() => {
   const poly=sorted.map(p=>x(p.temperature).toFixed(1)+','+y(p.percent).toFixed(1)).join(' ');
   const grid=[0,25,50,75,100].map(v=>'<line x1="44" y1="'+y(v)+'" x2="436" y2="'+y(v)+'" stroke="#293e4c"/>'+
     '<text x="36" y="'+(y(v)+4)+'" text-anchor="end" fill="#98b2c4" font-size="11">'+v+'%</text>').join('');
-  const pointsMarkup=sorted.map(p=>'<circle cx="'+x(p.temperature)+'" cy="'+y(p.percent)+'" r="4" fill="#60d6cf">'+
-     '<title>'+p.temperature+'°C → '+p.percent+'%</title></circle>').join('');
+  const pointsMarkup=sorted.map(p=>
+    '<g class="w-curve-point-marker" data-curve-point-index="'+p.index+
+      '" tabindex="0" role="button" aria-label="'+attr(
+       'Curve point: '+p.temperature+' degrees Celsius, '+p.percent+' percent fan speed')+'">'+
+      '<circle class="w-curve-point-halo" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="12" fill="transparent"/>'+
+      '<circle class="w-curve-point-ring" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="8" fill="none" stroke="#e8f9f7" stroke-width="2"/>'+
+      '<circle class="w-curve-point-dot" cx="'+x(p.temperature)+'" cy="'+y(p.percent)+
+       '" r="4.5" fill="#60d6cf"/>'+
+      '<title>'+p.temperature+'°C · '+p.percent+'% fan speed</title></g>').join('');
   const marker=Number.isFinite(activeTemperature)&&Number.isFinite(activePercent)
     ?'<circle cx="'+x(activeTemperature)+'" cy="'+y(activePercent)+'" r="6" fill="#f2bd6d" stroke="#132535" stroke-width="2"></circle>'+
      '<line x1="'+x(activeTemperature)+'" y1="20" x2="'+x(activeTemperature)+'" y2="180" stroke="#f2bd6d" stroke-dasharray="4 4"/>':'';
-  return '<svg class="w-curve-plot" viewBox="0 0 460 205" role="img" aria-label="Simulated fan curve showing output percentage by input temperature">'+
+  return '<div class="w-curve-graph">'+
+    '<svg class="w-curve-plot" viewBox="0 0 460 205" role="group" aria-label="Fan speed by temperature; hover or focus a point to see its values">'+
     grid+'<line x1="44" y1="174" x2="436" y2="174" stroke="#7890a0"/>'+
     '<text x="44" y="194" fill="#98b2c4" font-size="11">'+lo+'°C</text>'+
     '<text x="436" y="194" text-anchor="end" fill="#98b2c4" font-size="11">'+hi+'°C</text>'+
     '<polyline points="'+poly+'" fill="none" stroke="#62d5ce" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'+
-    pointsMarkup+marker+'</svg>';
+    marker+pointsMarkup+'</svg>'+
+    '<div class="w-curve-tooltip" role="tooltip" data-curve-tooltip hidden>'+
+    '<strong data-curve-tooltip-temp></strong><span data-curve-tooltip-duty></span></div></div>';
  };
  // A fan's measured response belongs to its physical PWM output, not
  // to any of the CPU/GPU temperature curves that select a duty for it.
@@ -279,12 +295,12 @@ const SDWorkspace = (() => {
  };
  // A curve is a series of editable numeric rows, with one blank row always
  // available. Nothing is sent to the elevated collector until Save is clicked.
- const curvePointRow=(point=null,S=null,curveId='')=>{
+ const curvePointRow=(point=null,S=null,curveId='',index=null)=>{
   const temp=point?.temperature==null?'':point.temperature;
   const percent=point?.percent==null?'':point.percent;
   const rpmEstimate=percent===''?{text:'—',hint:'Enter a fan speed.'}:
     estimatedFanRpm(S,curveId,Number(percent));
-  return '<tr data-curve-point-row>'+
+  return '<tr data-curve-point-row'+(index!=null?' data-curve-point-index="'+index+'"':'')+'>'+
    '<td><input type="number" min="-30" max="150" step="1" inputmode="decimal" '+
     'data-curve-temperature value="'+attr(temp)+'" placeholder="°C" aria-label="Curve point temperature in °C"></td>'+
    '<td><input type="number" min="0" max="100" step="1" inputmode="decimal" '+
@@ -296,7 +312,7 @@ const SDWorkspace = (() => {
  const curveTable=(curve,S)=>
   '<div class="w-curve-table-wrap"><table class="w-curve-table" data-curve-table="'+attr(curve.id)+'">'+
   '<thead><tr><th>Temperature (°C)</th><th>Fan speed (%)</th><th title="Based on the fan output calibration, not a measured live RPM">Est. RPM</th><th class="w-curve-actions-col"></th></tr></thead>'+
-  '<tbody>'+(curve.points||[]).map(point=>curvePointRow(point,S,curve.id)).join('')+
+  '<tbody>'+(curve.points||[]).map((point,index)=>curvePointRow(point,S,curve.id,index)).join('')+
     curvePointRow(null,S,curve.id)+'</tbody></table></div>'+
   '<p class="note w-curve-estimate-note">Est. RPM is informational and uses the fan output’s saved measurements. A dash (—) means this duty is not calibrated; hover for details. CPU/GPU MAX mixing can select a higher actual duty.</p>'+
   '<p class="note">Use the empty row to add a point.</p>'+
