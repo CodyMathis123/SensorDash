@@ -61,8 +61,14 @@ public sealed class FanControlRuntime
     // Called by the collection thread after a fresh LHM Computer.Open()
     // following sleep. Records the recovery without creating a new fan
     // authorization. Persistent profiles take over on the next Tick().
-    public void RecordHardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger) =>
+    public void RecordHardwareReopened(TimeSpan gap, DateTimeOffset now, string trigger)
+    {
         _trace.HardwareReopened(gap, now, trigger);
+        // Hardware is freshly reopened, but the Super I/O may not yet be
+        // ready to retain its first software PWM command. Retry approved
+        // profiles after a settle interval on the collection thread.
+        _profiles.SchedulePostResumeRearm(now);
+    }
 
     public object DebugLog() => _trace.ReadRecent();
     
