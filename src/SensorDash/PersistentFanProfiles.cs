@@ -308,6 +308,11 @@ public sealed class PersistentFanProfiles
         lock(_sync)
         {
             profiles=_approved.Values.ToArray();
+            if (_calibration?.Running==true && _calibration.ExpiresAt<=now)
+            {
+                _calibration.Abort("Timed out; approved fan curve restored.");
+                _trace?.Event("CALIBRATION","Session timed out; restored approved curve.",now);
+            }
             releases=_pendingReleases.ToArray();
             _pendingReleases.Clear();
             profileResets=_pendingProfileResets.ToArray();
@@ -342,7 +347,14 @@ public sealed class PersistentFanProfiles
         lock(_sync)
         {
             if(FanResumePolicy.NeedsRearm(previousTick,now,profiles.Length>0))
+            {
                 _overrides.Clear();
+                if(_calibration?.Running==true)
+                {
+                    _calibration.Abort("Sleep/resume interrupted calibration; approved profile restored.");
+                    _trace?.Event("CALIBRATION","Interrupted by sleep/resume; cancelled.",now);
+                }
+            }
             foreach(var id in _overrides.Where(kv=>kv.Value.Expires<=now ||
                 !profiles.Any(p=>p.ChannelIds.Contains(kv.Key))).Select(kv=>kv.Key).ToArray())
             {
@@ -381,18 +393,81 @@ public sealed class PersistentFanProfiles
                     _writer.ResetProfile([id]);
                     manual=null;
                 }
-                var applied=manual==null?demand:
+                FanAutoCalibration? calibrating;
+                lock(_sync)
+                {
+                    calibrating=_calibration?.Running==true && _calibration.ChannelId==id
+                        ?_calibration:null;
+                    if(calibrating!=null && (demand.Failsafe ||
+                        demand.Percent>calibrating.CurrentDuty+0.1 ||
+                        settings?.FanChannelMappings?.Any(m=>m.ChannelId==id &&
+                            m.Kind=="fan" && m.VisuallyIdentified &&
+                            m.RpmSensorId==calibrating.RpmSensorId)!=true))
+                    {
+                        calibrating.Abort("Cooling demand or fan mapping changed; approved fan curve restored.");
+                        _trace?.Event("CALIBRATION",calibrating.Message,now);
+                        calibrating=null;
+                    }
+                }
+                var applied=calibrating!=null
+                    ?new FanDutyDecision(calibrating.CurrentDuty,false,"Bounded automatic calibration")
+                    :manual==null?demand:
                     new FanDutyDecision(manual.Percent,false,"Temporary manual override");
                 if(!controls.TryGetValue(id,out var channel))
                 {
                     problems.Add(id+" missing");
+                    if(calibrating!=null)
+                        lock(_sync)calibrating.Abort("PWM output disappeared; calibration stopped.");
                     _trace?.Observe(profile.Id,id,"missing",demand.Percent,null,false,
                         null,null,null,now);
                     continue;
                 }
+                // Read back the PREVIOUS tick's duty. A new duty about to
+                // be written has not yet reached the Super I/O register.
+                // Calibration controls its own feedback and is excluded.
+                if(calibrating==null && settings!=null &&
+                    settings.FanChannelMappings.Any(m=>m.ChannelId==id && m.Kind=="fan"))
+                {
+                    var check=_feedback.Check(id,_writer.LastDuty(id),frame,now);
+                    if(check.Message.Length>0)
+                    {
+                        _trace?.Event(check.Rearm?"PWM-DRIFT":
+                            check.Recovered?"PWM-RECOVERED":"PWM-FEEDBACK",
+                            "channel="+id+" "+check.Message,now);
+                        if(check.Rearm || check.Recovered)
+                            lock(_sync)_pendingEvents.Enqueue(new FanRecoveryEvent(
+                                check.Rearm?"warning":"info","fan:channel:"+id,
+                                check.Message,_writer.LastDuty(id)));
+                    }
+                    if(check.Rearm)_writer.ForceRearm([id]);
+                }
                 var error=_writer.Apply(id,channel,applied,
-                    manual==null?profile.ResponseSeconds:0,now);
-                if(error!=null)problems.Add(error);
+                    manual==null && calibrating==null?profile.ResponseSeconds:0,now);
+                if(error!=null)
+                {
+                    problems.Add(error);
+                    if(calibrating!=null)lock(_sync)calibrating.Abort(
+                        "PWM writer failed; calibration stopped and firmware restoration attempted.");
+                }
+                if(error==null && calibrating!=null)
+                {
+                    lock(_sync)
+                    {
+                        if(calibrating.Running)
+                        {
+                            if(calibrating.NeedsApply)calibrating.MarkApplied(now);
+                            else if(calibrating.Observe(frame,now))
+                            {
+                                _trace?.Event("CALIBRATION",
+                                    "channel="+id+" "+calibrating.Message,now);
+                                if(!calibrating.Running)
+                                    _pendingEvents.Enqueue(new FanRecoveryEvent(
+                                        calibrating.State=="complete"?"info":"warning",
+                                        "fan:channel:"+id,calibrating.Message,null));
+                            }
+                        }
+                    }
+                }
                 if(_trace!=null)
                 {
                     var mapped=settings?.FanChannelMappings?.FirstOrDefault(m=>
@@ -439,6 +514,9 @@ public sealed class PersistentFanProfiles
         {
             _latest=[];
             _overrides.Clear();
+            if(_calibration?.Running==true)
+                _calibration.Abort("Hardware reinitialized; calibration cancelled.");
+            _feedback.Clear();
         }
         _lastTick=null;
         _postResumeRearmDue=null;
