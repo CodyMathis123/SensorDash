@@ -218,7 +218,8 @@ internal static class FanFeedbackCalibrationSelfTest
         Check(!stoppedSweep.Running && stoppedSweep.Message.Contains("save") &&
               stoppedSweep.Message.Contains("restart threshold"),
             "confirmed fan stop must end calibration with an explicit save invitation and restart caveat");
-        var stoppedSnapshot=System.Text.Json.JsonSerializer.Serialize(stoppedSweep.Snapshot());
+        var stoppedSnapshot=System.Text.Json.JsonSerializer.Serialize(
+            stoppedSweep.Snapshot(),System.Text.Json.JsonSerializerOptions.Web);
         Check(stoppedSnapshot.Contains("\"state\":\"cutoff\"") &&
             stoppedSnapshot.Contains("\"dutyPercent\":10"),
             "read-only snapshot must expose observed cutoff independently from running samples");
