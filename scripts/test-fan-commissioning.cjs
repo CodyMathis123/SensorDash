@@ -61,7 +61,7 @@ async function click(action,duty){
 }
 (async()=>{
  let html=controller.render(S);
- assert.match(html,/Identify and test your fans/);
+ assert.match(html,/Identify the physical fan and tachometer/);
  assert.match(html,/Pump — never test here/);
  assert.match(html,/Test 100%/);
  assert.match(html,/disabled/,'Pump mapping must disable hardware testing');
