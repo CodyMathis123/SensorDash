@@ -306,6 +306,37 @@ internal static class FanFeedbackCalibrationSelfTest
               roundTrip.Measurements.Single(p=>p.DutyPercent==100)
                   .Temperatures.Single().SensorName=="NVMe Temperature",
             "RPM/temperature calibration data must survive JSON persistence");
+        // Cutoff observations are separate metadata. The prior 18 positive
+        // RPM values remain verified, and invalid or contradictory cutoff
+        // data must be removed during settings normalization.
+        var savedStop=new FanChannelMapping{
+            ChannelId="pwm-stop",Label="NVMe Fan",Kind="fan",
+            RpmSensorId="rpm",VisuallyIdentified=true,VerifiedAt=now,
+            Measurements=Enumerable.Range(0,18).Select(i=>new FanCalibrationPoint{
+                DutyPercent=100-i*5,Rpm=350+(100-i*5)*95,ObservedAt=now
+            }).ToList(),
+            Cutoff=new FanCalibrationCutoff{
+                DutyPercent=10,ObservedAt=now,Temperatures=[
+                    new(){SensorId="nvme",SensorName="NVMe Temperature",
+                        Celsius=39,ObservedAt=now}]
+            }
+        };
+        var stoppedNormalized=FanCommissioningRules.Normalize([savedStop]).Single();
+        Check(stoppedNormalized.Measurements.Count==18 &&
+              stoppedNormalized.Measurements.All(p=>p.Rpm>0) &&
+              stoppedNormalized.Cutoff?.DutyPercent==10 &&
+              stoppedNormalized.VerifiedAt.HasValue,
+            "confirmed 10% stop must persist separately from 18 verified running points");
+        var stoppedRoundTrip=System.Text.Json.JsonSerializer.Deserialize<FanChannelMapping>(
+            System.Text.Json.JsonSerializer.Serialize(stoppedNormalized))!;
+        Check(stoppedRoundTrip.Cutoff?.DutyPercent==10 &&
+              stoppedRoundTrip.Cutoff.Temperatures.Single().Celsius==39 &&
+              stoppedRoundTrip.Measurements.Count==18,
+            "saving and reloading the fan mapping must keep RPM observations and cutoff");
+        stoppedNormalized.Cutoff!.DutyPercent=30;
+        Check(FanCommissioningRules.Normalize([stoppedNormalized]).Single().Cutoff==null,
+            "cutoff above a positive running-duty observation is inconsistent and must be dropped");
+
 
         // A fan must be discoverable and calibratable BEFORE any temperature
         // curve or live profile exists. Only the elevated, timed session may
