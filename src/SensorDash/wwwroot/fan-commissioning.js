@@ -41,6 +41,18 @@ const FanCommissioning=(()=>{
   const rpm=map?.rpmSensorId||'';
   const tach=S.sensors.filter(s=>s.type==='Fan');
   const status=S.fanControl?.status||{};
+  const calibration=S.fanControl?.persistent?.calibration;
+  const calibrationHere=calibration?.channelId===selected?calibration:null;
+  const activeOverride=(S.fanControl?.persistent?.overrides||[]).find(x=>x.channelId===selected);
+  const profile=(S.fanControl?.persistent?.profiles||[])
+    .find(p=>(p.channelIds||[]).includes(selected));
+  const minOverride=Math.ceil(Math.max(10,profile?.minimumPercent||0,output.minimum||0));
+  const maxOverride=Math.floor(Math.min(100,output.maximum??100));
+  const feedback=S.fanControl?.persistent?.pwmFeedback?.[selected];
+  const register=S.sensors.find(x=>x.id===selected && x.type==='Control');
+  const calSamples=calibrationHere?.measurements||[];
+  const autoRows=calSamples.map(p=>'<tr><td>'+Number(p.dutyPercent)+'% PWM</td><td>'+
+      Number(p.rpm).toFixed(0)+' RPM</td><td>'+esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
@@ -67,12 +79,23 @@ const FanCommissioning=(()=>{
    '<p class="note">Discovered channel: '+esc(output.name)+' · '+esc(output.mode)+
    ' · supported '+output.minimum+'–'+output.maximum+'% PWM. '+esc(readOnly)+
    ' Selecting an RPM sensor does not prove it belongs to this output.</p>'+
-   '<div class="fc-steps"><div><h3>3 · High-duty calibration</h3>'+
-   '<p class="note">Run a 30-second test. Confirm the correct fans respond, then capture RPM once the speed settles.</p>'+
+   '<div class="fc-steps"><div><h3>3 · Manual speed and supervised tests</h3>'+
+   '<p class="note">Run a 30-second test (70–100%) for unapproved channels, or temporarily override an approved fan curve. All changes require Windows elevation.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcExclusive"><span>I have closed other fan controllers, confirmed this is a <b>fan, not an essential pump</b>, and can observe it during the test.</span></label>'+
    '<div class="w-actions">'+dutyValues.map(percent=>'<button class="btn secondary" data-commissioning="test" data-duty="'+percent+
      '" '+(!isFan||!output.writable||owner?'disabled':'')+'>Test '+percent+'%</button>').join('')+
    '<button class="btn secondary" data-commissioning="release">Release to firmware</button></div>'+
+   (owner && isFan && output.writable && minOverride<=maxOverride?
+      '<div class="w-component"><h3>Approved profile · temporary override</h3>'+
+      '<p class="note">Your approved fan curve remains the fallback. Move the slider, then Apply; overrides expire in 5 minutes and thermal failsafes take priority.</p>'+
+      '<div class="w-fan-quick-controls"><input type="range" id="fcOverrideDuty" min="'+minOverride+
+      '" max="'+maxOverride+'" step="1" value="'+
+      Math.min(maxOverride,Math.max(minOverride,activeOverride?.percent??profile?.minimumPercent??minOverride))+
+      '"><output id="fcOverrideValue">'+
+      Number(activeOverride?.percent??profile?.minimumPercent??minOverride).toFixed(0)+'%</output></div>'+
+      '<div class="w-actions"><button class="btn secondary" data-commissioning="override">Apply for 5 minutes</button>'+
+      (activeOverride?'<button class="btn secondary" data-commissioning="reset-override">Return to fan curve</button>':'')+
+      '</div></div>':'')+
    '<div class="w-live-status">Status: <b id="fcStatus">'+esc(status.state||'off')+'</b>'+
    ' <span id="fcMessage">'+esc(status.message||'')+'</span>'+
    '<span id="fcLiveRpm">RPM: —</span></div>'+
@@ -80,12 +103,34 @@ const FanCommissioning=(()=>{
     (!isFan||!rpm?'disabled':'')+'>Capture current RPM</button><span class="note" id="fcCaptureHelp">'+
    (rpm?'Requires matching active manual test and fresh, settled RPM':'Select and save an RPM sensor to record measurements')+
    '</span></div>'+
+   '<div class="w-live-status">PWM register: <b id="fcLivePwm">'+
+   (Number.isFinite(register?.value)?Number(register.value).toFixed(1)+'%':'—')+
+   '</b> · Feedback check: '+esc(feedback?.state||'waiting')+'</div>'+
    '<div class="table-container"><table class="w-output-table"><thead><tr><th>Command</th><th>Observed tachometer</th><th>Recorded</th></tr></thead><tbody>'+
     sampleRows+'</tbody></table></div></div>'+
-   '<div><h3>4 · Verify response</h3>'+
+   '<div><h3>4 · Automatic PWM/RPM calibration</h3>'+
+   '<p class="note">For a visually identified fan with an enabled profile, run a single bounded sweep from high to low duty, measuring PWM readback and settled RPM at each step. The scan stops if cooling demand rises, feedback fails, or RPM reaches zero. Only an approved fan output is touched.</p>'+
+   '<div class="w-actions"><button class="btn" data-commissioning="start-auto" '+
+   (!owner||!isFan||!map?.visuallyIdentified||!rpm||!output.writable||calibration?.state==='running'?'disabled':'')+
+   '>Start auto calibration</button>'+
+   (calibrationHere?.state==='running'?'<button class="btn secondary" data-commissioning="cancel-auto">Cancel and restore curve</button>':'')+
+   (calibrationHere?.state==='complete'?
+      '<button class="btn secondary" data-commissioning="save-auto">Save measured response</button>':'')+
+   '</div>'+
+   '<p class="note" id="fcAutoStatus">'+esc(calibrationHere?.message||
+      (owner?'Ready when identification and RPM mapping are confirmed.':
+       'Enable an approved fan profile to calibrate below 70%.'))+'</p>'+
+   '<p class="note" id="fcAutoProgress">'+(calibrationHere?
+      calibrationHere.completedSteps+' / '+calibrationHere.totalSteps+
+      ' measured points · '+calibrationHere.state:'')+'</p>'+
+   (calSamples.length?'<div class="table-container"><table><thead><tr><th>PWM</th><th>RPM</th><th>Measured</th></tr></thead><tbody>'+
+      autoRows+'</tbody></table></div>':'')+'</div>'+
+   '<div><h3>5 · Verify response</h3>'+
    '<p class="note">Capture two different test speeds and confirm the intended fans respond. Enable automatic control separately.</p>'+
    '<label class="w-fan-ack"><input type="checkbox" id="fcVisual"><span>I personally confirmed that this PWM output drives the named fan or fan bank, not a pump.</span></label>'+
-   '<div class="w-actions"><button class="btn" data-commissioning="verify" '+(!isFan?'disabled':'')+
+   '<div class="w-actions"><button class="btn secondary" data-commissioning="confirm-identity" '+
+   (!isFan?'disabled':'')+'>Confirm physical fan identity</button>'+
+   '<button class="btn" data-commissioning="verify" '+(!isFan?'disabled':'')+
    '>Verify mapping</button><span class="note">'+(verified?'Last verified '+esc(new Date(map.verifiedAt).toLocaleString()):
     'Not verified · no operating minimum has been established')+'</span></div></div></div></section>';
  };
