@@ -154,6 +154,15 @@ const h={
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
  assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(curvesView.includes('data-curve-point-index="0"') &&
+   curvesView.includes('class="w-curve-point-marker"') &&
+   curvesView.includes('data-curve-tooltip') &&
+   curvesView.includes('role="tooltip"') &&
+   script.includes('const handleCurvePointEnter=') &&
+   script.includes('const handleCurvePointClick=') &&
+   app.includes("document.addEventListener('pointerover'") &&
+   app.includes("document.addEventListener('focusin'"),
+   'Curve graph must expose interactive points linked to editor rows');
  assert.ok(curvesView.includes('Fan control &amp; calibration') &&
    curvesView.includes('Temperature curves'),
    'Fan control, identification and calibration share one workspace');
