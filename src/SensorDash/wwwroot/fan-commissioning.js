@@ -29,6 +29,15 @@ const FanCommissioning=(()=>{
   });
   if(!r.ok)throw Error((await r.text()).slice(0,150));
  };
+ const sensorHidden=(S,s)=>!!s&&(typeof SDWorkspace!=='undefined'&&typeof SDWorkspace.isHidden==='function'?SDWorkspace.isHidden(S,s):
+  (S.settings?.hiddenSensorIds||[]).includes(s.id)||
+  !!(s.deviceId&&(S.settings?.hiddenDeviceIds||[]).includes(s.deviceId))||
+  (S.settings?.hiddenHardwareTypes||[]).some(type=>type.toLowerCase()===String(s.deviceType||'').toLowerCase()));
+ const selectable=(S,s,selectedIds=[])=>!sensorHidden(S,s)||selectedIds.includes(s.id);
+ const measuredAt=timestamp=>{
+  const date=new Date(timestamp);
+  return Number.isFinite(date.getTime())?date.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Unknown date';
+ };
  const sensorLabel=(S,id,fallback)=>{
   const alias=S.settings?.aliases?.[id];
   return typeof alias==='string'&&alias.trim()?alias.trim():fallback||id||'Temperature';
@@ -44,12 +53,12 @@ const FanCommissioning=(()=>{
    Number(p.dutyPercent)+'% PWM</td><td>'+
    Number(p.rpm).toFixed(0)+' RPM</td><td>'+
    temperatureCells(p,S)+'</td><td>'+
-   esc(new Date(p.observedAt).toLocaleTimeString())+'</td></tr>').join('');
+   esc(measuredAt(p.observedAt))+'</td></tr>').join('');
  const cutoffRow=(cutoff,S)=>cutoff?
    '<tr class="fc-cutoff-row"><td>'+Number(cutoff.dutyPercent)+
    '% PWM · observed stop</td><td>0 RPM (confirmed)</td><td>'+
    temperatureCells(cutoff,S)+'</td><td>'+
-   esc(new Date(cutoff.observedAt).toLocaleTimeString())+'</td></tr>':'';
+   esc(measuredAt(cutoff.observedAt))+'</td></tr>':'';
  const persist=async(S,draft,h,message)=>{
   await SDWorkspace.saveSettings(S,draft);
   h.toast(message);h.render();
@@ -62,7 +71,7 @@ const FanCommissioning=(()=>{
   const output=outputs.find(o=>o.id===selected),map=current(S);
   const owner=activeProfile(S,selected);
   const rpm=map?.rpmSensorId||'';
-  const tach=S.sensors.filter(s=>s.type==='Fan');
+  const tach=S.sensors.filter(s=>s.type==='Fan'&&selectable(S,s,[rpm]));
   const status=S.fanControl?.status||{};
   const calibration=S.fanControl?.persistent?.calibration;
   const calibrationHere=calibration?.channelId===selected?calibration:null;
@@ -76,7 +85,10 @@ const FanCommissioning=(()=>{
   const progressText=completed+' of '+total+' stable speeds measured';
   const busyMessage=activeName+' is currently being calibrated. Only one fan can be calibrated at a time.';
   const disabledReason=running?' title="'+esc(busyMessage)+'"':'';
-  const temperatures=S.sensors.filter(x=>x.type==='Temperature');
+  const existingGuards=calibrationGuards.get(selected);
+  const configuredGuardIds=(S.settings?.simulatedFanCurves||[]).map(c=>c.sourceSensorId);
+  const temperatures=S.sensors.filter(x=>x.type==='Temperature'&&selectable(S,x,
+    [existingGuards?.first,existingGuards?.second,...configuredGuardIds]));
   const linkedProfileDrafts=(S.settings?.fanProfiles||[])
     .filter(p=>(p.channelIds||[]).includes(selected));
   const linkedCurveIds=new Set(linkedProfileDrafts.flatMap(p=>p.curveIds||[]));
@@ -88,7 +100,7 @@ const FanCommissioning=(()=>{
   const guardSelect=(id,label,selectedId,optional)=>'<label>'+label+
     '<select id="'+id+'">'+choice('',optional?'None':'Choose a temperature sensor',selectedId)+
     temperatures.map(t=>choice(t.id,S.settings?.aliases?.[t.id]||
-      (t.device+' / '+t.name),selectedId)).join('')+'</select></label>';
+      (t.device+' / '+t.name)+(sensorHidden(S,t)?' [Hidden]':''),selectedId)).join('')+'</select></label>';
   const activeOverride=(S.fanControl?.persistent?.overrides||[]).find(x=>x.channelId===selected);
   const profile=(S.fanControl?.persistent?.profiles||[])
     .find(p=>(p.channelIds||[]).includes(selected));
@@ -141,7 +153,7 @@ const FanCommissioning=(()=>{
    '<div class="w-actions"><label>2 · Friendly name<input id="fcLabel" maxlength="80" value="'+
    esc(map?.label||'')+'" placeholder="e.g. Right radiator fans"></label>'+
    '<label>Optional tachometer (RPM) sensor<select id="fcRpm">'+
-   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,S.settings?.aliases?.[s.id]||(s.device+' / '+s.name),rpm)).join('')+
+   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,S.settings?.aliases?.[s.id]||(s.device+' / '+s.name)+(sensorHidden(S,s)?' [Hidden]':''),rpm)).join('')+
    '</select></label><button class="btn secondary" data-commissioning="save">Save identification</button>'+
    (map?'<button class="btn secondary" data-commissioning="remove">Forget mapping</button>':'')+'</div>'+
    '<p class="note">Discovered channel: '+esc(output.name)+' · '+esc(output.mode)+
