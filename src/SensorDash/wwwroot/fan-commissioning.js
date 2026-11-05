@@ -160,23 +160,25 @@ const FanCommissioning=(()=>{
         'verified pairing':'RPM calibration')+'</button>':'')+
    '</div>'+
    '<div class="fc-calibration-status" id="fcCalibrationBanner" role="status" aria-live="polite" data-status="'+
-   (calibrationHere?.state||(pendingCalibration?'pending':calibrationNotice?'error':'idle'))+'">'+
-   '<strong id="fcCalibrationHeading">'+(calibrationHere?.state==='running'?'Calibrating fan speed':
+   (otherRunning?'busy':calibrationHere?.state||(pendingCalibration?'pending':calibrationNotice?'error':'idle'))+'">'+
+   '<strong id="fcCalibrationHeading">'+(otherRunning?'Another calibration is running':
+     calibrationHere?.state==='running'?'Calibrating fan speed':
      calibrationHere?.state==='complete'?'Calibration complete':
      calibrationHere?.state==='aborted'?'Calibration stopped':
      pendingCalibration?'Waiting for Windows approval':
      calibrationNotice?'Calibration did not start':
      savedCount?'Saved RPM measurements: '+savedCount:'Ready to calibrate')+'</strong>'+
    '<span class="fc-calibration-feedback" id="fcAutoStatus">'+esc(
+     (otherRunning?busyMessage+' This fan remains on its normal settings.':null)||
      calibrationHere?.message||calibrationNotice||
      (pendingCalibration?'Waiting for Windows approval and the service to start the test.':
      verified?'Pairing verified. The full calibration can measure slower speeds.':
      'Verify the fan/RPM pairing before performing a full test.'))+'</span>'+
-   '<progress id="fcCalibrationProgress" value="'+(calibrationHere?.completedSteps||0)+
-     '" max="'+(calibrationHere?.totalSteps||1)+'" '+
-     (!calibrationHere?.state||calibrationHere.state==='aborted'?'hidden':'')+'></progress>'+
-   '<small id="fcAutoProgress">'+(calibrationHere?
-     calibrationHere.completedSteps+' of '+calibrationHere.totalSteps+' stable speeds measured':
+   '<progress id="fcCalibrationProgress" value="'+(otherRunning?completed:calibrationHere?.completedSteps||0)+
+     '" max="'+(otherRunning?total:calibrationHere?.totalSteps||1)+'" '+
+     (!otherRunning&&(!calibrationHere?.state||calibrationHere.state==='aborted')?'hidden':'')+'></progress>'+
+   '<small id="fcAutoProgress">'+(otherRunning?progressText+' on '+esc(activeName):
+     calibrationHere?calibrationHere.completedSteps+' of '+calibrationHere.totalSteps+' stable speeds measured':
      'No calibration running')+'</small></div>'+
    (calSamples.length?'<details class="fc-advanced-toggle" open><summary>Current run · '+
       calSamples.length+' measured speeds</summary><div class="table-container"><table><thead><tr>'+
