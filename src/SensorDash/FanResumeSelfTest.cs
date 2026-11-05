@@ -85,7 +85,9 @@ internal static class FanResumeSelfTest
             var channels=new Dictionary<string,IFanPwmChannel>{{"fan1",fake}};
             SensorFrame Frame(DateTimeOffset at)=>new(at,[
                 new SensorReading("temp","CPU","CPU","CPU","Temperature",30,at),
-                new SensorReading("rpm1","Radiator fan","Motherboard","SuperIO","Fan",490,at)
+                new SensorReading("rpm1","Radiator fan","Motherboard","SuperIO","Fan",490,at),
+                // Independent register readback, not IControl.SoftwareValue.
+                new SensorReading("fan1","Radiator fan PWM","Motherboard","SuperIO","Control",10,at)
             ],null);
             profiles.Tick(channels,Frame(now),now,settings);
             Check(fake.Writes==1 && fake.Resets==1,"First takeover resets cached LHM mode");
@@ -96,8 +98,9 @@ internal static class FanResumeSelfTest
                 "Resume gap must force SetDefault then SetSoftware despite cached 10%");
             Check(trace.ResumeRearms==1,"One resume event");
             var lines=JsonSerializer.Serialize(trace.ReadRecent());
-            Check(lines.Contains("REARM")&&lines.Contains("PWM"),
-                "Text trace includes resume and sampled fan state");
+            Check(lines.Contains("REARM")&&lines.Contains("PWM") &&
+                  lines.Contains("registerDuty=10.0%"),
+                "Text trace includes resume, PWM and independent control register feedback");
             trace.HardwareReopened(TimeSpan.FromSeconds(9.7),now.AddSeconds(66),"windows-resume");
             var hardwareTrace=JsonSerializer.Serialize(trace.ReadRecent());
             Check(hardwareTrace.Contains("HW-REOPEN") &&
@@ -127,8 +130,13 @@ internal static class FanResumeSelfTest
             profiles.Tick(channels,Frame(now.AddSeconds(96)),now.AddSeconds(96));
             Check(fake.Writes==beforeWakeWrites+2,
                 "Stable approved PWM must not be repeatedly reasserted");
-            Check(JsonSerializer.Serialize(trace.ReadRecent()).Contains("POST-RESUME-REARM"),
+            var recent=JsonSerializer.Serialize(trace.ReadRecent());
+            Check(recent.Contains("POST-RESUME-REARM"),
                 "Delayed recovery must appear in diagnostics");
+            Check(recent.Contains("registerDuty=10.0%"),
+                "Post-resume trace must include hardware register duty");
+            Check(recent.Contains("rpm=490.0"),
+                "Post-resume trace must retain measured RPM");
 
             // A duplicate/other controller cannot receive a new authorization
             // merely because the resume policy was triggered.
