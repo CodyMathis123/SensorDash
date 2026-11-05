@@ -61,6 +61,7 @@ if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
             services.AddSingleton(new FanControlRuntime(data));
             // If telemetry is enabled, build its timestamp index before fan
             // collection starts. Otherwise no telemetry work is performed.
+            services.AddHostedService<PerformanceSamplerWorker>();
             services.AddHostedService<TelemetryExportWorker>();
             services.AddHostedService<SensorWorker>();
             services.AddHostedService<SimulationWorker>();
@@ -98,6 +99,7 @@ var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
 });
 builder.WebHost.UseUrls("http://127.0.0.1:8765");
 builder.Services.AddSingleton(new DashboardState(userDir));
+builder.Services.AddHostedService<PerformanceSamplerWorker>();
 builder.Services.AddHostedService<DashboardBridgeWorker>();
 var app = builder.Build();
 IResult Resource(string name, string mediaType)
@@ -285,19 +287,109 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 await app.RunAsync();
 
-// Lightweight on-demand process diagnostics. No hardware reads or GC collection are triggered.
+// One inexpensive sample per minute per process. Does not force GC, poll hardware,
+// retain sensor values or write to disk. History is bounded to 24h / 1440 samples.
+public sealed record ProcessPerformanceSample(
+    DateTimeOffset Timestamp, double UptimeSeconds, long WorkingSetBytes, long PrivateBytes,
+    long ManagedHeapBytes, long GcCommittedBytes, long TotalAllocatedBytes,
+    double? CpuPercentOneCore, double? AllocationBytesPerSecond,
+    int Gen0Collections, int Gen1Collections, int Gen2Collections,
+    int ThreadCount, int HandleCount,
+    double? CollectorCycleMeanMs, double? HardwareScanMeanMs,
+    double? IpcSerializationMeanMs, double? IpcResponseMeanBytes,
+    long CollectorCycles, long IpcResponses);
+
+public static class CollectorPerformance
+{
+    private static long _cycles, _cycleMicroseconds, _scanMicroseconds;
+    private static long _responses, _responseBytes, _serializationMicroseconds;
+    public static void ObserveCycle(double cycleMs, double scanMs)
+    {
+        Interlocked.Increment(ref _cycles);
+        Interlocked.Add(ref _cycleMicroseconds, (long)(cycleMs * 1000));
+        Interlocked.Add(ref _scanMicroseconds, (long)(scanMs * 1000));
+    }
+    public static void ObserveIpcResponse(int bytes, double serializationMs)
+    {
+        Interlocked.Increment(ref _responses);
+        Interlocked.Add(ref _responseBytes, bytes);
+        Interlocked.Add(ref _serializationMicroseconds, (long)(serializationMs * 1000));
+    }
+    public static (double? CycleMs, double? ScanMs, double? IpcMs, double? IpcBytes, long Cycles, long Responses) Drain()
+    {
+        var cycles = Interlocked.Exchange(ref _cycles, 0);
+        var cycleUs = Interlocked.Exchange(ref _cycleMicroseconds, 0);
+        var scanUs = Interlocked.Exchange(ref _scanMicroseconds, 0);
+        var responses = Interlocked.Exchange(ref _responses, 0);
+        var responseBytes = Interlocked.Exchange(ref _responseBytes, 0);
+        var ipcUs = Interlocked.Exchange(ref _serializationMicroseconds, 0);
+        return (cycles > 0 ? cycleUs / (cycles * 1000.0) : null,
+            cycles > 0 ? scanUs / (cycles * 1000.0) : null,
+            responses > 0 ? ipcUs / (responses * 1000.0) : null,
+            responses > 0 ? (double)responseBytes / responses : null, cycles, responses);
+    }
+}
+
 public static class ProcessTelemetry
 {
-    public static object Snapshot()
+    private static readonly object Gate = new();
+    private static readonly List<ProcessPerformanceSample> Samples = [];
+    private static ProcessPerformanceSample? _current;
+    private static double _previousCpuSeconds, _previousAllocatedBytes;
+    private static DateTimeOffset _previousTimestamp;
+
+    public static ProcessPerformanceSample Snapshot() =>
+        Volatile.Read(ref _current) ?? Sample();
+
+    public static ProcessPerformanceSample[] History()
+    {
+        lock (Gate) return Samples.ToArray();
+    }
+
+    public static ProcessPerformanceSample Sample()
     {
         using var process = Process.GetCurrentProcess();
-        return new
+        var now = DateTimeOffset.UtcNow;
+        var cpu = process.TotalProcessorTime.TotalSeconds;
+        var allocated = GC.GetTotalAllocatedBytes(false);
+        var gc = GC.GetGCMemoryInfo();
+        var timings = CollectorPerformance.Drain();
+        lock (Gate)
         {
-            workingSetBytes = process.WorkingSet64,
-            privateBytes = process.PrivateMemorySize64,
-            managedHeapBytes = GC.GetTotalMemory(false),
-            threadCount = process.Threads.Count
-        };
+            var elapsed = (now - _previousTimestamp).TotalSeconds;
+            var cpuPercent = elapsed > 0 ? Math.Max(0, (cpu - _previousCpuSeconds) / elapsed * 100) : (double?)null;
+            var allocationRate = elapsed > 0 ? Math.Max(0, (allocated - _previousAllocatedBytes) / elapsed) : (double?)null;
+            var uptime = Math.Max(0, (now.UtcDateTime - process.StartTime.ToUniversalTime()).TotalSeconds);
+            var sample = new ProcessPerformanceSample(now, uptime, process.WorkingSet64,
+                process.PrivateMemorySize64, GC.GetTotalMemory(false), gc.TotalCommittedBytes,
+                allocated, cpuPercent, allocationRate, GC.CollectionCount(0), GC.CollectionCount(1),
+                GC.CollectionCount(2), process.Threads.Count, process.HandleCount,
+                timings.CycleMs, timings.ScanMs, timings.IpcMs, timings.IpcBytes,
+                timings.Cycles, timings.Responses);
+            _previousTimestamp = now;
+            _previousCpuSeconds = cpu;
+            _previousAllocatedBytes = allocated;
+            Samples.Add(sample);
+            // Both bounds matter when long sleep/resume gaps occur.
+            while (Samples.Count > 1440 || (Samples.Count > 1 &&
+                now - Samples[0].Timestamp > TimeSpan.FromHours(24)))
+                Samples.RemoveAt(0);
+            Volatile.Write(ref _current, sample);
+            return sample;
+        }
+    }
+}
+public sealed class PerformanceSamplerWorker : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try { ProcessTelemetry.Sample(); }
+            catch (Exception) { /* Observability must never stop cooling or the tray. */ }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) { break; }
+        }
     }
 }
 public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null, string? DeviceId = null);
@@ -706,12 +798,15 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
+                var cycleStarted = Stopwatch.GetTimestamp();
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
                 var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
+                var scanStarted = Stopwatch.GetTimestamp();
                 foreach (var hardware in _computer.Hardware)
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
+                var scanMs = Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds;
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 // Fan control must never depend on local SQLite recording.
@@ -740,6 +835,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 if ((now - _lastCleanup).TotalHours >= 1 || cfg.RetentionDays != _lastRetentionDays) {
                     db.Cleanup(cfg.RetentionDays); _lastCleanup = now; _lastRetentionDays = cfg.RetentionDays;
                 }
+                CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
             } catch (Exception ex) {
                 logger.LogError(ex, "Sensor collection failed");
                 controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");
