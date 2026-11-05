@@ -180,6 +180,57 @@ internal static class FanFeedbackCalibrationSelfTest
         Check(sweep.Measurements.Count==1,
             "aborted calibration retains observations for diagnostics only");
 
+        // A downward sweep with 18 valid speeds and a *confirmed* zero RPM
+        // at 10% must keep its positive data and persist the stop separately.
+        // One zero reading is not sufficient to declare a real cutoff.
+        var stoppedSweep=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        var stage=now;
+        for(var duty=100;duty>=15;duty-=5)
+        {
+            stoppedSweep.MarkApplied(stage);
+            for(var second=8;second<=20;second++)
+                stoppedSweep.Observe(Frame(stage.AddSeconds(second),duty,
+                    300+duty*95,39),stage.AddSeconds(second));
+            Check(stoppedSweep.Running && stoppedSweep.CompletedSteps==
+                (100-duty)/5+1,
+                "each positive PWM step must finish before testing lower duty");
+            stage=stage.AddSeconds(21);
+        }
+        Check(stoppedSweep.CompletedSteps==18 &&
+              stoppedSweep.CurrentDuty==10,
+            "all 18 higher-speed samples retained before final 10% step");
+        stoppedSweep.MarkApplied(stage);
+        Check(!stoppedSweep.Observe(Frame(stage.AddSeconds(8),10,0,39),
+            stage.AddSeconds(8)) && stoppedSweep.Running,
+            "first zero-RPM reading must not be declared a fan cutoff");
+        Check(!stoppedSweep.Observe(Frame(stage.AddSeconds(10),10,0,39),
+            stage.AddSeconds(10)) && stoppedSweep.Cutoff==null,
+            "two zero-RPM readings must not establish a confirmed cutoff");
+        Check(stoppedSweep.Observe(Frame(stage.AddSeconds(12),10,0,39),
+            stage.AddSeconds(12)) &&
+            stoppedSweep.State=="cutoff" &&
+            stoppedSweep.Cutoff?.DutyPercent==10 &&
+            stoppedSweep.Measurements.Count==18 &&
+            stoppedSweep.Measurements.All(p=>p.Rpm>0) &&
+            stoppedSweep.Cutoff.Temperatures.Single().Celsius==39,
+            "three distinct zero readings confirm low-duty stop without losing valid RPM samples");
+        Check(!stoppedSweep.Running && stoppedSweep.Message.Contains("save") &&
+              stoppedSweep.Message.Contains("restart threshold"),
+            "confirmed fan stop must end calibration with an explicit save invitation and restart caveat");
+        var stoppedSnapshot=System.Text.Json.JsonSerializer.Serialize(stoppedSweep.Snapshot());
+        Check(stoppedSnapshot.Contains("\"state\":\"cutoff\"") &&
+            stoppedSnapshot.Contains("\"dutyPercent\":10"),
+            "read-only snapshot must expose observed cutoff independently from running samples");
+
+        // A transient tach glitch must not be promoted to a confirmed stop.
+        var glitchSweep=new FanAutoCalibration("pwm","rpm",10,100,now,
+            "response",["temp"],85);
+        glitchSweep.MarkApplied(now);
+        Check(glitchSweep.Observe(Frame(now.AddSeconds(8),100,0),now.AddSeconds(8)) &&
+            glitchSweep.State=="aborted",
+            "zero RPM at high duty remains a safety fault, not a fan cutoff");
+
         // A smoothly increasing RPM is not a settled response even when
         // adjacent samples are individually close together.
         var rising=new FanAutoCalibration("pwm","rpm",70,100,now);
