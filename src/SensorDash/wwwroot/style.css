@@ -457,3 +457,5 @@
 .w-fan-quick-controls output{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--cyan);min-width:62px;text-align:right}
 .w-fan-quick-row .w-actions{margin:8px 0 0}
 @media(max-width:700px){.w-fan-quick-controls{gap:8px}.w-fan-quick-controls output{min-width:48px;font-size:17px}}
+
+.w-curve-graph{position:relative;max-width:740px}
