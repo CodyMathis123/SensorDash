@@ -555,25 +555,17 @@ const SDWorkspace = (() => {
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
    const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
    return controls+renderProfiles(S)+
-      FanControlUx.section(S,'quick','Temporary fan speed',
-        overrideCount?overrideCount+' active override'+(overrideCount===1?'':'s')+
-          ' · expand to return to curves':'On-demand adjustments · closed by default',
-        quickFans(S),false)+
+      FanControlUx.section(S,'calibration','Fan control & calibration',
+        'One place for temporary speed, identification, manual tests and automatic PWM/RPM measurement',
+        editing?FanCommissioning.render(S):
+          WorkspaceLocks.readonly('Fan control & calibration')+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',true)+
       FanControlUx.section(S,'curves','Temperature curves',
         curves.length+' curve(s) · expand to edit',curveContent,false)+
-      FanControlUx.section(S,'advanced','Advanced setup & diagnostics','Only for hardware changes or troubleshooting',FanControlUx.section(S,'commissioning','Identify · Name · Calibrate · Verify',
-        'Hardware identification and measured RPM response',
-        editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):''):
-          WorkspaceLocks.readonly('Commissioning')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release manual control to firmware</button></div>',false)+
-      FanControlUx.section(S,'manual','Manual fan test and diagnostics',
-        'Administrator-approved, time-limited direct PWM tests',
-        editing?renderLiveFanControl(S):
-          WorkspaceLocks.readonly('Manual tests')+
-          '<div class="w-actions">'+button('fan-release','Release to firmware control')+'</div>',false)+
-      FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
-        'Resume recovery, commands, RPM feedback and errors',
-        FanControlDebug.render(S),false),false);
+      FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
+        FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
+          'Resume recovery, commands, RPM feedback and errors',
+          FanControlDebug.render(S),false),false);
  };
  const saves=new WeakMap();
  const saveState=S=>{
