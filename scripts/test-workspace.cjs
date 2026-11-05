@@ -123,6 +123,13 @@ const h={
  };
  const explorer=vm.runInNewContext(explorerSource+'\nexplorer;',browser);
  const explorerHtml=explorer();
+ S.filter='Common types';
+ const commonHtml=explorer();
+ assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power and Load sensors"/,
+  'The Common types preset must explain its included readings');
+ assert.doesNotMatch(commonHtml,/data-filter="Key"/,
+  'The ambiguous Key label must not remain');
+ S.filter='In use';
  assert.ok(explorerHtml.includes('data-usage-system="loop-1"'));
  assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
  assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
@@ -304,6 +311,19 @@ const h={
    channelIds:['pwm1']}],readings:[{id:'radiator',name:'Radiator MAX',
    state:'running',targetPercent:40,message:'MAX of CPU/GPU curves'}],
    overrides:[]}};
+ S.sensors.push(sensor('hiddenPwm','Unused PWM','Control',0));
+ S.byId.set('hiddenPwm',S.sensors.at(-1));
+ S.settings.hiddenSensorIds=['hiddenPwm','pwm1'];
+ S.fanControl.outputs.push({id:'hiddenPwm',name:'Unused PWM',device:'IT8688E',writable:true});
+ const hiddenProfileHtml=workspace.render(S,'curves',h);
+ assert.doesNotMatch(hiddenProfileHtml,/data-profile-channel="radiator" value="hiddenPwm"/,
+  'Unassigned hidden physical PWM output must not appear in profile selector');
+ assert.match(hiddenProfileHtml,/data-profile-channel="radiator" value="pwm1" checked/,
+  'Existing hidden PWM output must remain checked in its configured profile');
+ assert.match(hiddenProfileHtml,/Radiator PWM \[Hidden\]/,
+  'Existing hidden channel must carry an explicit label');
+ S.settings.hiddenSensorIds=[];S.fanControl.outputs.pop();
+ S.byId.delete('hiddenPwm');S.sensors.pop();
  const estimated=workspace.render(S,'curves',h);
  assert.ok(estimated.includes('Target PWM')&&
    estimated.includes('Estimated RPM')&&
