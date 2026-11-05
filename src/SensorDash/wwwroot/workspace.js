@@ -41,6 +41,7 @@ const SDWorkspace = (() => {
      s.value!=null && !isHidden(S,s) &&(group==='all'||s.type===group)
      ).slice(0,n);
  const isHidden=(S,s)=>{
+  if(!s)return false; // An output without a matching sensor cannot inherit a visibility rule.
   const cfg=S.settings||{};
   return !!(cfg.hiddenSensorIds||[]).includes(s.id)
     || !!(s.deviceId&&(cfg.hiddenDeviceIds||[]).includes(s.deviceId))
