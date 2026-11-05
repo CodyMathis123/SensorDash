@@ -314,7 +314,7 @@ const FanCommissioning=(()=>{
    }
    try{
     await command({action:'calibrate',channelId:selected,percent:100,
-      durationSeconds:600,calibrationMode:identifying?'identify':'response',
+      durationSeconds:identifying?300:1500,calibrationMode:identifying?'identify':'response',
       temperatureSensorIds:guards,temperatureLimit:limit,
       confirmExclusiveOwnership:true});
    }catch(error){
