@@ -459,3 +459,27 @@
 @media(max-width:700px){.w-fan-quick-controls{gap:8px}.w-fan-quick-controls output{min-width:48px;font-size:17px}}
 
 .w-curve-graph{position:relative;max-width:740px}
+
+/* Interactive fan curve preview: hover/focus points and linked editor rows. */
+.w-curve-graph{width:100%;margin:10px 0 18px}
+.w-curve-graph .w-curve-plot{margin:0}
+.w-curve-point-marker{cursor:pointer;outline:none}
+.w-curve-point-halo{pointer-events:all}
+.w-curve-point-ring{opacity:0;transition:opacity .12s ease}
+.w-curve-point-dot{transition:fill .12s ease}
+.w-curve-point-marker.is-active .w-curve-point-ring,
+.w-curve-point-marker:hover .w-curve-point-ring,
+.w-curve-point-marker:focus-visible .w-curve-point-ring{opacity:1}
+.w-curve-point-marker.is-active .w-curve-point-dot,
+.w-curve-point-marker:hover .w-curve-point-dot,
+.w-curve-point-marker:focus-visible .w-curve-point-dot{fill:#f9dd92}
+.w-curve-tooltip{position:absolute;z-index:5;max-width:190px;min-width:132px;pointer-events:none;
+ transform:translate(-50%,-100%);padding:8px 12px;border-radius:9px;
+ background:#203d4a;border:1px solid #71aaa9;box-shadow:0 8px 24px #0008;
+ color:#ecfbfd;text-align:center;font-size:12px;line-height:1.5}
+.w-curve-tooltip[hidden]{display:none}
+.w-curve-tooltip.is-below{transform:translate(-50%,0)}
+.w-curve-tooltip strong{display:block;font-size:14px;font-variant-numeric:tabular-nums}
+.w-curve-tooltip span{display:block;color:#abe4dc}
+.w-curve-table tbody tr.is-active td{background:#21414a}
+.w-curve-table tbody tr.is-active input{border-color:#76d9cb;box-shadow:0 0 0 1px #4e8f87}
