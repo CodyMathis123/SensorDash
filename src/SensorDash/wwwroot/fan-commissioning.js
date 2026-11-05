@@ -102,6 +102,7 @@ const FanCommissioning=(()=>{
   const isFan=map?.kind==='fan';
   const observations=(map?.measurements||[]).slice().sort((a,b)=>a.dutyPercent-b.dutyPercent);
   const verified=!!map?.verifiedAt && qualifyResponse(map);
+  const savedCutoff=map?.cutoff||null;
   const savedCount=observations.length;
   const savedRange=observations.length?
     Math.min(...observations.map(p=>p.dutyPercent))+'–'+
@@ -113,7 +114,6 @@ const FanCommissioning=(()=>{
     ' · '+savedCount+' running-speed points · '+savedRange:'No saved RPM measurements';
   const identifyReady=isFan && !!rpm && output.writable;
   const responseReady=identifyReady && verified;
-  const savedCutoff=map?.cutoff||null;
   const sampleRows=observations.length?
    measurementRows(observations,S)+cutoffRow(savedCutoff,S):
    '<tr><td colspan="4">No RPM measurements saved for this fan yet</td></tr>';
