@@ -187,21 +187,6 @@ internal sealed class FanAutoCalibration
         return result;
     }
 
-    // A live temperature curve may require more cooling than the next
-    // calibration stage. Keep its safety priority, but allow the user to
-    // explicitly save the already-valid partial response rather than
-    // mislabeling it as a failed mapping or losing 14 stable measurements.
-    internal void FinishPartial(string reason)
-    {
-        if(!Running)return;
-        State=_measurements.Count>=2?"partial":"aborted";
-        Message=State=="partial"
-            ?reason+" "+_measurements.Count+
-                " stable speeds were measured. Review and save this partial range if useful."
-            :reason+" Too few settled measurements to save.";
-        NeedsApply=false;
-    }
-
     // A step is accepted only after:
     // - a minimum spin-up delay (no early readings are counted),
     // - >= 8 DISTINCT tachometer observations spanning >= 10 seconds,
