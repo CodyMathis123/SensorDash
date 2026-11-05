@@ -89,17 +89,20 @@ async function click(action,duty){
  assert.equal(controller.qualifyResponse({
   kind:'pump',visuallyIdentified:true,rpmSensorId:'tach1',
   measurements:[{dutyPercent:70,rpm:600},{dutyPercent:100,rpm:1600}]}),false);
- assert.ok(source.includes("control.state!=='active'") &&
-  source.includes("control.channelId!==selected") &&
+ assert.ok(source.includes("control.state==='active'") &&
+  source.includes("control.channelId===selected") &&
   source.includes("Date.now()-activeSince<5000"),
   'RPM sampling must require current matching active control plus stabilization');
  assert.ok(source.includes('Math.abs(Date.now()-observed)>6000'),
   'Reject stale RPM readings');
  assert.ok(model.includes('m.Kind=="fan"') &&
-  model.includes('p.DutyPercent is >=70 and <=100') &&
+  model.includes('p.DutyPercent is >=10 and <=100') &&
   model.includes('m.VerifiedAt=null'),
   'Server-side normalization must refuse pump data, unsafe points and invalid verification');
  assert.ok(workspace.includes('FanCommissioning.render(S)') &&
+  workspace.includes("'calibration','Fan control & calibration'") &&
+  !workspace.includes("FanControlUx.section(S,'manual'") &&
+  !workspace.includes("FanControlUx.section(S,'quick'") &&
   workspace.includes("mapping(o.id)?.label") &&
   read('src/SensorDash/FanControlRuntime.cs').includes('Channel identified as a pump; manual session stopped.') &&
   app.includes('FanCommissioning.handle(e,S') &&
@@ -107,5 +110,25 @@ async function click(action,duty){
   page.includes('/fan-commissioning.js') &&
   backend.includes('FanCommissioningSelfTest.Run()'),
   'Commissioning must integrate into the existing dashboard and executable self-test');
- console.log('PASS: pump exclusion, explicit elevation, conservative duty limits, observation gating, model verification, and separated frontend module');
+ // An approved fan with physical identification can start a single
+ // administrator-authorized sweep without separate per-step elevation.
+ S.fanControl.persistent.profiles=[{
+   id:'p',channelIds:['channel1'],minimumPercent:10
+ }];
+ S.settings.fanChannelMappings[0].visuallyIdentified=true;
+ await click('start-auto');
+ assert.equal(requests.length,1,'Auto calibration requires exclusive-ownership acknowledgment');
+ nodes.get('fcExclusive').checked=true;
+ await click('start-auto');
+ assert.equal(requests.length,2);
+ assert.equal(requests[1].payload.action,'calibrate');
+ assert.equal(requests[1].payload.channelId,'channel1');
+ assert.equal(requests[1].payload.durationSeconds,240);
+ assert.equal(requests[1].payload.confirmExclusiveOwnership,true);
+ const enabled=controller.render(S);
+ assert.match(enabled,/Start auto calibration/);
+ assert.match(enabled,/Approved profile/);
+ assert.match(enabled,/Apply for 5 minutes/);
+ assert.match(enabled,/PWM register/);
+ console.log('PASS: consolidated fan control, one elevated auto-sweep, pump exclusion, calibration data validation and PWM feedback');
 })().catch(e=>{console.error(e);process.exitCode=1});
