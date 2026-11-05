@@ -222,36 +222,67 @@ const FanCommissioning=(()=>{
    entry.visuallyIdentified=true;
    return persist(S,draft,h,'Fan identity confirmed. Calibration remains observational.');
   }
-  if(action==='start-auto'){
-   if(!map||map.kind!=='fan'||!map.visuallyIdentified||!map.rpmSensorId||
-      byId('fcRpm')?.value!==map.rpmSensorId||!activeProfile(S,selected))
-    throw Error('Auto calibration requires a confirmed fan, matching RPM sensor and enabled approved profile.');
+  if(action==='start-identify'||action==='start-auto'){
+   const identifying=action==='start-identify';
+   if(!map||map.kind!=='fan'||!map.rpmSensorId||byId('fcKind')?.value!=='fan'||
+      byId('fcRpm')?.value!==map.rpmSensorId||!channel.writable)
+    throw Error('Save an identified fan output and matching RPM sensor before calibrating.');
+   if(!identifying&&(!map.visuallyIdentified||!map.verifiedAt||
+      !qualifyResponse(map)))
+    throw Error('First verify the physical PWM/RPM pairing at 70–100% duty.');
    if(!byId('fcExclusive')?.checked)
-    throw Error('Confirm you can observe the fan and no other fan-control software is active.');
+    throw Error('Confirm you can observe the fan and no other control software is active.');
+   const guards=[byId('fcGuardPrimary')?.value,byId('fcGuardSecondary')?.value]
+     .filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
+   const limit=Number(byId('fcGuardLimit')?.value||85);
+   if(!identifying){
+    if(!guards.length||guards.some(id=>!S.sensors.some(x=>x.id===id&&
+      x.type==='Temperature')))
+     throw Error('Select at least one real CPU/GPU temperature guard for low-duty calibration.');
+    if(!Number.isFinite(limit)||limit<35||limit>100)
+     throw Error('Choose a temperature limit between 35 and 100°C.');
+    for(const id of guards){
+     const sensor=S.sensors.find(x=>x.id===id);
+     const age=Date.now()-Date.parse(sensor?.observedAt||'');
+     if(!Number.isFinite(sensor?.value)||!Number.isFinite(age)||age>4000||
+        age< -4000||sensor.value>=limit)
+      throw Error('Guard temperatures must be fresh and below the configured limit.');
+    }
+   }
    await command({action:'calibrate',channelId:selected,percent:100,
-     durationSeconds:240,confirmExclusiveOwnership:true});
-   h.toast('Approve Windows elevation once to start supervised auto calibration.');
+     durationSeconds:240,calibrationMode:identifying?'identify':'response',
+     temperatureSensorIds:guards,temperatureLimit:limit,
+     confirmExclusiveOwnership:true});
+   h.toast('Approve elevation to '+(identifying?
+     'verify the physical fan/RPM pairing.':'measure the guarded fan response.'));
    return;
   }
   if(action==='cancel-auto'){
    await command({action:'cancel-calibration',channelId:selected,percent:100,
-      durationSeconds:30});
-   h.toast('Approve elevation to cancel; approved curve will resume.');
+     durationSeconds:30});
+   h.toast('Approve elevation to cancel and restore the prior controller.');
    return;
   }
   if(action==='save-auto'){
    const result=S.fanControl?.persistent?.calibration;
    if(!result||result.channelId!==selected||result.state!=='complete'||
-     !map||map.kind!=='fan'||!map.visuallyIdentified)
-    throw Error('Only a completed calibration for this confirmed fan can be saved.');
+      !map||map.kind!=='fan'||result.rpmSensorId!==map.rpmSensorId)
+    throw Error('Only a completed calibration of this fan and RPM sensor can be saved.');
+   if(result.mode==='identify'&&!byId('fcVisual')?.checked)
+    throw Error('Visually confirm that the selected output drives these fans before verifying the pairing.');
+   if(result.mode==='response'&&(!map.verifiedAt||!map.visuallyIdentified))
+    throw Error('A verified physical pairing is required before saving a full response.');
    const sample=result.measurements||[];
-   if(!qualifyResponse({...map,measurements:sample}))
-    throw Error('Measured response was not consistent enough to verify; existing calibration was preserved.');
+   if(!qualifyResponse({...map,visuallyIdentified:true,measurements:sample}))
+    throw Error('Measured RPM response is inconsistent; previous calibration was preserved.');
    const draft=structuredClone(S.settings);
    const entry=draft.fanChannelMappings.find(m=>m.channelId===selected);
+   if(result.mode==='identify')entry.visuallyIdentified=true;
    entry.measurements=sample;
    entry.verifiedAt=new Date().toISOString();
-   return persist(S,draft,h,'Automatic PWM/RPM calibration saved and verified.');
+   return persist(S,draft,h,result.mode==='identify'?
+     'PWM/RPM pairing verified. A full low-duty sweep can now be performed before assigning a temperature curve.':
+     'Full fan PWM/RPM response saved; temperature curves can now display estimated RPM.');
   }
   if(action==='override'){
    if(!map||map.kind!=='fan'||!activeProfile(S,selected))
@@ -360,6 +391,14 @@ const FanCommissioning=(()=>{
  const change=(e,S,h)=>{
   if(e.target.id==='fcOverrideDuty'){
    if(byId('fcOverrideValue'))byId('fcOverrideValue').textContent=e.target.value+'%';
+   return true;
+  }
+  if(['fcGuardPrimary','fcGuardSecondary','fcGuardLimit'].includes(e.target.id)){
+   calibrationGuards.set(selected,{
+     first:byId('fcGuardPrimary')?.value||'',
+     second:byId('fcGuardSecondary')?.value||'',
+     limit:byId('fcGuardLimit')?.value||'85'
+   });
    return true;
   }
   if(e.target.id!=='fcChannel')return false;
