@@ -319,6 +319,7 @@ function settingsView(){
   '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
   '<div class="stat-row"><label>GC committed memory</label><strong>'+formatMb(p?.gcCommittedBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Process uptime</label><strong>'+perfUptime(p?.uptimeSeconds)+'</strong></div>'+
+  '<div class="stat-row"><label>Sampled at</label><strong>'+(p?.timestamp?new Date(p.timestamp).toLocaleString():'—')+'</strong></div>'+
   '<div class="stat-row"><label>Total allocations since start</label><strong>'+formatMb(p?.totalAllocatedBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Allocation rate</label><strong>'+perfNumber(Number.isFinite(p?.allocationBytesPerSecond)?p.allocationBytesPerSecond/1048576:null,' MB/s',3)+'</strong></div>'+
   '<div class="stat-row"><label>GC collections · Gen 0 / 1 / 2</label><strong>'+[p?.gen0Collections,p?.gen1Collections,p?.gen2Collections].map(v=>Number.isFinite(v)?v:'—').join(' / ')+'</strong></div>'+
