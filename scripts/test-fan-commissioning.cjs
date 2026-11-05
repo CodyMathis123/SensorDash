@@ -65,7 +65,16 @@ async function click(action,duty){
  S.sensors.push({id:'tachHidden',type:'Fan',name:'Hidden RPM',device:'Mainboard',deviceId:'hiddenDevice',value:400},
   {id:'tempHidden',type:'Temperature',name:'Hidden temperature',device:'CPU',deviceId:'hiddenDevice',value:44});
  S.settings.hiddenDeviceIds=['hiddenDevice'];
+ S.sensors.push({id:'channelHidden',type:'Control',name:'Hidden PWM',device:'Mainboard',deviceId:'hiddenDevice',value:0});
+ S.fanControl.outputs.push({id:'channelHidden',name:'Hidden PWM',device:'Mainboard',mode:'Undefined',minimum:0,maximum:100,writable:true});
  let html=controller.render(S);
+ assert.doesNotMatch(html,/<option value="channelHidden"/,
+  'Hidden physical PWM outputs must not appear in calibration choices');
+ S.settings.fanChannelMappings.push({channelId:'channelHidden',label:'Previously configured',kind:'fan',rpmSensorId:'tach1'});
+ html=controller.render(S);
+ assert.match(html,/<option value="channelHidden"[^>]*>[^<]*\[Hidden\]/,
+  'Previously configured hidden PWM output must remain identifiable');
+ S.settings.fanChannelMappings.pop();
  assert.doesNotMatch(html,/value="tachHidden"|value="tempHidden"/,
   'Hidden device sensors must be excluded from new calibration selections');
  S.settings.fanChannelMappings[0].rpmSensorId='tachHidden';
