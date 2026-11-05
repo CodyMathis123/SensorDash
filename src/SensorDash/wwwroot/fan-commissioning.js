@@ -64,7 +64,14 @@ const FanCommissioning=(()=>{
   h.toast(message);h.render();
  };
  const render=S=>{
-  const outputs=channels(S);
+  const configuredOutputIds=new Set([
+   ...mappings(S).map(m=>m.channelId),
+   ...(S.settings?.fanProfiles||[]).flatMap(p=>p.channelIds||[]),
+   ...(S.fanControl?.persistent?.profiles||[]).flatMap(p=>p.channelIds||[]),
+   S.fanControl?.persistent?.calibration?.channelId
+  ].filter(Boolean));
+  const outputs=channels(S).filter(o=>configuredOutputIds.has(o.id)||
+   !sensorHidden(S,S.byId?.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   if(!outputs.length)return '<section class="panel fc-panel"><h2>Identify · Name · Calibrate · Verify</h2>'+
    '<p class="note">No controllable fan outputs found.</p></section>';
   if(!outputs.some(o=>o.id===selected))selected=outputs[0].id;
@@ -147,14 +154,15 @@ const FanCommissioning=(()=>{
        'View '+esc(activeName)+'</button>':'')+
      '</div>':'')+
    '<div class="w-actions"><label>1 · Physical PWM output<select id="fcChannel">'+
-   outputs.map(o=>choice(o.id,o.device+' / '+o.name+' ['+o.id+']',selected)).join('')+
+   outputs.map(o=>choice(o.id,o.device+' / '+o.name+' ['+o.id+']'+
+    (sensorHidden(S,S.byId?.get(o.id)||S.sensors.find(s=>s.id===o.id))?' [Hidden]':''),selected)).join('')+
    '</select></label><label>Type of connected equipment<select id="fcKind">'+
    [['unknown','Unknown / not identified'],['fan','Fan or fan bank'],['pump','Pump — never test here']]
    .map(([v,n])=>choice(v,n,map?.kind||'unknown')).join('')+'</select></label></div>'+
    '<div class="w-actions"><label>2 · Friendly name<input id="fcLabel" maxlength="80" value="'+
    esc(map?.label||'')+'" placeholder="e.g. Right radiator fans"></label>'+
    '<label>Optional tachometer (RPM) sensor<select id="fcRpm">'+
-   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,S.settings?.aliases?.[s.id]||(s.device+' / '+s.name)+(sensorHidden(S,s)?' [Hidden]':''),rpm)).join('')+
+   choice('','No RPM feedback available',rpm)+tach.map(s=>choice(s.id,(S.settings?.aliases?.[s.id]||(s.device+' / '+s.name))+(sensorHidden(S,s)?' [Hidden]':''),rpm)).join('')+
    '</select></label><button class="btn secondary" data-commissioning="save">Save identification</button>'+
    (map?'<button class="btn secondary" data-commissioning="remove">Forget mapping</button>':'')+'</div>'+
    '<p class="note">Discovered channel: '+esc(output.name)+' · '+esc(output.mode)+
