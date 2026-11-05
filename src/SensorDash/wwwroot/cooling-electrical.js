@@ -163,15 +163,19 @@ const CoolingElectrical=(()=>{
   '" '+extra+' value="'+esc(value??'')+'"></label>';
  const numeric=(scope,key,value,title,step='any')=>
   textInput(scope,key,value,title,'type="number" min="0" step="'+step+'"'+(key==='wattsPerUnit'?' title="Used instead of volts × amps when provided"':''));
+ const hiddenSensor=(S,s)=>typeof SDWorkspace!=='undefined'&&typeof SDWorkspace.isHidden==='function'?SDWorkspace.isHidden(S,s):
+  (S.settings?.hiddenSensorIds||[]).includes(s.id)||
+  (S.settings?.hiddenDeviceIds||[]).includes(s.deviceId)||
+  (S.settings?.hiddenHardwareTypes||[]).some(t=>t.toLowerCase()===String(s.deviceType||'').toLowerCase());
  const sensorSelect=(S,scope,field,type,chosen)=>{
   const options=(S.sensors||[]).filter(s=>s.type===type&&
-   (s.id===chosen||!SDWorkspace.isHidden(S,s)));
+   (s.id===chosen||!hiddenSensor(S,s)));
   return '<label>'+esc(field==='powerSensorId'?'Measured power sensor':
    field==='controlSensorId'?'PWM duty sensor (optional)':'Tachometer sensor')+
    '<select data-electrical-field="'+field+'" data-electrical-scope="'+esc(scope)+'">'+
    '<option value="">No sensor</option>'+options.map(s=>
     '<option value="'+esc(s.id)+'" '+(s.id===chosen?'selected':'')+'>'+esc((S.settings?.aliases?.[s.id]||(s.device+' / '+s.name))+
-      (SDWorkspace.isHidden(S,s)?' [Hidden]':''))+'</option>')
+      (hiddenSensor(S,s)?' [Hidden]':''))+'</option>')
     .join('')+'</select></label>';
  };
  const editor=(S,c,scope,editing)=>{
