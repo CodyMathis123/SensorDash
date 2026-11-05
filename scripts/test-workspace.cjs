@@ -203,7 +203,7 @@ const h={
  assert.ok(estimated.includes('Est. RPM')&&
    estimated.includes('≈770')&&
    estimated.includes('≈1,050')&&
-   estimated.includes('MAX profile'),
+   estimated.includes('MAX mixing'),
    'CPU/GPU MAX curves reuse one physical fan calibration to estimate RPM');
  S.settings.simulatedFanCurves=previousCurves;
  S.settings.fanProfiles=previousProfiles;
