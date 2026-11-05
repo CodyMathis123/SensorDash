@@ -342,6 +342,97 @@ const SDWorkspace = (() => {
     throw Error('Each temperature must be unique.');
   return preserveRowOrder?points:sorted;
  };
+ // Reindex after insertion/removal; indices always refer to the displayed
+ // editor row, never to a sorted copy of the temperature points.
+ const indexCurveRows=(table)=>{
+  table.querySelectorAll('tbody tr[data-curve-point-row]').forEach((row,index)=>{
+   const temperature=row.querySelector('[data-curve-temperature]')?.value.trim();
+   const percent=row.querySelector('[data-curve-percentage]')?.value.trim();
+   if(temperature!=='' && percent!=='')row.dataset.curvePointIndex=String(index);
+   else delete row.dataset.curvePointIndex;
+  });
+ };
+ const curvePointScope=element=>element?.closest?.('[data-fan-curve-editor]')||
+    element?.closest?.('.panel');
+ const clearCurvePoint=(scope)=>{
+  if(!scope)return;
+  scope.querySelectorAll('.w-curve-point-marker.is-active, tr[data-curve-point-row].is-active')
+   .forEach(node=>node.classList.remove('is-active'));
+  const tooltip=scope.querySelector('[data-curve-tooltip]');
+  if(tooltip)tooltip.hidden=true;
+ };
+ const activateCurvePoint=(origin,index)=>{
+  const scope=curvePointScope(origin);
+  if(!scope || !Number.isInteger(index) || index<0)return false;
+  const markers=[...scope.querySelectorAll('.w-curve-point-marker[data-curve-point-index]')];
+  const selected=markers.find(n=>Number(n.dataset.curvePointIndex)===index);
+  if(!selected){clearCurvePoint(scope);return false;}
+  const table=scope.querySelector('[data-curve-table]');
+  const rows=table?[...table.querySelectorAll('tbody tr[data-curve-point-row]')]:[];
+  markers.forEach(node=>node.classList.toggle('is-active',node===selected));
+  rows.forEach(row=>row.classList.toggle('is-active',
+     Number(row.dataset.curvePointIndex)===index &&
+     row.dataset.curvePointIndex!=null));
+  const tooltip=scope.querySelector('[data-curve-tooltip]');
+  const graph=selected.closest('.w-curve-graph');
+  if(tooltip && graph){
+   const temp=selected.dataset.curveDotTemperature;
+   const duty=selected.dataset.curveDotPercent;
+   const tempLabel=tooltip.querySelector('[data-curve-tooltip-temp]');
+   const dutyLabel=tooltip.querySelector('[data-curve-tooltip-duty]');
+   if(tempLabel)tempLabel.textContent=temp+' °C';
+   if(dutyLabel)dutyLabel.textContent=duty+'% fan speed';
+   // Position relative to the SVG viewport, not the document, and keep
+   // tooltips within the plot at narrow mobile widths.
+   const dot=selected.querySelector('.w-curve-point-dot')||selected;
+   const dotRect=dot.getBoundingClientRect();
+   const rect=graph.getBoundingClientRect();
+   const left=Math.max(84,Math.min(rect.width-84,
+     (dotRect.left+dotRect.right)/2-rect.left));
+   const y=dotRect.top-rect.top;
+   const below=y<65;
+   tooltip.style.left=left+'px';
+   tooltip.style.top=(below?dotRect.bottom-rect.top+12:y-12)+'px';
+   tooltip.classList.toggle('is-below',below);
+   tooltip.hidden=false;
+  }
+  return true;
+ };
+ const curvePointNode=event=>event.target?.closest?.(
+    '.w-curve-point-marker[data-curve-point-index],tr[data-curve-point-row][data-curve-point-index]');
+ const handleCurvePointEnter=event=>{
+  const node=curvePointNode(event);
+  if(!node)return false;
+  if(event.relatedTarget && node.contains(event.relatedTarget))return false;
+  return activateCurvePoint(node,Number(node.dataset.curvePointIndex));
+ };
+ const handleCurvePointExit=event=>{
+  const node=curvePointNode(event);
+  if(!node)return false;
+  if(event.relatedTarget && node.contains(event.relatedTarget))return false;
+  const scope=curvePointScope(node);
+  const focused=document.activeElement?.closest?.('[data-curve-point-index]');
+  if(focused && focused!==node && scope?.contains(focused)){
+   activateCurvePoint(focused,Number(focused.dataset.curvePointIndex));
+  }else clearCurvePoint(scope);
+  return true;
+ };
+ const handleCurvePointClick=event=>{
+  const dot=event.target?.closest?.('.w-curve-point-marker[data-curve-point-index]');
+  if(!dot)return false;
+  const scope=curvePointScope(dot);
+  const table=scope?.querySelector('[data-curve-table]');
+  if(!table)return false; // Read-only charts still have hover/focus tooltips.
+  const row=[...table.querySelectorAll('tbody tr[data-curve-point-row]')]
+    .find(r=>r.dataset.curvePointIndex===dot.dataset.curvePointIndex);
+  const input=row?.querySelector('[data-curve-temperature]');
+  if(!input)return false;
+  event.preventDefault();
+  input.focus({preventScroll:true});
+  row.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+  activateCurvePoint(row,Number(row.dataset.curvePointIndex));
+  return true;
+ };
  const updateCurvePreview=(table,S)=>{
   const container=table.closest('.panel');
   const message=container?.querySelector('[data-curve-feedback]');
@@ -1089,5 +1180,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,quickInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
 })();
