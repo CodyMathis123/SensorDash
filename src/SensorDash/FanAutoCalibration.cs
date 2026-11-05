@@ -162,6 +162,46 @@ internal sealed class FanAutoCalibration
         return true;
     }
 
+    // Capture the exact thermal observations used during an accepted RPM
+    // sample, not whatever temperatures happen to be current when a user
+    // opens the table later. No guard exists in the identify-only preflight.
+    private List<FanCalibrationTemperature> CaptureTemperatures(
+        SensorFrame frame, DateTimeOffset now)
+    {
+        var result=new List<FanCalibrationTemperature>();
+        foreach(var id in _thermalGuards)
+        {
+            var sensor=frame.Sensors.FirstOrDefault(s=>s.Id==id &&
+                s.Type=="Temperature");
+            if(sensor?.ObservedAt is not { } observed ||
+               (now-observed).TotalSeconds is < -4 or > 10 ||
+               sensor.Value is not { } value || !double.IsFinite(value))
+                continue;
+            result.Add(new FanCalibrationTemperature{
+                SensorId=id,
+                SensorName=string.IsNullOrWhiteSpace(sensor.Name)?id:sensor.Name,
+                Celsius=value,
+                ObservedAt=observed
+            });
+        }
+        return result;
+    }
+
+    // A live temperature curve may require more cooling than the next
+    // calibration stage. Keep its safety priority, but allow the user to
+    // explicitly save the already-valid partial response rather than
+    // mislabeling it as a failed mapping or losing 14 stable measurements.
+    internal void FinishPartial(string reason)
+    {
+        if(!Running)return;
+        State=_measurements.Count>=2?"partial":"aborted";
+        Message=State=="partial"
+            ?reason+" "+_measurements.Count+
+                " stable speeds were measured. Review and save this partial range if useful."
+            :reason+" Too few settled measurements to save.";
+        NeedsApply=false;
+    }
+
     // A step is accepted only after:
     // - a minimum spin-up delay (no early readings are counted),
     // - >= 8 DISTINCT tachometer observations spanning >= 10 seconds,
@@ -240,7 +280,8 @@ internal sealed class FanAutoCalibration
                     {
                         _stability="stable";
                         _measurements.Add(new FanCalibrationPoint{
-                            DutyPercent=CurrentDuty,Rpm=mean,ObservedAt=now
+                            DutyPercent=CurrentDuty,Rpm=mean,ObservedAt=now,
+                            Temperatures=CaptureTemperatures(frame,now)
                         });
                         _index++;
                         _recentRpm.Clear();
