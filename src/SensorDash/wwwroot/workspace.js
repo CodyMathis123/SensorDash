@@ -253,47 +253,7 @@ const SDWorkspace = (() => {
     '<div class="w-curve-tooltip" role="tooltip" data-curve-tooltip hidden>'+
     '<strong data-curve-tooltip-temp></strong><span data-curve-tooltip-duty></span></div></div>';
  };
- // A fan's measured response belongs to its physical PWM output, not
- // to any of the CPU/GPU temperature curves that select a duty for it.
- // Multiple curves in a MAX profile deliberately share this calibration.
- // Compact, observational estimate. Does not affect the commanded duty.
- // A single verified fan mapping can be shared by CPU/GPU MAX curves.
- const estimatedFanRpm=(S,curveId,percent)=>{
-  if(!S||!Number.isFinite(percent))return {text:'—',hint:'Enter a fan speed to see the estimate.'};
-  const profiles=(S.settings?.fanProfiles||[])
-    .filter(p=>(p.curveIds||[]).includes(curveId));
-  const ids=[...new Set(profiles.flatMap(p=>p.channelIds||[]))];
-  if(!ids.length)return {text:'—',hint:'Assign this curve to a fan profile to show estimated RPM.'};
-  const results=[],reasons=[];
-  for(const id of ids){
-   const m=(S.settings?.fanChannelMappings||[]).find(m=>m.channelId===id);
-   const name=m?.label||id;
-   if(m?.kind!=='fan'||!m.verifiedAt){
-    reasons.push(name+': fan/RPM pairing not verified.');continue;
-   }
-   const points=[...(m.measurements||[])]
-    .filter(p=>Number.isFinite(p.dutyPercent)&&Number.isFinite(p.rpm)&&p.rpm>0)
-    .sort((a,b)=>a.dutyPercent-b.dutyPercent);
-   if(points.length<2){reasons.push(name+': no RPM calibration saved.');continue;}
-   if(percent<points[0].dutyPercent||percent>points.at(-1).dutyPercent){
-    reasons.push(name+': RPM measured only from '+points[0].dutyPercent+
-      '% to '+points.at(-1).dutyPercent+'%; run the full fan calibration for this point.');
-    continue;
-   }
-   const index=points.findIndex(p=>p.dutyPercent>=percent);
-   const upper=points[Math.max(0,index)],lower=points[Math.max(0,index-1)];
-   const rpm=upper.dutyPercent===lower.dutyPercent?upper.rpm:
-     lower.rpm+(upper.rpm-lower.rpm)*(percent-lower.dutyPercent)/
-       (upper.dutyPercent-lower.dutyPercent);
-   results.push({name,rpm:Math.round(rpm)});
-  }
-  if(!results.length)return {text:'—',hint:reasons.join(' ')||'RPM estimate unavailable.'};
-  if(results.length===1&&ids.length===1)
-   return {text:'≈'+results[0].rpm.toLocaleString(),
-     hint:results[0].name+': approximately '+results[0].rpm.toLocaleString()+' RPM based on measured PWM/RPM response.'};
-  return {text:results.length+' fan'+(results.length===1?'':'s'),
-    hint:results.map(x=>x.name+': ≈'+x.rpm.toLocaleString()+' RPM').concat(reasons).join(' · ')};
- };
+ // RPM estimates belong to a live fan profile's physical PWM channel.
  // A curve is a series of editable numeric rows, with one blank row always
  // available. Nothing is sent to the elevated collector until Save is clicked.
  const curvePointRow=(point=null,S=null,curveId='',index=null)=>{
