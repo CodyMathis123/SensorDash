@@ -120,7 +120,7 @@ const FanCommissioning=(()=>{
    '<div class="w-actions"><button class="btn" data-commissioning="start-identify" '+
      (!identifyReady||calibration?.state==='running'?'disabled':'')+
      '>Verify fan and RPM pairing</button></div>'+
-   '<p class="fc-setup-details">Choose the temperatures to monitor during calibration. The test stops if a temperature rises too far, a sensor disappears, or fan RPM fails to stabilize. A 25-minute safety cutoff prevents indefinite testing.</p>'+
+   '<p class="fc-setup-details">Calibration temporarily takes control of this PWM output and ignores its normal temperature curve. Only the selected temperature guards, fan/RPM feedback and hardware safety checks can stop the test. Select every temperature that depends on these fans; the normal approved curve resumes afterward. A 25-minute cutoff prevents indefinite testing.</p>'+
    '<div class="fc-calibration-guards">'+
      guardSelect('fcGuardPrimary','Primary thermal guard',guardDefaults.first,false)+
      guardSelect('fcGuardSecondary','Additional thermal guard',guardDefaults.second,true)+
@@ -322,9 +322,11 @@ const FanCommissioning=(()=>{
     for(const id of guards){
      const sensor=S.sensors.find(x=>x.id===id);
      const age=Date.now()-Date.parse(sensor?.observedAt||'');
-     if(!Number.isFinite(sensor?.value)||!Number.isFinite(age)||age>4000||
+     if(!Number.isFinite(sensor?.value)||!Number.isFinite(age)||age>10000||
         age< -4000||sensor.value>=limit)
-      throw Error('Guard temperatures must be fresh and below the configured limit.');
+      throw Error('Temperature guard '+(sensor?.name||id)+
+        ' must have a valid reading less than 10 seconds old and below '+
+        limit+'°C before calibration starts.');
     }
    }
    const label=identifying?'verify the fan/RPM pairing':'run the full fan speed calibration';
