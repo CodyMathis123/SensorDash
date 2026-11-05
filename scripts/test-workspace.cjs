@@ -250,12 +250,30 @@ const h={
    kind:'fan',verifiedAt:new Date().toISOString(),rpmSensorId:'rpm',
    measurements:[{dutyPercent:10,rpm:490},
      {dutyPercent:40,rpm:1050},{dutyPercent:100,rpm:1980}]}];
+ // The LIVE profile, not either reusable CPU/GPU curve, maps a
+ // physical radiator PWM header to its independently calibrated RPM.
+ const previousLive=S.fanControl;
+ S.fanControl={outputs:[{id:'pwm1',name:'Radiator PWM',device:'IT8688E',
+   writable:true}],persistent:{profiles:[{id:'radiator',name:'Radiator MAX',
+   channelIds:['pwm1']}],readings:[{id:'radiator',name:'Radiator MAX',
+   state:'running',targetPercent:40,message:'MAX of CPU/GPU curves'}],
+   overrides:[]}};
  const estimated=workspace.render(S,'curves',h);
- assert.ok(estimated.includes('Est. RPM')&&
-   estimated.includes('≈770')&&
-   estimated.includes('≈1,050')&&
-   estimated.includes('MAX mixing'),
-   'CPU/GPU MAX curves reuse one physical fan calibration to estimate RPM');
+ assert.ok(estimated.includes('Target PWM')&&
+   estimated.includes('Estimated RPM')&&
+   estimated.includes('Measured RPM')&&
+   estimated.includes('≈1,050 RPM')&&
+   estimated.includes('40.0%') &&
+   !estimated.includes('data-curve-estimated-rpm') &&
+   !estimated.includes('w-curve-estimate-note'),
+   'Only the MAX live profile maps the fan to calibrated RPM; curve editor is PWM-only');
+ S.fanControl.persistent.readings[0].targetPercent=25;
+ assert.ok(workspace.render(S,'curves',h).includes('≈770 RPM'),
+   'Changing the active MAX profile demand reuses the same radiator calibration');
+ S.fanControl.persistent.readings[0].targetPercent=5;
+ assert.ok(workspace.render(S,'curves',h).includes('Not calibrated at 5%'),
+   'Never invent fan RPM outside saved calibration range');
+ S.fanControl=previousLive;
  S.settings.simulatedFanCurves=previousCurves;
  S.settings.fanProfiles=previousProfiles;
  S.settings.fanChannelMappings=previousMapping;
