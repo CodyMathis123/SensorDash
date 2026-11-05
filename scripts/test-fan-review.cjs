@@ -71,9 +71,11 @@ S.fanControl.persistent.readings[0].targetPercent=10;
 assert.equal(api.FanFeedback.estimate(S,'pwm',10).text,'Not calibrated at 10%',
   'High-duty-only calibration cannot estimate low-duty fan RPM');
 assert.match(api.FanFeedback.render(S,['pwm'],'profile'),/Not calibrated at 10%/);
+const priorActiveProfiles=S.fanControl.persistent.profiles;
 S.fanControl.persistent.profiles=[];
 assert.equal(api.FanFeedback.target(S,'profile','pwm'),null,
   'Stopped profile must not present stale curve targets as live PWM');
+S.fanControl.persistent.profiles=priorActiveProfiles;
 S.sensors[0].value=undefined;
 assert.equal(api.FanFeedback.reading(S,'pwm').text,'RPM unavailable');
 S.settings.fanControlLocked=true;
