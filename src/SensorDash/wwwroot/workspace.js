@@ -785,7 +785,10 @@ const SDWorkspace = (() => {
    if(state.dirty)saveStatus(S,'Saving…');
    const run=state.tail.then(async()=>{
      const body=JSON.stringify(S.settings);
-     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-SensorDash-Action':'settings'},body});
+     const response=await fetch('/api/settings',{method:'PUT',credentials:'same-origin',
+       headers:{'Content-Type':'application/json','X-SensorDash-Action':'settings'},body});
+     if(response.status===401)throw Error('Windows authentication required. Open Settings, connect your Windows account, then retry.');
+     if(response.status===403)throw Error('The request was denied. Open SensorDash using http://localhost:8765/ and retry.');
      if(!response.ok)throw Error(await response.text());
      const saved=await response.json();
      // A response must never replace newer local edits.
