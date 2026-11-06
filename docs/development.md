@@ -36,53 +36,49 @@ in different ways. Inspect memory after startup, one hour, and 24 hours before
 changing collector sampling or fan-control hardware access. Collector/IPC
 timing fields are secondary diagnostic context, not extra polling.
 
-## Windows CI and optional performance diagnostics
+## Windows CI, Workstation GC, and optional diagnostics
 
-The single **Windows MSI build** workflow now validates the service-hosted .NET
-collector/web API, native C++ tray, browser JavaScript and C# contracts, WiX
-packaging, and MSI upgrade/repair/downgrade/uninstall behavior. The duplicate
-native-tray marker workflow has been removed.
+SensorDash uses **Workstation GC exclusively**. The .NET project explicitly
+sets `ServerGarbageCollection=false`, so both the Windows service and any
+.NET executable launched from the same project use Workstation GC. There
+is no alternative GC build parameter, experimental installer, or special suffix.
 
-- Pushes to `Production` build the normal baseline GC MSI.
-- Pushes to `feature/fan-control-workspace-reorganization-20261106` validate
-  the known-good Workstation GC variant and native tray in the SAME workflow.
-- Manual workflow dispatch allows an explicit `gc_profile` selection; Production
-  builds never select an experimental GC configuration.
+The single **Windows MSI build** workflow validates the service-hosted .NET
+collector/web API, native C++ tray, browser JavaScript and C# contracts,
+WiX packaging, and MSI upgrade/repair/downgrade/uninstall behavior.
+- Pushes to `Production` publish the standard Workstation GC MSI.
+- Pull requests into `Production` validate that same Workstation GC build.
+- Manual dispatch is available on branches containing this workflow, with no
+  GC selection. Every MSI uses `SensorDash-Setup-<version>-x64.msi`.
 
-**Process memory / GC diagnostics are disabled by default** on installed
-SensorDash. No periodic memory sampler or history runs unless the service has
-`SENSORDASH_PERFORMANCE_DIAGNOSTICS=1` set in its environment before startup.
-The Workstation GC CI smoke test temporarily sets that variable for its
-runtime verification. No memory diagnostics are needed for normal fan control,
-sleep/wake rearm, or telemetry export.
+**Process memory / GC diagnostics are disabled by default** in installed
+SensorDash. An operator must set `SENSORDASH_PERFORMANCE_DIAGNOSTICS=1`
+before starting the service to enable additional memory measurements. CI
+sets that variable only while verifying the effective GC mode, without
+changing the distributed default. Normal fan control does not require
+memory diagnostics.
 
-For a manual rerun from the combined feature branch:
+To request the standard MSI workflow explicitly from the feature branch:
 
 ```powershell
-gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/fan-control-workspace-reorganization-20261106 -f gc_profile=workstation
+gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/workstation-gc-default-20261106
 ```
 
-Confirm the final run's commit SHA, complete successful Windows tests, and
-`-workstation-gc.msi` artifact. Tests must be green before the PR is merged.
-Unlike the previous separate marker-based workflow, ordinary feature-branch
-pushes now run this single validation path.
+Review the commit SHA, the standard MSI artifact, the effective `serverGc=false`
+runtime assertions, and all installer-servicing tests before merging.
 
-**Supervised real-PC installation is a separate decision.** Before replacing an
-installed automatic fan-control service, retain its working installer and
-verify a viable downgrade/rollback strategy. The MSI intentionally rejects
-downgrades and a previously built baseline MSI has a lower version than the
-experimental MSI. Rolling back may therefore require a *newer versioned*
-baseline MSI or a carefully planned uninstall/reinstall preserving user data.
-Do not assume running an older baseline MSI will revert the GC experiment.
-Avoid installing any unverified or failed artifact on the cooling PC.
+**Supervised installation is a separate decision.** Preserve the currently
+working installer and settings before upgrading a live fan-control service.
+MSI downgrade rejection still applies: a previously issued MSI with a
+lower product version cannot simply replace a newer install. If rollback is
+needed, use a newer-versioned corrective MSI or a carefully planned
+uninstall/reinstall preserving user data. The historical baseline MSI
+referenced by the upgrade tests is the *previous Production release*, not
+another supported GC configuration.
 
-Compare the same configuration, workload, and runtime (including installed
-driver state) for startup, 1-hour, and 24-hour readings. Export both process
-histories for every trial and use private bytes as the primary footprint metric;
-check GC pauses, collection-cycle latency, recovery logs, and fan-control parity.
-Reset by reinstalling the last validated baseline MSI, not by manipulating
-the live service or GC environment variables. Changing GC mode has no promised
-memory benefit. Never apply a GC heap hard limit during these first tests.
+Changing GC mode does not guarantee lower memory use. Compare actual
+private bytes, GC pauses, startup performance, and fan-control timing
+under representative loads.
 
 Microsoft reference: https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector
 
@@ -95,7 +91,7 @@ Routine servicing validation downloads the MSI artifact from the latest successf
 1. Inspect relevant implementation and tests; make a focused change on a branch from `Production`.
 2. Run appropriate local checks, review the diff, update documentation and add an ADR only for meaningful architectural decisions.
 3. Push and create/update a PR targeting `Production`. Its description states the problem, resulting behavior, validation and known limits.
-4. The **Windows MSI build** workflow never runs automatically for feature branches, fix branches, or pull requests. When validation is explicitly requested or required before merge, use Actions → Windows MSI build → Run workflow → select the feature branch. The same workflow runs automatically on every push to `Production` (including merges).
+4. The **Windows MSI build** workflow runs automatically for pull requests targeting `Production` and for pushes to `Production`. Manual dispatch remains available for a specific feature branch when needed.
 5. For a manually requested run, inspect every job, failing step/log and expected MSI and installer-diagnostic artifacts. Confirm it corresponds to the latest branch commit; if a subsequent change requires revalidation, deliberately dispatch a new run. Do not mistake an earlier successful run for validation of newer changes.
 6. Before merging, review the final diff and required checks. Where the delivery requires Windows CI, manually validate the final head and merge only after the required pipeline succeeds. Resolve reviews and merge using an expected-head check when authorized; never bypass branch protection. This workflow deliberately does not generate a PR check unless manually dispatched.
 7. Verify the PR merged and monitor the automatically triggered `Production` pipeline. Report the PR, validation result and any production-build failure. Investigate failures without representing the delivery as fully validated.
