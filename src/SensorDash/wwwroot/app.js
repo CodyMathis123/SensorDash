@@ -334,8 +334,6 @@ function settingsView(){
   '<div class="stat-row"><label>CPU · one logical core</label><strong>'+perfNumber(p?.cpuPercentOneCore,'%',2)+'</strong></div>'+
   (name.startsWith('Service')?'<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
     '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'+
-    '<div class="stat-row"><label>IPC serialization · mean</label><strong>'+perfNumber(p?.ipcSerializationMeanMs,' ms',2)+'</strong></div>'+
-    '<div class="stat-row"><label>IPC response · mean</label><strong>'+perfNumber(Number.isFinite(p?.ipcResponseMeanBytes)?p.ipcResponseMeanBytes/1024:null,' KiB',1)+'</strong></div>':'')
  ).join('')+
  '<h3 class="sensor-used-title">Historical analysis</h3>'+
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
@@ -400,7 +398,7 @@ async function loadStatus(shouldRender=false){
  try{
   S.status=await fetchJSON('/api/status');
   if(shouldRender&&S.view==='settings')render();
- }catch(e){console.warn('Desktop process status unavailable:',e.message)}
+ }catch(e){console.warn('SensorDash service status unavailable:',e.message)}
 }
 async function exportPerformance(){
  try{
