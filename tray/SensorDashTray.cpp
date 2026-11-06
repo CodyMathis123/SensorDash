@@ -85,6 +85,20 @@ bool ReadStatus(std::string& output) {
     WinHttpCloseHandle(session);
     return ok;
 }
+std::wstring ShortText(const std::wstring& input) {
+    if (input.size() <= 3) return input;
+    auto decimal = input.find(L'.');
+    if (decimal != std::wstring::npos && decimal > 0 && decimal <= 3)
+        return input.substr(0, decimal);
+    try {
+        double number = std::stod(input);
+        if (number >= 1000 && number < 1000000) {
+            auto rounded = static_cast<int>((number + 500.0) / 1000.0);
+            return std::to_wstring(rounded) + L"k";
+        }
+    } catch (...) {}
+    return input.substr(0, 3);
+}
 COLORREF Color(const std::wstring& input) {
     if (input.size() != 7 || input[0] != L'#') return RGB(31, 71, 120);
     unsigned int red = 0, green = 0, blue = 0;
@@ -125,6 +139,13 @@ HICON DrawIcon(const std::wstring& value, const std::wstring& color) {
     info.fIcon = TRUE;
     info.hbmColor = bitmap;
     info.hbmMask = mask;
+    HDC maskDc = CreateCompatibleDC(screen);
+    if (maskDc) {
+        auto oldMask = SelectObject(maskDc, mask);
+        PatBlt(maskDc, 0, 0, kSize, kSize, BLACKNESS);
+        SelectObject(maskDc, oldMask);
+        DeleteDC(maskDc);
+    }
     HICON icon = CreateIconIndirect(&info);
     DeleteObject(bitmap);
     DeleteObject(mask);
@@ -151,7 +172,9 @@ void SetIcon(int id, const std::wstring& value,
              const std::wstring& tooltip, const std::wstring& color) {
     auto signature = value + L"|" + tooltip + L"|" + color;
     if (added[id] && signature == previous[id]) return;
-    HICON image = DrawIcon(value, color);
+    HICON image = id == 0
+        ? CopyIcon(LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101)))
+        : DrawIcon(ShortText(value), color);
     if (!image) return;
     NOTIFYICONDATAW info{};
     info.cbSize = sizeof(info);
