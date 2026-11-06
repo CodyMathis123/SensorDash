@@ -26,7 +26,7 @@ if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 if (!args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
 {
     if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
-        try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765/") { UseShellExecute = true }); }
+        try { Process.Start(new ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }
         catch { }
     return;
 }
@@ -59,8 +59,9 @@ var app = builder.Build();
 // avoid local browser DNS-rebinding requests to a SYSTEM-owned web process.
 app.Use(async (context, next) =>
 {
-    if (!string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-        || context.Request.Host.Port != 8765)
+    if (!(string.Equals(context.Request.Host.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+       || string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+       || context.Request.Host.Port != 8765)
     {
         context.Response.StatusCode = 403;
         return;
@@ -70,7 +71,7 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 bool ValidBrowserMutation(HttpContext context, string action) =>
-    context.Request.Headers.Origin.ToString() == "http://127.0.0.1:8765" &&
+    context.Request.Headers.Origin.ToString() == "http://localhost:8765" &&
     context.Request.Headers["X-SensorDash-Action"].ToString() == action &&
     context.Request.ContentType is string mime &&
     mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) &&
@@ -83,7 +84,24 @@ IResult Resource(string name, string mediaType)
         ? Results.Problem("Missing embedded dashboard resource: " + name, statusCode: 500)
         : Results.Stream(resource, contentType: mediaType);
 }
-app.MapGet("/", () => Resource("index.html", "text/html; charset=utf-8"));
+// Keep old bookmarks working, but present the browser with the Windows-auth
+// friendly localhost hostname rather than a dotted numeric IP address.
+app.MapGet("/", (HttpContext ctx) =>
+    string.Equals(ctx.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+        ? Results.Redirect("http://localhost:8765/")
+        : Resource("index.html", "text/html; charset=utf-8"));
+app.MapGet("/api/auth/status", (HttpContext ctx) => Results.Ok(new
+{
+    authenticated = ctx.User.Identity?.IsAuthenticated == true,
+    user = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Identity?.Name : null
+}));
+app.MapGet("/api/auth/sign-in", () => Results.Redirect("/")).RequireAuthorization();
+app.MapGet("/api/auth/me", (HttpContext ctx) => Results.Ok(new
+{
+    authenticated = true,
+    user = ctx.User.Identity?.Name,
+    scheme = ctx.User.Identity?.AuthenticationType
+})).RequireAuthorization();
 app.MapGet("/index.html", () => Resource("index.html", "text/html; charset=utf-8"));
 app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
@@ -180,9 +198,14 @@ app.MapGet("/api/tray-state", (DashboardState state) =>
         };
         var name = Safe(string.IsNullOrWhiteSpace(config.Label) ? sensor?.Name ?? config.SensorId : config.Label);
         var color = System.Text.RegularExpressions.Regex.IsMatch(config.Color ?? "",
-            "^#[0-9a-fA-F]{6}$") ? config.Color : "#24334A";
+            "^#[0-9a-fA-F]{6}$") ? config.Color : "#62D5CE";
+        var style = config.Style is "accent-bar" or "solid" or "outline" ? config.Style : "accent-bar";
+        var textColor = config.TextColor == "auto" ||
+            System.Text.RegularExpressions.Regex.IsMatch(config.TextColor ?? "", "^#[0-9a-fA-F]{6}$")
+            ? config.TextColor : "auto";
         result.Append("widget\t").Append(name).Append('\t').Append(number)
-            .Append('\t').Append(unit).Append('\t').Append(color).Append('\n');
+            .Append('\t').Append(unit).Append('\t').Append(color)
+            .Append('\t').Append(style).Append('\t').Append(textColor).Append('\n');
     }
     return Results.Text(result.ToString(), "text/plain; charset=utf-8");
 });
