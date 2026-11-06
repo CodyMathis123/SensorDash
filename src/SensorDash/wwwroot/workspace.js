@@ -604,6 +604,31 @@ const SDWorkspace = (() => {
    active.some(a=>(a.channelIds||[]).includes(o.id))||
    !isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const curves=S.settings?.simulatedFanCurves||[];
+  // A reusable curve is edited in exactly one profile, even when shared.
+  const curveOwners=new Map();
+  for(const draft of all)for(const id of draft.curveIds||[])
+    if(!curveOwners.has(id))curveOwners.set(id,draft.id);
+  const curveDemand=p=>{
+    const reports=S.simulation?.results||[];
+    return '<div class="w-profile-demands"><div class="w-profile-demand-heading">'+
+      '<strong>Temperature inputs · MAX</strong>'+
+      '<span class="note">Saved curve preview; actual applied PWM may differ due to approval, smoothing or overrides.</span></div>'+
+      '<div class="w-profile-demand-head"><span>Curve</span><span>Temperature</span><span>Demand</span><span></span></div>'+
+      (p.curveIds||[]).map(id=>{
+        const curve=curves.find(c=>c.id===id), sample=reports.find(r=>r.id===id);
+        const other=curveOwners.get(id)!==p.id?all.find(q=>q.id===curveOwners.get(id))?.name:null;
+        return '<div class="w-profile-demand-row" data-profile-curve-row="'+attr(p.id)+'" data-curve-id="'+attr(id)+'">'+
+          '<span><strong>'+safe(curve?.name||id)+'</strong>'+
+          (other?'<small>Shared · edit in '+safe(other)+'</small>':'')+'</span>'+
+          '<strong data-sim="'+attr(id)+':input">'+
+          (Number.isFinite(sample?.inputTemperature)?sample.inputTemperature.toFixed(1)+' °C':'—')+'</strong>'+
+          '<strong data-sim="'+attr(id)+':output">'+
+          (Number.isFinite(sample?.targetPercent)?sample.targetPercent.toFixed(1)+' %':'—')+'</strong>'+
+          '<small data-profile-winning="'+attr(p.id)+'|'+attr(id)+'"></small></div>';
+      }).join('')+
+      (!(p.curveIds||[]).length?'<p class="note">No curves assigned yet.</p>':'')+
+      '</div>';
+  };
   const mapping=id=>FanFeedback.mapping(S,id);
   const header=card('Live fan profiles','Automatic fan control',
    '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
@@ -619,7 +644,7 @@ const SDWorkspace = (() => {
           '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
         '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
           ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
-        FanFeedback.render(S,p.channelIds,p.id)+
+        curveDemand(p)+FanFeedback.render(S,p.channelIds,p.id)+
         (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
       return FanControlUx.section(S,'profile:'+p.id,p.name,
@@ -632,6 +657,11 @@ const SDWorkspace = (() => {
       '<div class="w-live-status"><strong data-profile-state="'+attr(p.id)+'">'+safe(status?.state|| (running?'Starting':'Not enabled'))+'</strong>'+
         '<span data-profile-message="'+attr(p.id)+'">'+safe(status?.message||(running?'Waiting for the collector':'Ready to configure'))+'</span>'+
         '<strong data-profile-target="'+attr(p.id)+'">'+(status?.targetPercent==null?'':value({value:status.targetPercent})+'%')+'</strong></div>'+
+      curveDemand(p)+FanFeedback.render(S,p.channelIds,p.id)+
+      '<div class="w-profile-curve-editors">'+
+      renderCurves(S,new Set((p.curveIds||[]).filter(id=>curveOwners.get(id)===p.id)),true)+'</div>'+
+      FanControlUx.section(S,'profile-settings:'+p.id,'Profile configuration',
+        'Assignments, minimum duty and ramp-down · infrequent changes',
       '<div class="w-actions"><label>Name<input data-profile-name="'+attr(p.id)+'" value="'+attr(p.name)+'"></label>'+
        '<label>Minimum duty (%)<input type="number" min="0" max="100" step="1" data-profile-min="'+attr(p.id)+'" value="'+p.minimumPercent+'"></label>'+
        '<label>Ramp-down time (seconds)<input type="number" min="0" max="90" step="1" data-profile-response="'+attr(p.id)+'" value="'+p.responseSeconds+'"></label></div>'+
@@ -646,13 +676,12 @@ const SDWorkspace = (() => {
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
-      FanFeedback.render(S,p.channelIds,p.id)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
         button('remove-profile','Delete draft','data-id="'+attr(p.id)+'"')+'</div>'+
       '<p class="note">Reapprove to apply changes to an enabled profile. '+
-      'Separate profiles cannot share the same output.</p>');
+      'Separate profiles cannot share the same output.</p>'),false);
     return FanControlUx.section(S,'profile:'+p.id,p.name,
       (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
       p.curveIds.length+' curve(s)',form,!!running?.needsReapproval);
@@ -696,11 +725,11 @@ const SDWorkspace = (() => {
    }
    await persist(S,h);
  };
- const renderCurves=(S)=>{
+ const renderCurves=(S,filterIds=null,inline=false)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
    const editing=!WorkspaceLocks.fan(S);
-   const cards=curves.map(curve=>{
+   const cards=curves.filter(c=>!filterIds||filterIds.has(c.id)).map(curve=>{
      const sample=simulation.find(s=>s.id===curve.id);
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
@@ -741,25 +770,33 @@ const SDWorkspace = (() => {
        'Linked to live fan control · expand to edit':'Temperature-to-duty curve',
        '<div data-fan-curve-editor="'+attr(curve.id)+'">'+form+'</div>',false);
    }).join('');
-   const curveContent=card('Temperature curves','Reusable fan-control curves',
+   if(inline)return cards;
+   const curveContent=card('Curve library','Unassigned curves and curve creation',
       (editing?'<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>':
        WorkspaceLocks.readonly('Temperature curves')))+
-      (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')));
+      (cards||'<p class="note">Assigned curves can be edited in their fan profiles above.</p>');
    const controls='<div class="w-fan-lock-toolbar">'+WorkspaceLocks.action('toggle-fan-lock',!editing)+
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
-   const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
+   const calibration=S.fanControl?.persistent?.calibration;
+   const activeCalibration=calibration?.state==='running';
+   const allocated=new Set((S.settings?.fanProfiles||[]).flatMap(p=>p.curveIds||[]));
+   const unassigned=new Set(curves.filter(c=>!allocated.has(c.id)).map(c=>c.id));
    return controls+
-      FanControlUx.section(S,'calibration','Fan control & calibration',
-        '1 · Identify and measure physical fan PWM/RPM before assigning temperature curves',
+      (activeCalibration?'<aside class="fc-global-calibration" role="status">'+
+       '<strong>Hardware calibration running</strong><span>'+safe(calibration.channelId)+
+       ' · '+safe(calibration.completedSteps||0)+'/'+safe(calibration.totalSteps||'?')+
+       ' steps. Open Hardware setup to monitor or cancel.</span></aside>':'')+
+      renderProfiles(S)+
+      FanControlUx.section(S,'curves','Curve library',
+        'Create reusable curves · '+unassigned.size+' not assigned',
+        renderCurves(S,unassigned,false),false)+
+      FanControlUx.section(S,'calibration','Hardware setup & calibration',
+        'PWM pairing, tach verification and calibration · occasional maintenance',
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
           '<p class="note">Fan calibration module unavailable.</p>'):
           WorkspaceLocks.readonly('Fan control & calibration')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',true)+
-      FanControlUx.section(S,'curves','Temperature curves',
-        '2 · Define temperature-to-PWM demand · '+curves.length+' curve(s)',
-        curveContent,false)+
-      renderProfiles(S)+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',false)+
       FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
         FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
           'Resume recovery, commands, RPM feedback and errors',
