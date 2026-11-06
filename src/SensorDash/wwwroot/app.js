@@ -312,7 +312,7 @@ function settingsView(){
  telemetryConfigPanel()+
   '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only collector and browser memory',
 
- [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
+ [['Service (web + collector)',S.status?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
   '<div class="stat-row"><label>Working set</label><strong>'+formatMb(p?.workingSetBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Private memory</label><strong>'+formatMb(p?.privateBytes)+'</strong></div>'+
@@ -332,7 +332,7 @@ function settingsView(){
   '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'+
   '<div class="stat-row"><label>Handles</label><strong>'+(p?.handleCount??'—')+'</strong></div>'+
   '<div class="stat-row"><label>CPU · one logical core</label><strong>'+perfNumber(p?.cpuPercentOneCore,'%',2)+'</strong></div>'+
-  (name==='Elevated collector'?'<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
+  (name.startsWith('Service')?'<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
     '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'+
     '<div class="stat-row"><label>IPC serialization · mean</label><strong>'+perfNumber(p?.ipcSerializationMeanMs,' ms',2)+'</strong></div>'+
     '<div class="stat-row"><label>IPC response · mean</label><strong>'+perfNumber(Number.isFinite(p?.ipcResponseMeanBytes)?p.ipcResponseMeanBytes/1024:null,' KiB',1)+'</strong></div>':'')
@@ -346,7 +346,7 @@ function settingsView(){
  '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
- '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
+ '<div class="stat-row"><label>Hardware controls</label><strong>Windows-authenticated requests with explicit browser confirmation</strong></div>'+
  '<div class="stat-row"><label>Discovered storage devices</label><strong>'+(S.diagnostics?.storageDevices?.length??'—')+'</strong></div>'+
  '')+
  '</details></div><div class="badge-line">'+
