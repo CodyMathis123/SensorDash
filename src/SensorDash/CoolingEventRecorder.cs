@@ -7,7 +7,7 @@ internal static class CoolingEventRecorder
 {
     internal static bool Accepted(object result)
     {
-        var json=JsonSerializer.SerializeToElement(result,PipeProtocol.Json);
+        var json=JsonSerializer.SerializeToElement(result, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         return json.TryGetProperty("accepted",out var flag) &&
                flag.ValueKind==JsonValueKind.True;
     }
