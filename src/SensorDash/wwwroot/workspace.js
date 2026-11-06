@@ -1266,5 +1266,5 @@ const SDWorkspace = (() => {
      if(el.textContent!==out)el.textContent=out;
    });
  };
- return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintTrayPreview,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
 })();
