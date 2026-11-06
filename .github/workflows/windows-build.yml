@@ -320,7 +320,7 @@ jobs:
             if (!$ready) { throw 'SensorDash did not open its local API' }
             if ($status.mode -ne 'service') { throw 'The local dashboard must run in the collector service' }
             $trayState = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/tray-state' -UseBasicParsing
-            if ($trayState.Content -notmatch '^status\\t') { throw 'Native tray status protocol unavailable' }
+            if ($trayState.Content -notmatch '^status\t') { throw 'Native tray status protocol unavailable' }
             if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
               if ($status.process.serverGc -ne $false) {
                 throw 'Experimental service-hosted web process is not using Workstation GC.'
@@ -329,7 +329,7 @@ jobs:
               if ($diagnostics.process.serverGc -ne $false) {
                 throw 'Service GC diagnostics disagree with the unified service status.'
               }
-              Write-Host 'PASS: both processes report Workstation GC in the actual published executable.'
+              Write-Host 'PASS: unified web/collector service reports Workstation GC.'
             }
             $presets = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/cooling-presets' -TimeoutSec 5
             $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
@@ -368,7 +368,7 @@ jobs:
             -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
             -SkipHttpErrorCheck
           if ($denied.StatusCode -notin @(401,403)) {
-            throw 'Cross-origin or originless write requests must be rejected before UAC'
+            throw 'Cross-origin or originless control mutations must be denied'
           }
             if ($script.Content -match 'chart-hover-overlay' -or
                 $script.Content -match 'hoverCtx.clearRect' -or
@@ -384,12 +384,12 @@ jobs:
             $groups = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/collection-groups' -TimeoutSec 8
             if ($groups.Count -ne 8) { throw "Expected eight collection families, got $($groups.Count)" }
             $settings = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
-            if ($settings.storagePollSeconds -lt 1) { throw 'Collector named-pipe bridge is not responding' }
+            if ($settings.storagePollSeconds -lt 1) { throw 'Service settings API is not responding' }
             if (@($groups | Where-Object { $_.id -eq 'Network' }).Count -ne 1) {
               throw 'Missing Network from generic hardware collection capabilities'
             }
 
-            # Save real workspace configurations across the UI -> named pipe -> service.
+            # Save real workspace configurations directly through the authenticated service API.
             $settings.disabledCollectionGroups = @('Network')
             $settings.disabledCollectionDeviceIds = @()
             $settings.coolingSystems = @(@{
@@ -411,11 +411,11 @@ jobs:
               throw 'Cooling component role not persisted correctly'
             }
             if ($saved.coolingSystems[0].name -ne 'CI Secondary Loop' -or $saved.trayWidgets[0].label -ne 'CI') {
-              throw 'Generic workspace settings did not round-trip through named pipe'
+              throw 'Generic workspace settings did not round-trip through service API'
             }
             $persisted = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -TimeoutSec 8
             if (@($persisted.disabledCollectionGroups) -notcontains 'Network') {
-              throw 'Generic collection family setting did not persist through service IPC'
+              throw 'Generic collection family setting did not persist in service'
             }
             if ($persisted.simulatedFanCurves[0].id -ne 'ci-curve' -or
                 $persisted.PSObject.Properties.Name -contains 'virtualSensors' -or
@@ -430,7 +430,7 @@ jobs:
             $blockedTelemetry = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
               -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"","hostLabel":"ci-test"}' `
               -SkipHttpErrorCheck
-            if ($blockedTelemetry.StatusCode -ne 403) {
+            if ($blockedTelemetry.StatusCode -notin @(401,403)) {
               throw 'Telemetry configuration without verified origin and action header must be rejected'
             }
             # A valid local browser action changes only exporter settings; it
