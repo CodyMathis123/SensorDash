@@ -271,9 +271,9 @@ const h={
  assert.equal(row.wasScrolled,true);
  assert.equal(workspace.handleCurvePointExit({target:row,relatedTarget:null}),true);
  assert.equal(tooltip.hidden,true);
- assert.ok(curvesView.includes('Fan control &amp; calibration') &&
+ assert.ok(curvesView.includes('Hardware setup &amp; calibration') &&
    curvesView.includes('Temperature curves'),
-   'Fan control, identification and calibration share one workspace');
+   'Calibration remains accessible in a separate, collapsed workspace');
  assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
    curvesView.indexOf('data-fan-fold="profiles"') <
      curvesView.indexOf('data-fan-fold="curves"') &&
