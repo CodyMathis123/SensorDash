@@ -134,7 +134,11 @@ const h={
  assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
  assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
  assert.ok(explorerHtml.includes('data-select="coolant"'));
- assert.ok(css.includes('grid-template-areas:"index sensor label color precision remove"'));
+ assert.ok(css.includes('grid-template-areas:"index preview sensor sensor label label remove"'),
+  'Tray appearance editor must expose preview, style, accent and text color on dedicated grid tracks');
+ assert.ok(script.includes('data-tray-style')&&script.includes('data-tray-text-mode')&&
+  script.includes('data-tray-text-custom')&&script.includes('paintTrayPreview'),
+  'Every tray widget must independently configure style and text color');
  assert.ok(script.includes('data-curve-temperature')&&script.includes('data-curve-percentage'));
  assert.ok(!script.includes('data-curve-points='));
 
@@ -160,7 +164,16 @@ const h={
   [[35,30],[40,30],[45,40],[50,55],[55,75],[60,100]]);
  assert.equal(S.settings.fanProfiles.at(-1).channelIds.length,0);
  const curvesView=workspace.render(S,'curves',h);
- assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves'));
+ assert.ok(curvesView.includes('Live fan profiles')&&curvesView.includes('Temperature curves')&&
+   curvesView.includes('Curve library'));
+ assert.equal((curvesView.match(/data-fan-curve-editor="[^"]+"/g)||[]).length,
+   S.settings.simulatedFanCurves.length,
+   'Every curve must have exactly one editor, even when rendered inside a profile');
+ const related=S.settings.fanProfiles.find(p=>(p.curveIds||[]).length>0);
+ assert.ok(curvesView.includes('data-profile-curve-row="'+related.id+'"'),
+   'Live profile should show per-sensor PWM demand');
+ assert.ok(curvesView.includes('Profile configuration'),
+   'Infrequent profile settings should be separate from live demand');
  assert.ok(curvesView.includes('data-curve-current-values') &&
    curvesView.includes('data-curve-current-marker') &&
    curvesView.includes('data-curve-current-title') &&
@@ -258,17 +271,19 @@ const h={
  assert.equal(row.wasScrolled,true);
  assert.equal(workspace.handleCurvePointExit({target:row,relatedTarget:null}),true);
  assert.equal(tooltip.hidden,true);
- assert.ok(curvesView.includes('Fan control &amp; calibration') &&
+ assert.ok(curvesView.includes('Hardware setup &amp; calibration') &&
    curvesView.includes('Temperature curves'),
-   'Fan control, identification and calibration share one workspace');
+   'Calibration remains accessible in a separate, collapsed workspace');
  assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
-   curvesView.indexOf('data-fan-fold="calibration"') <
+   curvesView.indexOf('data-fan-fold="profiles"') <
      curvesView.indexOf('data-fan-fold="curves"') &&
    curvesView.indexOf('data-fan-fold="curves"') <
-     curvesView.indexOf('data-fan-fold="profiles"') &&
+     curvesView.indexOf('data-fan-fold="calibration"') &&
+   curvesView.includes('Hardware setup &amp; calibration') &&
+   curvesView.includes('Temperature inputs · MAX') &&
    !curvesView.includes('data-fan-fold="manual"') &&
    !curvesView.includes('data-fan-fold="quick"'),
-   'Physical fan calibration precedes temperature curves and profile association');
+   'Live profiles must precede curve library and occasional hardware setup');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
@@ -277,7 +292,7 @@ const h={
  };
  S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub',rpmSensorId:'rpm1'}];
  let quick=workspace.render(S,'curves',h);
- assert.ok(quick.includes('Fan control &amp; calibration') &&
+ assert.ok(quick.includes('Hardware setup &amp; calibration') &&
    !quick.includes('data-quick-slider=') &&
    !quick.includes('data-fan-fold="manual"'),
    'There must not be a duplicate manual override UI');

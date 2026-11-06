@@ -19,6 +19,73 @@ git diff --check
 
 Check each command's exit status. The Windows workflow is authoritative for the complete backend self-test commands, publish, MSI creation, install/uninstall checks and artifact validation. Local package/network limitations must be reported; a successful remote Windows run can supply that missing validation.
 
+## Memory-first performance diagnostics
+
+Settings → Performance diagnostics shows a one-minute sampling cadence for the
+desktop/tray process and the elevated collector. Each process retains at most
+1,440 in-memory samples spanning up to 24 hours; history is discarded on restart
+and is never written into the telemetry SQLite database. The **Export memory
+history CSV** button combines the two process streams without exporting sensor
+values, saved settings, machine names or token material.
+
+Use **private memory** to compare process-private commitment, **working set** to
+compare resident pages (which can include shared memory), and **GC committed
+memory** to assess how much is committed by the managed GC. Do not label the
+difference as exact native memory; runtime and other components reserve memory
+in different ways. Inspect memory after startup, one hour, and 24 hours before
+changing collector sampling or fan-control hardware access. Collector/IPC
+timing fields are secondary diagnostic context, not extra polling.
+
+## Windows CI and optional performance diagnostics
+
+The single **Windows MSI build** workflow now validates the service-hosted .NET
+collector/web API, native C++ tray, browser JavaScript and C# contracts, WiX
+packaging, and MSI upgrade/repair/downgrade/uninstall behavior. The duplicate
+native-tray marker workflow has been removed.
+
+- Pushes to `Production` build the normal baseline GC MSI.
+- Pushes to `feature/fan-control-workspace-reorganization-20261106` validate
+  the known-good Workstation GC variant and native tray in the SAME workflow.
+- Manual workflow dispatch allows an explicit `gc_profile` selection; Production
+  builds never select an experimental GC configuration.
+
+**Process memory / GC diagnostics are disabled by default** on installed
+SensorDash. No periodic memory sampler or history runs unless the service has
+`SENSORDASH_PERFORMANCE_DIAGNOSTICS=1` set in its environment before startup.
+The Workstation GC CI smoke test temporarily sets that variable for its
+runtime verification. No memory diagnostics are needed for normal fan control,
+sleep/wake rearm, or telemetry export.
+
+For a manual rerun from the combined feature branch:
+
+```powershell
+gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/fan-control-workspace-reorganization-20261106 -f gc_profile=workstation
+```
+
+Confirm the final run's commit SHA, complete successful Windows tests, and
+`-workstation-gc.msi` artifact. Tests must be green before the PR is merged.
+Unlike the previous separate marker-based workflow, ordinary feature-branch
+pushes now run this single validation path.
+
+**Supervised real-PC installation is a separate decision.** Before replacing an
+installed automatic fan-control service, retain its working installer and
+verify a viable downgrade/rollback strategy. The MSI intentionally rejects
+downgrades and a previously built baseline MSI has a lower version than the
+experimental MSI. Rolling back may therefore require a *newer versioned*
+baseline MSI or a carefully planned uninstall/reinstall preserving user data.
+Do not assume running an older baseline MSI will revert the GC experiment.
+Avoid installing any unverified or failed artifact on the cooling PC.
+
+Compare the same configuration, workload, and runtime (including installed
+driver state) for startup, 1-hour, and 24-hour readings. Export both process
+histories for every trial and use private bytes as the primary footprint metric;
+check GC pauses, collection-cycle latency, recovery logs, and fan-control parity.
+Reset by reinstalling the last validated baseline MSI, not by manipulating
+the live service or GC environment variables. Changing GC mode has no promised
+memory benefit. Never apply a GC heap hard limit during these first tests.
+
+Microsoft reference: https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector
+
 ## Required PR workflow
 
 CI prepares release identity before compilation. The major.minor series comes from Directory.Build.props; the third MSI field is GITHUB_RUN_NUMBER. ProductCode is a deterministic UUID for the platform/version, while UpgradeCode is permanent. Thus a Production run is newer than its PR run. Retries of the same run retain its version/source identity; start a new workflow run to produce a new distributable version. Local source version values are development defaults and must not be distributed. Preserve the workflow's counter; if replacing/resetting the workflow, advance the version series first. The allocator fails at the MSI field limits instead of wrapping.

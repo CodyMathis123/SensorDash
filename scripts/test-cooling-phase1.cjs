@@ -10,7 +10,6 @@ const src=read('src/SensorDash/wwwroot/cooling-insights.js');
 const app=read('src/SensorDash/wwwroot/app.js');
 const workspace=read('src/SensorDash/wwwroot/workspace.js');
 const model=read('src/SensorDash/WorkspaceModels.cs');
-const admin=read('src/SensorDash/AdminFanControl.cs');
 const recorder=read('src/SensorDash/CoolingEventRecorder.cs');
 const program=read('src/SensorDash/Program.cs');
 const html=read('src/SensorDash/wwwroot/index.html');
@@ -55,12 +54,14 @@ assert.ok(!workspace.includes('CoolingInsights.activity(S,sys)'),'Historical coo
 assert.ok(!workspace.includes('h.chart(limit,unit(type),false,sys.id)'),'Historical cooling charts now belong to Grafana');
 assert.ok(!app.includes('data-cooling-timeline')&&!app.includes('CoolingTimeline.hover(canvas,desired)'));
 assert.ok(!app.includes('CoolingInsights.paint(S)')&&!app.includes('CoolingInsights.paintEvents(S)'));
-assert.ok(admin.includes('CoolingEventRecorder.Describe(command)')&&admin.includes('db.Event'));
+assert.ok(program.includes('CoolingEventRecorder.Describe(command)')&&program.includes('db.Event'),
+ 'The service-hosted API must audit accepted fan-control requests');
 assert.ok(recorder.includes('collector application pending'));
 assert.ok(program.includes('CoolingEventRecorderSelfTest.Run()'));
-assert.ok(program.includes('WebApplication.CreateSlimBuilder'),'Desktop minimal API host should use slim builder');
-assert.ok(read('src/SensorDash/ServiceBridge.cs').includes('var frame = _display.Latest;'),
- 'Tray should reuse the bridge snapshot rather than duplicating collector IPC reads');
+assert.ok(program.includes('WebApplication.CreateSlimBuilder')&&program.includes('AddWindowsService'),
+ 'The minimal API host must run inside the Windows service');
+assert.ok(program.includes('/api/tray-state')&&read('tray/SensorDashTray.cpp').includes('WinHttpOpenRequest'),
+ 'Native tray must read the service status endpoint instead of duplicating collector IPC reads');
 for(const url of ['cooling-insights.js'])
  assert.ok(html.includes('/'+url)&&program.includes('/'+url));
 console.log('PASS: local role-aware cooling without historical duplication');

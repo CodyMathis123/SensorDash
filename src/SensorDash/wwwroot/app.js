@@ -11,12 +11,15 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Common types',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
+ status:null,auth:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
 const when=t=>new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
 const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'—';
+const perfNumber=(value,unit='',digits=1)=>Number.isFinite(value)?Number(value).toFixed(digits)+unit:'—';
+const perfUptime=seconds=>Number.isFinite(seconds)?
+ Math.floor(seconds/3600)+'h '+Math.floor((seconds%3600)/60)+'m':'—';
 const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
 const label=s=>{
  const alias=S.settings?.aliases?.[s?.id];
@@ -223,6 +226,8 @@ async function saveTelemetryConfig(){
    method:'PUT',headers:{'Content-Type':'application/json','X-SensorDash-Action':'telemetry-config'},
    body:JSON.stringify(payload)
   });
+  if(r.status===401)throw new Error('Windows authentication required. Open Settings and connect your Windows account.');
+  if(r.status===403)throw new Error('Request denied. Open SensorDash at http://localhost:8765/.');
   if(!r.ok)throw new Error('HTTP '+r.status+'. Verify HTTPS URL and credentials.');
   S.telemetryConfig=await r.json();
   toast('Exporter configuration saved. Outbound HTTPS reconnects automatically.');
@@ -245,6 +250,10 @@ function settingsView(){
  const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
    .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
+ panel('Windows authorization','Local Windows account · no UAC prompts',
+  (S.auth?.authenticated
+    ?'<p class="note">Authenticated as <strong>'+esc(S.auth.user||'Windows user')+'</strong>. Changes are authorized by your Windows session; cooling actions still require confirmation.</p>'
+    :'<p class="note">The browser has not established Windows authentication. Readings remain visible, but saving settings and hardware actions require an authenticated Windows session.</p><p><a class="btn" href="/api/auth/sign-in">Connect Windows account</a></p><p class="note">Use the localhost dashboard address; IP-address bookmarks can prevent automatic Windows sign-in.</p>'))+
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
  panel('Collection and history intervals','Live polling is independent from what is archived for Grafana',
  '<div class="form-grid">'+[
@@ -307,23 +316,41 @@ function settingsView(){
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
  telemetryConfigPanel()+
-  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only collector and browser memory',
+  (S.status?.performanceDiagnosticsEnabled ? '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only service memory',
 
- [['Desktop / browser host',S.status?.process],['Elevated collector',S.diagnostics?.process]].map(([name,p])=>
+ [['Service (web + collector)',S.status?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
   '<div class="stat-row"><label>Working set</label><strong>'+formatMb(p?.workingSetBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Private memory</label><strong>'+formatMb(p?.privateBytes)+'</strong></div>'+
   '<div class="stat-row"><label>Managed heap</label><strong>'+formatMb(p?.managedHeapBytes)+'</strong></div>'+
-  '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'
+  '<div class="stat-row"><label>GC committed memory</label><strong>'+formatMb(p?.gcCommittedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>GC mode</label><strong>'+(typeof p?.serverGc==='boolean'?(p.serverGc?'Server':'Workstation'):'—')+'</strong></div>'+
+  '<div class="stat-row"><label>Configured GC heap count</label><strong>'+(Number.isInteger(p?.gcHeapCount)?p.gcHeapCount:'Runtime default / unavailable')+'</strong></div>'+
+  '<div class="stat-row"><label>Memory conservation setting</label><strong>'+(Number.isInteger(p?.gcConserveMemoryLevel)?p.gcConserveMemoryLevel:'Runtime default / unavailable')+'</strong></div>'+
+  '<div class="stat-row"><label>Last GC heap size</label><strong>'+formatMb(p?.gcLastHeapSizeBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Last GC fragmentation</label><strong>'+formatMb(p?.gcFragmentedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>GC pause · process lifetime</label><strong>'+perfNumber(p?.gcPauseTimePercent,'%',2)+'</strong></div>'+
+  '<div class="stat-row"><label>Process uptime</label><strong>'+perfUptime(p?.uptimeSeconds)+'</strong></div>'+
+  '<div class="stat-row"><label>Sampled at</label><strong>'+(p?.timestamp?new Date(p.timestamp).toLocaleString():'—')+'</strong></div>'+
+  '<div class="stat-row"><label>Total allocations since start</label><strong>'+formatMb(p?.totalAllocatedBytes)+'</strong></div>'+
+  '<div class="stat-row"><label>Allocation rate</label><strong>'+perfNumber(Number.isFinite(p?.allocationBytesPerSecond)?p.allocationBytesPerSecond/1048576:null,' MB/s',3)+'</strong></div>'+
+  '<div class="stat-row"><label>GC collections · Gen 0 / 1 / 2</label><strong>'+[p?.gen0Collections,p?.gen1Collections,p?.gen2Collections].map(v=>Number.isFinite(v)?v:'—').join(' / ')+'</strong></div>'+
+  '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'+
+  '<div class="stat-row"><label>Handles</label><strong>'+(p?.handleCount??'—')+'</strong></div>'+
+  '<div class="stat-row"><label>CPU · one logical core</label><strong>'+perfNumber(p?.cpuPercentOneCore,'%',2)+'</strong></div>'+
+  '<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
+    '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'
  ).join('')+
  '<h3 class="sensor-used-title">Historical analysis</h3>'+
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
-  '<button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>')+'</details>'+
+  '<p class="note">Memory-first diagnostics: private memory reflects committed process-private virtual memory, while working set includes resident shared pages. GC committed is not interchangeable with total native memory. Heap size and fragmentation are values from the last GC, not live heap measures; they remain unavailable until a GC occurs. The configured GC heap count is not necessarily the current active heap count; unavailable configuration values are not evidence of a particular default. GC pause is the cumulative percent of runtime spent paused in GC. Samples are taken once per minute, held only in memory for up to 24 hours (maximum 1,440 per process) and reset on restart. No collection is forced.</p>'+
+ '<div class="w-actions"><button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>'+
+ '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>' : '')+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
- '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
+ '<div class="stat-row"><label>Web address</label><strong>localhost:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
- '<div class="stat-row"><label>Hardware controls</label><strong>Explicit UAC approval for persistent fan profiles</strong></div>'+
+ '<div class="stat-row"><label>Hardware controls</label><strong>Windows-authenticated requests with explicit browser confirmation</strong></div>'+
  '<div class="stat-row"><label>Discovered storage devices</label><strong>'+(S.diagnostics?.storageDevices?.length??'—')+'</strong></div>'+
  '')+
  '</details></div><div class="badge-line">'+
@@ -373,11 +400,49 @@ function updateLiveValues(){
  SDWorkspace.paintFanControl(S);
  SDWorkspace.paintProfiles(S);
 }
+async function probeWindowsAuth(){
+ try{
+   // Force a Windows Negotiate challenge once at dashboard startup, rather
+   // than discovering missing browser credentials only after a failed save.
+   const response=await fetch('/api/auth/me',{credentials:'same-origin'});
+   return response.ok?await response.json():{authenticated:false,status:response.status};
+ }catch(e){return {authenticated:false,error:String(e)};}
+}
 async function loadStatus(shouldRender=false){
  try{
   S.status=await fetchJSON('/api/status');
+  // Authentication is challenged explicitly at bootstrap or when the
+  // operator chooses Connect. Anonymous polling on a fresh connection
+  // cannot reliably identify an already authenticated browser session.
   if(shouldRender&&S.view==='settings')render();
- }catch(e){console.warn('Desktop process status unavailable:',e.message)}
+ }catch(e){console.warn('SensorDash service status unavailable:',e.message)}
+}
+async function exportPerformance(){
+ try{
+  const data=await fetchJSON('/api/performance-history');
+  const fields=['timestamp','uptimeSeconds','workingSetBytes','privateBytes',
+   'managedHeapBytes','gcCommittedBytes','totalAllocatedBytes',
+   'cpuPercentOneCore','allocationBytesPerSecond','gen0Collections',
+   'gen1Collections','gen2Collections','threadCount','handleCount',
+   'collectorCycleMeanMs','hardwareScanMeanMs','ipcSerializationMeanMs',
+   'ipcResponseMeanBytes','collectorCycles','ipcResponses',
+   'serverGc','gcHeapCount','gcConserveMemoryLevel','gcLastHeapSizeBytes',
+   'gcFragmentedBytes','gcPauseTimePercent','gcIndex'];
+  const cell=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const rows=[['process',...fields].map(cell).join(',')];
+  for(const [kind,samples] of [['desktop',data.desktop],['collector',data.collector]]){
+   if(!Array.isArray(samples))continue;
+   for(const sample of samples)
+    rows.push([kind,...fields.map(field=>sample[field])].map(cell).join(','));
+  }
+  const blob=new Blob([rows.join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='SensorDash-performance-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Performance history exported');
+ }catch(e){toast('Could not export performance history: '+e.message);}
 }
 async function loadDiagnostics(shouldRender=true){
  try {
@@ -583,6 +648,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
  const removeAlias=e.target.closest('[data-remove-alias]');
  if(removeAlias){removeAlias.closest('.alias-row').querySelector('[data-alias]').value='';saveSettings();return}
  const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
+ if(e.target.closest('#exportPerformance')){void exportPerformance();return;}
  if(e.target.closest('#refreshDiagnostics')){
   Promise.all([loadStatus(false),loadDiagnostics(false)]).then(()=>{if(S.view==='settings')render()});
   return;
@@ -618,6 +684,7 @@ document.addEventListener('input',e=>{
    if(result)result.textContent=e.target.value+'%';
    return;
  }
+ if(S.view==='tray')SDWorkspace.paintTrayPreview(e.target);
  if(SDWorkspace.quickInput(e,S))return;
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
@@ -638,6 +705,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(S.view==='tray')SDWorkspace.paintTrayPreview(e.target);
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
@@ -653,13 +721,13 @@ document.addEventListener('visibilitychange',()=>{
 });
 async function bootstrap(){
  try{
-   const [cfg,frame,groups,status]=await Promise.all([
+   const [cfg,frame,groups,status,auth]=await Promise.all([
      fetchJSON('/api/settings'),fetchJSON('/api/live'),
-     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),CoolingElectrical.loadCatalog()
+     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),probeWindowsAuth(),CoolingElectrical.loadCatalog()
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
+   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};

@@ -96,7 +96,6 @@ const workspace=read('src/SensorDash/wwwroot/workspace.js');
 const app=read('src/SensorDash/wwwroot/app.js');
 const html=read('src/SensorDash/wwwroot/index.html');
 const program=read('src/SensorDash/Program.cs');
-const bridge=read('src/SensorDash/ServiceBridge.cs');
 const profiles=read('src/SensorDash/PersistentFanProfiles.cs');
 const model=read('src/SensorDash/WorkspaceModels.cs');
 assert.ok(workspace.includes('FanFeedback.render(S,p.channelIds,p.id)'));
@@ -110,7 +109,7 @@ assert.ok(html.includes('/fan-feedback.js')&&html.includes('/fan-control-ux.js')
  html.includes('/workspace-locks.js'));
 assert.ok(program.includes('FanProfileReviewSelfTest.Run()')&&
  program.includes('/fan-feedback.js'));
-assert.ok(bridge.includes('liveFan.Snapshot(state.Settings)'));
+assert.ok(program.includes('Results.Ok(control.Snapshot(state.Settings))'));
 assert.ok(profiles.includes('FanProfileReview.Compare'));
 assert.ok(model.includes('FanCommissioningRules.Normalize'));
 console.log('PASS: pending approval warnings, lock safety, collapsibles, and inherited physical PWM/RPM monitoring');

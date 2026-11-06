@@ -200,21 +200,73 @@ const SDWorkspace = (() => {
      'Grafana handles history; this local editor owns cooling assignments and live sensor context.')+
      starter+systemHtml;
  };
+ const trayTextMode=w=>{
+   const v=(w.textColor||'auto').toLowerCase();
+   if(v==='auto')return 'auto';
+   if(v==='#ffffff')return 'white';
+   if(v==='#0d151f')return 'dark';
+   return 'custom';
+ };
+ const trayAppearance=(style,accent,textColor)=>{
+   const safeAccent=/^#[0-9a-f]{6}$/i.test(accent||'')?accent:'#62d5ce';
+   const kind=['accent-bar','solid','outline'].includes(style)?style:'accent-bar';
+   const bg=kind==='solid'?safeAccent:'#0e1c28';
+   const red=parseInt(bg.slice(1,3),16),green=parseInt(bg.slice(3,5),16),blue=parseInt(bg.slice(5,7),16);
+   const auto=(red*299+green*587+blue*114)>=150000?'#0d151f':'#ffffff';
+   return {kind,accent:safeAccent,background:bg,
+     foreground:/^#[0-9a-f]{6}$/i.test(textColor||'')?textColor:auto};
+ };
+ const paintTrayPreview=target=>{
+   const row=target?.closest?.('.w-tray-row');
+   const preview=row?.querySelector?.('[data-tray-preview]');
+   if(!preview)return false;
+   const style=row.querySelector('[data-tray-style]')?.value||'accent-bar';
+   const accent=row.querySelector('[data-tray-color]')?.value||'#62d5ce';
+   const mode=row.querySelector('[data-tray-text-mode]')?.value||'auto';
+   const custom=row.querySelector('[data-tray-text-custom]')?.value||'#ffffff';
+   const color=mode==='white'?'#ffffff':mode==='dark'?'#0d151f':mode==='custom'?custom:'auto';
+   const appearance=trayAppearance(style,accent,color);
+   preview.className='w-tray-preview '+appearance.kind;
+   preview.style.setProperty('--tray-accent',appearance.accent);
+   preview.style.setProperty('--tray-bg',appearance.background);
+   preview.style.setProperty('--tray-fg',appearance.foreground);
+   return true;
+ };
  const renderTray=(S)=>{
    const list=S.settings?.trayWidgets||[];
    const options=S.sensors.length?'':nothing('The collector has not reported sensors yet.');
    return card('Notification-area sensors','Choose up to six independent, live Windows tray badges',
-      '<p class="note">Choose up to six tray readouts. Double-click one to open SensorDash.</p>'+
-      options+list.map((w,i)=>
-        '<div class="w-tray-row"><span class="w-tray-index">'+(i+1)+'</span>'+
-        '<label class="w-tray-sensor">Sensor'+
-        select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+'</label>'+
-        '<label class="w-tray-label">Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
-        '<label class="w-tray-color">Color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(w.color||'#62d5ce')+'"></label>'+
-        '<label class="w-tray-precision">Precision<select data-tray-decimals="'+attr(w.id)+'">'+opts(['0','1'],String(w.decimals))+'</select></label>'+
-        '<div class="w-tray-remove">'+button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div></div>').join('')+
-      '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
-      (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
+     '<p class="note">Choose a style for each icon. Accent bar restores the original dark badge with a thin colored dash. Solid fills and outlines are alternatives; Automatic text color adapts for bright backgrounds.</p>'+
+     options+list.map((w,i)=>{
+       const appearance=trayAppearance(w.style,w.color,w.textColor);
+       const mode=trayTextMode(w);
+       const reading=S.byId?.get(w.sensorId);
+       const number=Number.isFinite(reading?.value)?String(Math.round(reading.value)):'--';
+       const selected=(value,label)=>'<option value="'+value+'" '+(mode===value?'selected':'')+'>'+label+'</option>';
+       return '<div class="w-tray-row" data-tray-row="'+attr(w.id)+'">'+
+         '<span class="w-tray-index">'+(i+1)+'</span>'+
+         '<span class="w-tray-preview '+appearance.kind+'" data-tray-preview="'+attr(w.id)+'" '+
+           'style="--tray-accent:'+appearance.accent+';--tray-bg:'+appearance.background+
+           ';--tray-fg:'+appearance.foreground+'">'+safe(number.slice(0,3))+'</span>'+
+         '<label class="w-tray-sensor">Sensor'+
+         select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+'</label>'+
+         '<label class="w-tray-label">Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
+         '<label class="w-tray-style">Style<select data-tray-style="'+attr(w.id)+'">'+
+           '<option value="accent-bar" '+(appearance.kind==='accent-bar'?'selected':'')+'>Accent bar · original</option>'+
+           '<option value="solid" '+(appearance.kind==='solid'?'selected':'')+'>Solid background</option>'+
+           '<option value="outline" '+(appearance.kind==='outline'?'selected':'')+'>Accent outline</option></select></label>'+
+         '<label class="w-tray-color">Accent color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(appearance.accent)+'"></label>'+
+         '<label class="w-tray-text">Text color<select data-tray-text-mode="'+attr(w.id)+'">'+
+           selected('auto','Automatic')+selected('white','White')+selected('dark','Dark')+selected('custom','Custom')+
+           '</select></label>'+
+         '<label class="w-tray-custom">Custom text<input type="color" data-tray-text-custom="'+attr(w.id)+
+           '" value="'+attr(mode==='custom'?w.textColor:'#ffffff')+'" title="Choose a custom text color (select Custom to apply it)"></label>'+
+         '<label class="w-tray-precision">Precision<select data-tray-decimals="'+attr(w.id)+'">'+
+           opts(['0','1'],String(w.decimals))+'</select></label>'+
+         '<div class="w-tray-remove">'+button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div></div>';
+     }).join('')+
+     '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
+     (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
  const curveDiagram=(points,activeTemperature,activePercent)=>{
   // Keep source-row identity when sorting graph points by temperature.
@@ -509,7 +561,7 @@ const SDWorkspace = (() => {
   const curveOptions=(S.settings?.simulatedFanCurves||[]).map(c=>
     '<option value="'+attr(c.id)+'">'+safe(c.name)+'</option>').join('');
   return card('Manual fan tests','Select one output · 30–120-second tests · 70–100% PWM',
-    '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and approve Windows elevation. '+
+    '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and confirm the change in your browser. '+
       'Avoid essential pump outputs until their safe behavior is verified.</p>'+
     '<div class="w-live-status"><strong>Control state: <span data-fan-status>'+
        safe(state.state||'Loading…')+'</span></strong>'+
@@ -535,7 +587,7 @@ const SDWorkspace = (() => {
     '<label class="w-fan-ack"><input id="liveFanExclusive" type="checkbox" />'+
     '<span>I have closed other fan-control software and want SensorDash to control this output.</span></label>'+
     '<div class="w-actions">'+
-       button('fan-authorize','Request elevated takeover','',false)+
+       button('fan-authorize','Confirm temporary fan control','',false)+
        button('fan-release','Release to firmware control')+
      '</div>'+
     '<p class="note">For these short tests, SensorDash limits duty to at least 70% (or a higher channel minimum) '+
@@ -552,6 +604,38 @@ const SDWorkspace = (() => {
    active.some(a=>(a.channelIds||[]).includes(o.id))||
    !isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const curves=S.settings?.simulatedFanCurves||[];
+  // A reusable curve is edited in exactly one profile, even when shared.
+  const curveOwners=new Map();
+  for(const draft of all)for(const id of draft.curveIds||[])
+    if(!curveOwners.has(id))curveOwners.set(id,draft.id);
+  const curveDemand=p=>{
+    const reports=S.simulation?.results||[];
+    const valid=(p.curveIds||[]).map(id=>reports.find(x=>x.id===id)?.targetPercent)
+      .filter(Number.isFinite);
+    const maxDemand=valid.length?Math.max(...valid):null;
+    return '<div class="w-profile-demands"><div class="w-profile-demand-heading">'+
+      '<strong>Temperature inputs · MAX</strong>'+
+      '<span class="note">Saved curve preview; actual applied PWM may differ due to approval, smoothing or overrides.</span></div>'+
+      '<div class="w-profile-demand-head"><span>Curve</span><span>Temperature</span><span>Demand</span><span></span></div>'+
+      (p.curveIds||[]).map(id=>{
+        const curve=curves.find(c=>c.id===id), sample=reports.find(r=>r.id===id);
+        const other=curveOwners.get(id)!==p.id?all.find(q=>q.id===curveOwners.get(id))?.name:null;
+        const highest=Number.isFinite(maxDemand)&&Number.isFinite(sample?.targetPercent)&&
+          Math.abs(sample.targetPercent-maxDemand)<0.01;
+        return '<div class="w-profile-demand-row'+(highest?' w-demand-highest':'')+
+          '" data-profile-curve-row="'+attr(p.id)+'" data-curve-id="'+attr(id)+'">'+
+          '<span><strong>'+safe(curve?.name||id)+'</strong>'+
+          (other?'<small>Shared · edit in '+safe(other)+'</small>':'')+'</span>'+
+          '<strong data-sim="'+attr(id)+':input">'+
+          (Number.isFinite(sample?.inputTemperature)?sample.inputTemperature.toFixed(1)+' °C':'—')+'</strong>'+
+          '<strong data-sim="'+attr(id)+':output">'+
+          (Number.isFinite(sample?.targetPercent)?sample.targetPercent.toFixed(1)+' %':'—')+'</strong>'+
+          '<small data-profile-winning="'+attr(p.id)+'|'+attr(id)+'">'+
+          (highest?'Highest request':'')+'</small></div>';
+      }).join('')+
+      (!(p.curveIds||[]).length?'<p class="note">No curves assigned yet.</p>':'')+
+      '</div>';
+  };
   const mapping=id=>FanFeedback.mapping(S,id);
   const header=card('Live fan profiles','Automatic fan control',
    '<p class="note">Choose curves and actual PWM channels, save the draft, and enable it with administrator approval. '+
@@ -562,24 +646,28 @@ const SDWorkspace = (() => {
   const cards=all.map(p=>{
     const running=active.find(a=>a.id===p.id),status=reports.find(x=>x.id===p.id);
     if(!editing){
-      const content=card(p.name,(running?'ENABLED':'DRAFT')+' · locked configuration',
+      const content=card('Current control',(running?'ENABLED':'DRAFT')+' · locked configuration',
         '<div class="w-live-status"><strong>'+safe(status?.state|| (running?'Starting':'Not enabled'))+
           '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
-        '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
-          ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
-        FanFeedback.render(S,p.channelIds,p.id)+
+        '<p class="note">Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
+        curveDemand(p)+FanFeedback.render(S,p.channelIds,p.id)+
         (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
       return FanControlUx.section(S,'profile:'+p.id,p.name,
          (running?'Live · ':'Draft · ')+(running?.needsReapproval?'approval pending':'locked'),
-         content,false);
+         content,!!running);
     }
     const review=FanControlUx.profile(S,p);
-    const form=card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
+    const form=card('Current control',(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
       review+
       '<div class="w-live-status"><strong data-profile-state="'+attr(p.id)+'">'+safe(status?.state|| (running?'Starting':'Not enabled'))+'</strong>'+
         '<span data-profile-message="'+attr(p.id)+'">'+safe(status?.message||(running?'Waiting for the collector':'Ready to configure'))+'</span>'+
         '<strong data-profile-target="'+attr(p.id)+'">'+(status?.targetPercent==null?'':value({value:status.targetPercent})+'%')+'</strong></div>'+
+      curveDemand(p)+FanFeedback.render(S,p.channelIds,p.id)+
+      '<div class="w-profile-curve-editors">'+
+      renderCurves(S,new Set((p.curveIds||[]).filter(id=>curveOwners.get(id)===p.id)),true)+'</div>'+
+      FanControlUx.section(S,'profile-settings:'+p.id,'Profile configuration',
+        'Assignments, minimum duty and ramp-down · infrequent changes',
       '<div class="w-actions"><label>Name<input data-profile-name="'+attr(p.id)+'" value="'+attr(p.name)+'"></label>'+
        '<label>Minimum duty (%)<input type="number" min="0" max="100" step="1" data-profile-min="'+attr(p.id)+'" value="'+p.minimumPercent+'"></label>'+
        '<label>Ramp-down time (seconds)<input type="number" min="0" max="90" step="1" data-profile-response="'+attr(p.id)+'" value="'+p.responseSeconds+'"></label></div>'+
@@ -594,16 +682,15 @@ const SDWorkspace = (() => {
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
         '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
-      FanFeedback.render(S,p.channelIds,p.id)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
         button('remove-profile','Delete draft','data-id="'+attr(p.id)+'"')+'</div>'+
       '<p class="note">Reapprove to apply changes to an enabled profile. '+
-      'Separate profiles cannot share the same output.</p>');
+      'Separate profiles cannot share the same output.</p>'),false);
     return FanControlUx.section(S,'profile:'+p.id,p.name,
       (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
-      p.curveIds.length+' curve(s)',form,!!running?.needsReapproval);
+      p.curveIds.length+' curve(s)',form,!!running);
   }).join('');
   const content=header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
     (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
@@ -644,11 +731,12 @@ const SDWorkspace = (() => {
    }
    await persist(S,h);
  };
- const renderCurves=(S)=>{
+ const renderCurves=(S,filterIds=null,inline=false)=>{
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
    const editing=!WorkspaceLocks.fan(S);
-   const cards=curves.map(curve=>{
+   const allocated=new Set((S.settings?.fanProfiles||[]).flatMap(p=>p.curveIds||[]));
+   const cards=curves.filter(c=>inline?filterIds?.has(c.id):!allocated.has(c.id)).map(curve=>{
      const sample=simulation.find(s=>s.id===curve.id);
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
@@ -689,25 +777,32 @@ const SDWorkspace = (() => {
        'Linked to live fan control · expand to edit':'Temperature-to-duty curve',
        '<div data-fan-curve-editor="'+attr(curve.id)+'">'+form+'</div>',false);
    }).join('');
-   const curveContent=card('Temperature curves','Reusable fan-control curves',
+   if(inline)return cards;
+   const curveContent=card('Curve library','Unassigned curves and curve creation',
       (editing?'<div class="w-actions">'+button('add-curve','+ Temperature curve')+'</div>':
        WorkspaceLocks.readonly('Temperature curves')))+
-      (cards||card('Create a fan curve','Select a temperature source',nothing('No curves yet.')));
+      (cards||'<p class="note">Assigned curves can be edited in their fan profiles above.</p>');
    const controls='<div class="w-fan-lock-toolbar">'+WorkspaceLocks.action('toggle-fan-lock',!editing)+
      '<span class="note">'+(editing?'Editing enabled · Lock to prevent accidental changes':
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
-   const overrideCount=S.fanControl?.persistent?.overrides?.length||0;
+   const calibration=S.fanControl?.persistent?.calibration;
+   const activeCalibration=calibration?.state==='running';
+   const unassigned=new Set(curves.filter(c=>!allocated.has(c.id)).map(c=>c.id));
    return controls+
-      FanControlUx.section(S,'calibration','Fan control & calibration',
-        '1 · Identify and measure physical fan PWM/RPM before assigning temperature curves',
+      (activeCalibration?'<aside class="fc-global-calibration" role="status">'+
+       '<strong>Hardware calibration running</strong><span>'+safe(calibration.channelId)+
+       ' · '+safe(calibration.completedSteps||0)+'/'+safe(calibration.totalSteps||'?')+
+       ' steps. Open Hardware setup to monitor or cancel.</span></aside>':'')+
+      renderProfiles(S)+
+      FanControlUx.section(S,'curves','Curve library',
+        'Create reusable curves · '+unassigned.size+' not assigned',
+        curveContent,false)+
+      FanControlUx.section(S,'calibration','Hardware setup & calibration',
+        'PWM pairing, tach verification and calibration · occasional maintenance',
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
           '<p class="note">Fan calibration module unavailable.</p>'):
           WorkspaceLocks.readonly('Fan control & calibration')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',true)+
-      FanControlUx.section(S,'curves','Temperature curves',
-        '2 · Define temperature-to-PWM demand · '+curves.length+' curve(s)',
-        curveContent,false)+
-      renderProfiles(S)+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',activeCalibration)+
       FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
         FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
           'Resume recovery, commands, RPM feedback and errors',
@@ -733,7 +828,10 @@ const SDWorkspace = (() => {
    if(state.dirty)saveStatus(S,'Saving…');
    const run=state.tail.then(async()=>{
      const body=JSON.stringify(S.settings);
-     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body});
+     const response=await fetch('/api/settings',{method:'PUT',credentials:'same-origin',
+       headers:{'Content-Type':'application/json','X-SensorDash-Action':'settings'},body});
+     if(response.status===401)throw Error('Windows authentication required. Open Settings, connect your Windows account, then retry.');
+     if(response.status===403)throw Error('The request was denied. Open SensorDash using http://localhost:8765/ and retry.');
      if(!response.ok)throw Error(await response.text());
      const saved=await response.json();
      // A response must never replace newer local edits.
@@ -833,12 +931,22 @@ const SDWorkspace = (() => {
  function syncInputs(S){
    syncCoolingInputs(S);
    const d=S.settings;
-   for(const e of document.querySelectorAll('[data-tray-sensor],[data-tray-label],[data-tray-color],[data-tray-decimals]')){
-     const id=e.dataset.traySensor||e.dataset.trayLabel||e.dataset.trayColor||e.dataset.trayDecimals;
+   for(const e of document.querySelectorAll('[data-tray-sensor],[data-tray-label],[data-tray-color],[data-tray-decimals],[data-tray-style],[data-tray-text-mode],[data-tray-text-custom]')){
+     const id=e.dataset.traySensor||e.dataset.trayLabel||e.dataset.trayColor||
+       e.dataset.trayDecimals||e.dataset.trayStyle||e.dataset.trayTextMode||e.dataset.trayTextCustom;
      const o=d.trayWidgets.find(w=>w.id===id);
      if(!o)continue;
-     const field=e.dataset.traySensor?'sensorId':e.dataset.trayLabel?'label':e.dataset.trayColor?'color':'decimals';
-     o[field]=field==='decimals'?Number(e.value):e.value;
+     if(e.dataset.traySensor)o.sensorId=e.value;
+     else if(e.dataset.trayLabel)o.label=e.value;
+     else if(e.dataset.trayColor)o.color=e.value;
+     else if(e.dataset.trayDecimals)o.decimals=Number(e.value);
+     else if(e.dataset.trayStyle)o.style=e.value;
+     else if(e.dataset.trayTextMode)
+       o.textColor=e.value==='auto'?'auto':e.value==='white'?'#ffffff':
+         e.value==='dark'?'#0d151f':document.querySelector(
+           '[data-tray-text-custom="'+CSS.escape(id)+'"]')?.value||'#ffffff';
+     else if(e.dataset.trayTextCustom&&document.querySelector(
+         '[data-tray-text-mode="'+CSS.escape(id)+'"]')?.value==='custom')o.textColor=e.value;
    }
    for(const e of document.querySelectorAll('[data-profile-name],[data-profile-min],[data-profile-response]')){
      const id=e.dataset.profileName||e.dataset.profileMin||e.dataset.profileResponse;
@@ -912,12 +1020,16 @@ const SDWorkspace = (() => {
         percent:action==='quick-apply'?percent:100,
         durationSeconds:action==='quick-apply'?300:30,
         confirmExclusiveOwnership:action==='quick-apply'};
+       if(action==='quick-apply'&&!confirm('Apply a temporary '+percent+'% PWM override to '+channel+
+          ' for up to 5 minutes? Confirm no other fan-control program is active. Temperature guards remain enabled.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
         method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
         body:JSON.stringify(command)});
        if(!response.ok){h.toast('Override unavailable: '+(await response.text()).slice(0,150));return true;}
        if(S.quickFanDrafts)delete S.quickFanDrafts[channel];
-       h.toast('Approve Windows elevation to '+(action==='quick-apply'?'set temporary fan speed.':'restore the fan curve.'));
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         (action==='quick-apply'?'Temporary override requested.':'Fan curve restoration requested.'));
        return true;
       }
       if(action==='fan-authorize'||action==='fan-release'){
@@ -939,12 +1051,16 @@ const SDWorkspace = (() => {
        if(!release&&mode==='curve'&&!command.curveId){
          h.toast('Select a saved temperature curve.');return true;
        }
+       if(!release&&!confirm('Take direct control of '+channel+' at '+command.percent+'% PWM for up to '+
+         command.durationSeconds+' seconds? This must be a fan output, not a pump; no other controller should be active.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
          method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
          body:JSON.stringify(command)
        });
        if(!response.ok){h.toast('Authorization not started: '+(await response.text()).slice(0,150));return true;}
-       h.toast('Windows elevation requested. The status above shows the actual hardware result.');
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         'Request submitted. Check the live hardware-control status.');
        return true;
      }
      if(['starter-radiators','starter-nvme','add-profile'].includes(action)){
@@ -970,12 +1086,16 @@ const SDWorkspace = (() => {
          profileId:id||'',confirmExclusiveOwnership:action==='start-profile',
          durationSeconds:60,percent:100
        };
+       if(action==='start-profile'&&!confirm('Enable approved fan profile '+(id||'')+
+         '? It will control the assigned PWM channels until stopped, with safety guards active.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
          method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
          body:JSON.stringify(command)
        });
        if(!response.ok){h.toast('Authorization unavailable: '+(await response.text()).slice(0,160));return true;}
-       h.toast('Confirm Windows elevation. Collector status will update.');
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         'Request submitted. Review the live collector status.');
        return true;
      }
      if(action==='remove-profile'){
@@ -1058,7 +1178,7 @@ const SDWorkspace = (() => {
      }
      if(action==='add-tray'){
        const candidate=S.sensors.find(s=>s.value!=null&&!isHidden(S,s)&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
-       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',decimals:0});
+       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',style:'accent-bar',textColor:'auto',decimals:0});
      }
      if(action==='remove-tray')cfg.trayWidgets=cfg.trayWidgets.filter(w=>w.id!==id);
      if(action==='add-curve'){
@@ -1191,6 +1311,22 @@ const SDWorkspace = (() => {
        key==='output'?(row?.targetPercent==null?'—':row.targetPercent.toFixed(1)+' %'):row?.state||'waiting';
      if(el.textContent!==out)el.textContent=out;
    });
+   // Diagnostic preview only: the approved profile can differ from saved curve
+   // demands until reapproval, or due to PWM minimums/overrides/ramping.
+   const profiles=S.settings?.fanProfiles||[];
+   document.querySelectorAll('[data-profile-curve-row]').forEach(el=>{
+     const id=el.dataset.profileCurveRow;
+     const profile=profiles.find(p=>p.id===id);
+     const candidates=(profile?.curveIds||[]).map(curveId=>
+       readings.find(r=>r.id===curveId)).filter(r=>Number.isFinite(r?.targetPercent));
+     const highest=candidates.length?Math.max(...candidates.map(r=>r.targetPercent)):null;
+     const candidate=readings.find(r=>r.id===el.dataset.curveId);
+     const winning=Number.isFinite(highest)&&Number.isFinite(candidate?.targetPercent)&&
+       Math.abs(candidate.targetPercent-highest)<0.01;
+     el.classList.toggle('w-demand-highest',winning);
+     const badge=el.querySelector('[data-profile-winning]');
+     if(badge)badge.textContent=winning?'Highest request':'';
+   });
  };
- return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
+ return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintTrayPreview,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
 })();

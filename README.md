@@ -1,6 +1,6 @@
 # SensorDash — Windows hardware control companion
 
-SensorDash is a Windows hardware-monitoring and control utility for [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor). Its elevated collector is the **single authority** for sensor polling, local cooling topology, approved fan curves and physical PWM outputs. A small tray process and loopback web interface expose local controls. The Raspberry Pi hosts [HomeAwayFromHome](https://github.com/CodyMathis123/HomeAwayFromHome), Grafana and VictoriaMetrics for read-only history, infrastructure health and alert analysis.
+SensorDash is a Windows hardware-monitoring and control utility for [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor). Its elevated collector is the **single authority** for sensor polling, local cooling topology, approved fan curves and physical PWM outputs. The collector service also hosts the loopback dashboard. A native Win32 tray executable displays sensor readouts in each logged-in user's session. The Raspberry Pi hosts [HomeAwayFromHome](https://github.com/CodyMathis123/HomeAwayFromHome), Grafana and VictoriaMetrics for read-only history, infrastructure health and alert analysis.
 
 ## Ownership boundary
 
@@ -14,7 +14,7 @@ SensorDash is a Windows hardware-monitoring and control utility for [LibreHardwa
 
 The Windows interface has **Cooling Systems, Fan Control, Tray Readouts, Sensor Explorer, Events and Settings**. The old Windows Overview, custom Dashboards, Virtual Sensors and Storage/history chart pages were deliberately removed. We no longer ship the client history-chart engine or its associated static web assets. Long-term visualization is owned by Grafana.
 
-**Safety boundary:** No browser/Pi/Grafana endpoint can directly authorize, modify or release physical PWM. A locally approved fan profile is the only persistent control path. The Laing DDC pump remains tachometer-only; a fan pump mapping forbids manual PWM commissioning. Firmware restoration is best-effort on clean shutdown and interrupted manual tests; no software can guarantee recovery from sudden power loss.
+**Safety boundary:** Only Windows-authenticated, explicitly confirmed local browser requests may ask the service to modify physical PWM. Remote Pi/Grafana endpoints remain read-only. A locally approved fan profile is the only persistent control path. The Laing DDC pump remains tachometer-only; a fan pump mapping forbids manual PWM commissioning. Firmware restoration is best-effort on clean shutdown and interrupted manual tests; no software can guarantee recovery from sudden power loss.
 
 ## Paired HomeAway end-to-end test
 
@@ -37,9 +37,69 @@ dotnet restore src/SensorDash/SensorDash.csproj -r win-x64
 dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist
 ```
 
-The GitHub Actions Windows workflow runs JavaScript tests, C# self-tests, MSI packaging, HTTP/IPC smoke tests, and a real MSI upgrade/rollback check against a successful Production artifact. Use the feature-branch MSI only after CI has passed and a supervised hardware-control validation window is available. Keep your existing approved curves, service data and last working installer until radiator/NVMe/pump parity has been proven.
+The manually requested GitHub Actions Windows workflow runs JavaScript tests, C# self-tests, MSVC native tray compilation, service-hosted HTTP/Windows-auth smoke tests, MSI packaging, and installer upgrade/repair/downgrade-rejection tests against a previous Production artifact. Use the feature-branch MSI only after CI has passed and a supervised hardware-control validation window is available. Keep your existing approved curves, service data and last working installer until radiator/NVMe/pump parity has been proven.
 
-The loopback UI is `http://127.0.0.1:8765`. Physical output requests remain behind the administrator-authorized local fan-control boundary. The elevated service should keep running if the tray exits or the Pi disappears.
+The browser UI is `http://localhost:8765`, hosted by the SYSTEM collector service and bound only to IPv4 loopback (`127.0.0.1`). Old bookmarks to `http://127.0.0.1:8765/` redirect to the canonical browser URL to enable integrated Windows sign-in by default in more browsers. Browser mutations use Windows Negotiate authentication and action-specific, same-origin JSON checks. Fan-control changes also require unmistakable in-browser confirmation and are checked again by the collector. No UAC helper is launched for each change. The collector keeps working when the tray exits, the user signs out, or the Pi disappears.
+
+## Experimental native-tray/service layout
+
+The collector still installs as `SensorDash.exe --collector`, preserving the
+existing Windows Service registration and ProgramData settings/telemetry buffer.
+It now also serves the loopback web dashboard. The old WinForms desktop host
+and general-user JSON IPC bridge are not compiled into the service.
+
+`SensorDash.Tray.exe` is a small native C++ Win32 process with no CLR,
+WinForms, ASP.NET Core, or hardware-driver dependency. Windows launches it
+at each interactive sign-in through the MSI's Run registry registration.
+It has a separate Start Menu shortcut, a per-session single-instance mutex,
+configurable sensor icons, and a simple read-only HTTP status feed.
+Exiting the tray never stops cooling, telemetry or the web dashboard.
+
+The new architecture is being validated on
+`feature/service-hosted-web-native-tray`. The previous validated MSI is
+a rollback source; newer MSI product versions reject direct downgrades, so
+returning to an older MSI requires a planned uninstall/reinstall (with settings
+preservation confirmed separately). Do not replace the working cooling service
+with an unvalidated feature-branch MSI.
+
+### Native tray appearance and Windows login
+
+Tray icons can independently use the original dark badge with an accent bar
+(default for existing configurations), a solid accent-color background, or an
+accent outline. Each badge supports automatic high-contrast text color
+(especially useful for yellow solid backgrounds), white, dark, or a custom
+font color. Values and all appearance choices remain in the existing
+`%ProgramData%\\SensorDash` workspace settings.
+
+Authenticated browser edits use Windows Negotiate. Unlike PowerShell's
+explicit `-UseDefaultCredentials`, browsers only automatically respond to
+integrated-auth challenges for allowed local/intranet hosts. Use the
+canonical `localhost` address, and see **Settings → Windows authorization**
+to verify the actual Windows identity or select **Connect Windows account**
+if not authenticated. Authentication never elevates the browser process;
+the SYSTEM collector still validates every hardware command and safety guard.
+
+## Optional performance diagnostics
+
+Process memory / GC diagnostics are **disabled by default** in the service-hosted
+web + native C++ tray build. In normal operation, the service does not start
+the one-minute memory sampler, build in-memory sample history, enumerate
+process/GC metrics or measure per-cycle diagnostic timing. The Settings
+performance panel is hidden, and the read-only performance-history endpoint
+returns an empty, disabled response. Hardware monitoring, fan control,
+sleep/resume recovery and Pi telemetry export remain enabled.
+
+To temporarily collect diagnostics, set the **system-level environment variable**
+`SENSORDASH_PERFORMANCE_DIAGNOSTICS=1` for the Windows service and restart
+`SensorDashCollector`. Remove the variable (or set it to `0`) and restart
+the service to return to the default. This is deliberately an operator/service
+configuration rather than an ordinary browser setting; it cannot silently
+re-enable itself. Restart only when safe for the physical cooling system.
+
+When enabled, scan/cycle durations over 10 seconds are excluded from
+performance averages, as a suspend/resume interval may otherwise look like
+a minutes-long hardware scan. Such exclusion is diagnostic-only and does not
+skip collection cycles or alter fan control.
 
 ## Cooling control and sleep/resume
 

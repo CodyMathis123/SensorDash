@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
-using System.Windows.Forms;
 using LibreHardwareMonitor.Hardware;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -21,85 +21,66 @@ if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-// An explicit UAC-elevated helper sends exactly one privileged fan-control
-// command to an administrator-only pipe, then exits. There is deliberately no
-// unprivileged fan-control operation on the telemetry pipe.
-if (args.Contains("--fan-admin-command", StringComparer.OrdinalIgnoreCase))
+// Only the installed service hosts the browser UI. A desktop launch simply
+// opens that local URL. The separate native tray has its own executable.
+if (!args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
 {
-    try
-    {
-        var at=Array.FindIndex(args,a=>a.Equals("--fan-admin-command",StringComparison.OrdinalIgnoreCase));
-        if(at<0||at+1>=args.Length)throw new ArgumentException("Missing command payload.");
-        var decoded=Convert.FromBase64String(args[at+1]);
-        if(decoded.Length>4096)throw new ArgumentException("Command too large.");
-        var command=JsonSerializer.Deserialize<FanCommand>(decoded, JsonSerializerOptions.Web);
-        await AdminFanControlClient.SendAsync(command ?? throw new ArgumentException("Invalid command."));
-    }
-    catch(Exception ex)
-    {
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(),"SensorDash-Fan-Admin.log"),
-            DateTimeOffset.UtcNow+" "+ex.GetType().Name+": "+ex.Message+Environment.NewLine); }catch{}
-        Environment.ExitCode=1;
-    }
+    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
+        try { Process.Start(new ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }
+        catch { }
     return;
 }
-
-// Same signed executable, two separate Windows processes.
-// Windows Service (--collector) owns elevated sensor hardware access and the database.
-// Desktop (default) owns the tray icon + loopback web server, never opens the hardware.
-if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
-{
-    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
-    Directory.CreateDirectory(data);
-    var service = Host.CreateDefaultBuilder(args)
-        .UseWindowsService(options => options.ServiceName = "SensorDashCollector")
-        .ConfigureServices(services =>
-        {
-            services.AddSingleton(new DashboardState(data));
-            services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
-            services.AddSingleton<SimulationState>();
-            services.AddSingleton(new FanControlRuntime(data));
-            // If telemetry is enabled, build its timestamp index before fan
-            // collection starts. Otherwise no telemetry work is performed.
-            services.AddHostedService<TelemetryExportWorker>();
-            services.AddHostedService<SensorWorker>();
-            services.AddHostedService<SimulationWorker>();
-            services.AddHostedService<CollectorPipeServer>();
-            services.AddHostedService<AdminFanControlPipeServer>();
-        }).Build();
-    await service.RunAsync();
-    return;
-}
-
-// An existing tray process owns localhost:8765. Double-click only opens its UI.
-try
-{
-    using var probe = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
-    using var response = await probe.GetAsync("http://127.0.0.1:8765/api/status");
-    if (response.IsSuccessStatusCode)
-    {
-        if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); } catch { }
-        return;
-    }
-}
-catch (HttpRequestException) { }
-catch (TaskCanceledException) { }
-
-var userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
-Directory.CreateDirectory(userDir);
-// The desktop process only serves loopback minimal APIs and embedded assets.
-// SlimBuilder avoids unrelated MVC/configuration defaults in the tray host;
-// the elevated collector keeps its normal Windows Service host.
+var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
+Directory.CreateDirectory(data);
 var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
 {
-    Args = args,
+    // --collector is an executable mode switch, not an ASP.NET configuration key.
+    Args = Array.Empty<string>(),
     ContentRootPath = AppContext.BaseDirectory
 });
-builder.WebHost.UseUrls("http://127.0.0.1:8765");
-builder.Services.AddSingleton(new DashboardState(userDir));
-builder.Services.AddHostedService<DashboardBridgeWorker>();
+builder.Services.AddWindowsService(options => options.ServiceName = "SensorDashCollector");
+// Kestrel binds both IPv4 and IPv6 loopback for the canonical localhost URL.
+// This remains local-only: no LAN or wildcard interfaces are exposed.
+builder.WebHost.UseUrls("http://localhost:8765");
+builder.Services.AddSingleton(new DashboardState(data));
+builder.Services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
+builder.Services.AddSingleton<SimulationState>();
+builder.Services.AddSingleton(new FanControlRuntime(data));
+if (OptionalPerformanceDiagnostics.Enabled)
+    builder.Services.AddHostedService<PerformanceSamplerWorker>();
+builder.Services.AddHostedService<TelemetryExportWorker>();
+builder.Services.AddHostedService<SensorWorker>();
+builder.Services.AddHostedService<SimulationWorker>();
+// Keep privilege decisions server-side. Windows Negotiate authenticates the
+// interactive user for mutations; read-only status and assets remain local.
+builder.Services.AddAuthentication(
+    Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate();
+builder.Services.AddAuthorization();
 var app = builder.Build();
+// Bind exclusively to IPv4 loopback, and reject alternate Host headers to
+// avoid local browser DNS-rebinding requests to a SYSTEM-owned web process.
+app.Use(async (context, next) =>
+{
+    if (!(string.Equals(context.Request.Host.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+       || string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+       || context.Request.Host.Port != 8765)
+    {
+        context.Response.StatusCode = 403;
+        return;
+    }
+    await next();
+});
+app.UseAuthentication();
+app.UseAuthorization();
+bool ValidBrowserMutation(HttpContext context, string action) =>
+    string.Equals(context.Request.Host.Host, "localhost", StringComparison.OrdinalIgnoreCase) &&
+    context.Request.Headers.Origin.ToString() == "http://localhost:8765" &&
+    context.Request.Headers["X-SensorDash-Action"].ToString() == action &&
+    context.Request.ContentType is string mime &&
+    mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) &&
+    context.Request.ContentLength is not > 65_536;
+
 IResult Resource(string name, string mediaType)
 {
     var resource = typeof(DashboardState).Assembly.GetManifestResourceStream("SensorDash.Web." + name);
@@ -107,7 +88,24 @@ IResult Resource(string name, string mediaType)
         ? Results.Problem("Missing embedded dashboard resource: " + name, statusCode: 500)
         : Results.Stream(resource, contentType: mediaType);
 }
-app.MapGet("/", () => Resource("index.html", "text/html; charset=utf-8"));
+// Keep old bookmarks working, but present the browser with the Windows-auth
+// friendly localhost hostname rather than a dotted numeric IP address.
+app.MapGet("/", (HttpContext ctx) =>
+    string.Equals(ctx.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+        ? Results.Redirect("http://localhost:8765/")
+        : Resource("index.html", "text/html; charset=utf-8"));
+app.MapGet("/api/auth/status", (HttpContext ctx) => Results.Ok(new
+{
+    authenticated = ctx.User.Identity?.IsAuthenticated == true,
+    user = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Identity?.Name : null
+}));
+app.MapGet("/api/auth/sign-in", () => Results.Redirect("/")).RequireAuthorization();
+app.MapGet("/api/auth/me", (HttpContext ctx) => Results.Ok(new
+{
+    authenticated = true,
+    user = ctx.User.Identity?.Name,
+    scheme = ctx.User.Identity?.AuthenticationType
+})).RequireAuthorization();
 app.MapGet("/index.html", () => Resource("index.html", "text/html; charset=utf-8"));
 app.MapGet("/app.js", () => Resource("app.js", "text/javascript; charset=utf-8"));
 app.MapGet("/workspace.js", () => Resource("workspace.js", "text/javascript; charset=utf-8"));
@@ -123,76 +121,105 @@ app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"))
 app.MapGet("/api/cooling-presets", () => Results.Ok(CoolingPresetCatalog.Items));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
-    app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
+    app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "service",
     collectorOnline = state.Latest is { Error: null },
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     pawnIo = state.Latest?.PawnIo,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
-    process = ProcessTelemetry.Snapshot(),
+    performanceDiagnosticsEnabled = OptionalPerformanceDiagnostics.Enabled,
+    process = OptionalPerformanceDiagnostics.Enabled ? ProcessTelemetry.Snapshot() : null,
     lastSample = state.Latest?.Timestamp,
     error = state.Latest?.Error
 }));
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
-app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("diagnostics"), ct));
-app.MapGet("/api/settings", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("settings"), ct));
-app.MapGet("/api/collection-groups", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("collectionGroups"), ct));
-app.MapPut("/api/settings", async (HttpContext ctx) =>
+app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(state)));
+// Read-only, bounded performance history. Browser download never contains sensor readings,
+// settings, paths, tokens or device identifiers.
+app.MapGet("/api/performance-history", async (CancellationToken ct) =>
 {
+    return OptionalPerformanceDiagnostics.Enabled
+        ? Results.Ok(new { enabled = true, desktop = Array.Empty<ProcessPerformanceSample>(), collector = ProcessTelemetry.History() })
+        : Results.Ok(new { enabled = false, desktop = Array.Empty<ProcessPerformanceSample>(), collector = Array.Empty<ProcessPerformanceSample>() });
+});
+app.MapGet("/api/settings", (DashboardState state) => Results.Ok(state.Settings));
+app.MapGet("/api/collection-groups", () => Results.Ok(HardwareCollection.Groups));
+app.MapPut("/api/settings", async (HttpContext ctx, DashboardState state) =>
+{
+    if (!ValidBrowserMutation(ctx, "settings")) return Results.StatusCode(403);
     try
     {
         var updated = await JsonSerializer.DeserializeAsync<DashboardSettings>(
             ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
-        return updated == null
-            ? Results.BadRequest("Invalid settings.")
-            : await ProxyAsync(new PipeCommand("saveSettings", Settings: updated), ctx.RequestAborted);
+        if (updated is null) return Results.BadRequest("Invalid settings.");
+        state.UpdateSettings(updated);
+        return Results.Ok(state.Settings);
     }
     catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
-});
+}).RequireAuthorization();
 // Configuration changes are local to the Windows collector. No HTTP endpoint
 // ever returns the bearer token or certificate PEM. Never trust cross-origin
 // pages with service-owned secrets.
-app.MapGet("/api/telemetry-config", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("telemetrySettings"), ct));
+app.MapGet("/api/telemetry-config", () => Results.Ok(TelemetryConfiguration.Snapshot()));
 app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
 {
-    if (ctx.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
-        ctx.Request.Headers["X-SensorDash-Action"].ToString() != "telemetry-config" ||
-        ctx.Request.ContentType is not string mime ||
-        !mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
-        return Results.StatusCode(403);
-    if (ctx.Request.ContentLength is > 24_576)
-        return Results.StatusCode(413);
+    if (!ValidBrowserMutation(ctx, "telemetry-config")) return Results.StatusCode(403);
+    if (ctx.Request.ContentLength is > 24_576) return Results.StatusCode(413);
     try
     {
         var update = await JsonSerializer.DeserializeAsync<TelemetryConfigurationUpdate>(
             ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
-        return update is null
-            ? Results.BadRequest("Invalid telemetry configuration.")
-            : await ProxyAsync(new PipeCommand("saveTelemetrySettings", Telemetry: update), ctx.RequestAborted);
+        return update is null ? Results.BadRequest("Invalid telemetry configuration.")
+            : Results.Ok(TelemetryConfiguration.Save(update));
     }
     catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
-});
-app.MapGet("/api/events", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("events"), ct));
-app.MapGet("/api/simulation", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("simulation"), ct));
-app.MapGet("/api/fan-control", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("fanOutputs"), ct));
-app.MapGet("/api/fan-control/debug", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("fanDebug"), ct));
-app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
+}).RequireAuthorization();
+app.MapGet("/api/events", (HistoryStore db) => Results.Ok(db.ReadEvents()));
+app.MapGet("/api/simulation", (SimulationState simulation) =>
+    Results.Ok(new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest }));
+app.MapGet("/api/fan-control", (FanControlRuntime control, DashboardState state) =>
+    Results.Ok(control.Snapshot(state.Settings)));
+app.MapGet("/api/fan-control/debug", (FanControlRuntime control) => Results.Ok(control.DebugLog()));
+// Minimal, read-only local protocol for the native tray. No web framework,
+// GC, hardware polling or full sensor-frame deserialization in the tray.
+app.MapGet("/api/tray-state", (DashboardState state) =>
 {
-    // Browser mutations require same-origin JSON with a non-simple custom
-    // header. Cross-origin pages cannot satisfy this through ordinary forms.
-    if(context.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
-       context.Request.Headers["X-SensorDash-Action"].ToString() != "fan-control" ||
-       context.Request.ContentType is not string mime ||
-       !mime.StartsWith("application/json",StringComparison.OrdinalIgnoreCase))
-        return Results.StatusCode(403);
+    var frame = state.Latest;
+    var sensors = frame?.Sensors.ToDictionary(s => s.Id) ?? new Dictionary<string, SensorReading>();
+    var result = new System.Text.StringBuilder();
+    var online = frame is not null && string.IsNullOrEmpty(frame.Error);
+    result.Append("status\t").Append(online ? "online" : "offline").Append('\n');
+    static string Safe(string? text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+    foreach (var config in state.Settings.TrayWidgets.Take(6))
+    {
+        if (string.IsNullOrEmpty(config.SensorId)) continue;
+        sensors.TryGetValue(config.SensorId, out var sensor);
+        var decimals = Math.Clamp(config.Decimals, 0, 2);
+        var number = sensor?.Value is double value && double.IsFinite(value)
+            ? value.ToString("F" + decimals, System.Globalization.CultureInfo.InvariantCulture)
+            : "--";
+        var unit = sensor?.Type switch
+        {
+            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" => "%",
+            "Power" => "W", "Voltage" => "V", "Clock" => "MHz", _ => ""
+        };
+        var name = Safe(string.IsNullOrWhiteSpace(config.Label) ? sensor?.Name ?? config.SensorId : config.Label);
+        var color = System.Text.RegularExpressions.Regex.IsMatch(config.Color ?? "",
+            "^#[0-9a-fA-F]{6}$") ? config.Color : "#62D5CE";
+        var style = config.Style is "accent-bar" or "solid" or "outline" ? config.Style : "accent-bar";
+        var textColor = config.TextColor == "auto" ||
+            System.Text.RegularExpressions.Regex.IsMatch(config.TextColor ?? "", "^#[0-9a-fA-F]{6}$")
+            ? config.TextColor : "auto";
+        result.Append("widget\t").Append(name).Append('\t').Append(number)
+            .Append('\t').Append(unit).Append('\t').Append(color)
+            .Append('\t').Append(style).Append('\t').Append(textColor).Append('\n');
+    }
+    return Results.Text(result.ToString(), "text/plain; charset=utf-8");
+});
+app.MapPost("/api/fan-control/authorize", async (HttpContext context, FanControlRuntime control,
+    DashboardState state, HistoryStore db) =>
+{
+    if (!ValidBrowserMutation(context, "fan-control")) return Results.StatusCode(403);
     FanCommand? command;
     try
     {
@@ -218,30 +245,41 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
        ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override" || command.Action=="calibrate") &&
            !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
-    try
+    // The authenticated Windows session authorizes this request. The service
+    // already owns the hardware; it must not create a UAC helper in Session 0.
+    var result = control.Request(command, state.Settings);
+    if (CoolingEventRecorder.Accepted(result))
     {
-        var process=new ProcessStartInfo(Environment.ProcessPath ??
-            throw new InvalidOperationException("Cannot locate SensorDash executable"))
-        {
-            UseShellExecute=true,Verb="runas"
-        };
-        process.ArgumentList.Add("--fan-admin-command");
-        process.ArgumentList.Add(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(command,JsonSerializerOptions.Web)));
-        Process.Start(process);
-        return Results.Accepted(value:new { message="Windows elevation requested. Check live status for the actual result." });
+        var entry = CoolingEventRecorder.Describe(command);
+        if (entry is not null)
+            try { db.Event("info", entry.Sensor, entry.Message, null); }
+            catch (Exception) { /* An audit write must not block safe control. */ }
     }
-    catch(System.ComponentModel.Win32Exception)
-    {
-        return Results.Problem("Elevation was cancelled or unavailable.",statusCode:403);
-    }
-});
-async Task<IResult> ProxyAsync(PipeCommand request, CancellationToken ct)
+    return Results.Ok(result);
+}).RequireAuthorization();
+
+object Diagnostics(DashboardState state)
 {
-    try { return Results.Json(await CollectorClient.AskAsync(request, ct), JsonSerializerOptions.Web); }
-    catch (Exception ex) when (ex is IOException or TimeoutException or OperationCanceledException)
+    var frame = state.Latest;
+    var storage = frame?.Devices?.Where(d => d.Type == "Storage").ToArray() ?? [];
+    var readings = frame?.Sensors.Where(s => s.DeviceType == "Storage").ToArray() ?? [];
+    return new
     {
-        return Results.Problem("Collector service unavailable: " + ex.Message, statusCode: 503);
-    }
+        pawnIo = frame?.PawnIo,
+        isAdministrator = SecurityInfo.IsAdministrator(),
+        storageEnabled = true,
+        storagePollSeconds = state.Settings.StoragePollSeconds,
+        storageDevices = storage,
+        storageSensorCount = readings.Length,
+        process = OptionalPerformanceDiagnostics.Enabled ? ProcessTelemetry.Snapshot() : null,
+        storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
+        storageLastPolled = state.LastStoragePoll,
+        note = storage.Length == 0
+            ? "The collector did not discover storage devices. Check the Windows service event log."
+            : readings.All(s => s.Type != "Temperature")
+                ? "Storage devices were found, but the library exposed no temperature sensor."
+                : "Storage readings are available. Assign the desired SSD sensor in Settings."
+    };
 }
 app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
 {
@@ -263,41 +301,148 @@ app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
     finally { state.Unsubscribe(id); }
 });
 
-// A dedicated STA UI thread supplies the notification-area menu.
-// The ASP.NET host runs asynchronously and never requires elevated privileges.
-var trayThread = new Thread(() =>
-{
-    Application.EnableVisualStyles();
-    using var context = new SensorDashTray(app.Services.GetRequiredService<DashboardState>(),app.Lifetime);
-    Application.Run(context);
-}) { IsBackground = true, Name = "SensorDash Tray" };
-trayThread.SetApartmentState(ApartmentState.STA);
-trayThread.Start();
-app.Lifetime.ApplicationStarted.Register(() =>
-{
-    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(350);
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
-            catch { }
-        });
-});
 await app.RunAsync();
 
-// Lightweight on-demand process diagnostics. No hardware reads or GC collection are triggered.
+// Optional, explicitly enabled process diagnostics. Disabled by default: no sampler,
+// no memory/GC enumeration, no history storage and no per-cycle measurement.
+public static class OptionalPerformanceDiagnostics
+{
+    public static readonly bool Enabled = string.Equals(
+        Environment.GetEnvironmentVariable("SENSORDASH_PERFORMANCE_DIAGNOSTICS"), "1",
+        StringComparison.Ordinal) || string.Equals(
+        Environment.GetEnvironmentVariable("SENSORDASH_PERFORMANCE_DIAGNOSTICS"), "true",
+        StringComparison.OrdinalIgnoreCase);
+}
+
+// One inexpensive sample per minute per process. Does not force GC, poll hardware,
+// retain sensor values or write to disk. History is bounded to 24h / 1440 samples.
+public sealed record ProcessPerformanceSample(
+    DateTimeOffset Timestamp, double UptimeSeconds, long WorkingSetBytes, long PrivateBytes,
+    long ManagedHeapBytes, long GcCommittedBytes, long TotalAllocatedBytes,
+    double? CpuPercentOneCore, double? AllocationBytesPerSecond,
+    int Gen0Collections, int Gen1Collections, int Gen2Collections,
+    int ThreadCount, int HandleCount,
+    double? CollectorCycleMeanMs, double? HardwareScanMeanMs,
+    double? IpcSerializationMeanMs, double? IpcResponseMeanBytes,
+    long CollectorCycles, long IpcResponses,
+    bool ServerGc, int? GcHeapCount, int? GcConserveMemoryLevel,
+    long? GcLastHeapSizeBytes, long? GcFragmentedBytes, double? GcPauseTimePercent,
+    long? GcIndex);
+
+public static class CollectorPerformance
+{
+    private static long _cycles, _cycleMicroseconds, _scanMicroseconds;
+    private static long _responses, _responseBytes, _serializationMicroseconds;
+    public static void ObserveCycle(double cycleMs, double scanMs)
+    {
+        if (!OptionalPerformanceDiagnostics.Enabled) return;
+        // A suspended/resumed Windows process can make elapsed scan/cycle time
+        // appear enormous. Discard these intervals instead of polluting means.
+        if (!double.IsFinite(cycleMs) || !double.IsFinite(scanMs) ||
+            cycleMs < 0 || scanMs < 0 || cycleMs > 10_000 || scanMs > 10_000) return;
+        Interlocked.Increment(ref _cycles);
+        Interlocked.Add(ref _cycleMicroseconds, (long)(cycleMs * 1000));
+        Interlocked.Add(ref _scanMicroseconds, (long)(scanMs * 1000));
+    }
+    public static void ObserveIpcResponse(int bytes, double serializationMs)
+    {
+        if (!OptionalPerformanceDiagnostics.Enabled) return;
+        Interlocked.Increment(ref _responses);
+        Interlocked.Add(ref _responseBytes, bytes);
+        Interlocked.Add(ref _serializationMicroseconds, (long)(serializationMs * 1000));
+    }
+    public static (double? CycleMs, double? ScanMs, double? IpcMs, double? IpcBytes, long Cycles, long Responses) Drain()
+    {
+        var cycles = Interlocked.Exchange(ref _cycles, 0);
+        var cycleUs = Interlocked.Exchange(ref _cycleMicroseconds, 0);
+        var scanUs = Interlocked.Exchange(ref _scanMicroseconds, 0);
+        var responses = Interlocked.Exchange(ref _responses, 0);
+        var responseBytes = Interlocked.Exchange(ref _responseBytes, 0);
+        var ipcUs = Interlocked.Exchange(ref _serializationMicroseconds, 0);
+        return (cycles > 0 ? cycleUs / (cycles * 1000.0) : null,
+            cycles > 0 ? scanUs / (cycles * 1000.0) : null,
+            responses > 0 ? ipcUs / (responses * 1000.0) : null,
+            responses > 0 ? (double)responseBytes / responses : null, cycles, responses);
+    }
+}
+
 public static class ProcessTelemetry
 {
-    public static object Snapshot()
+    private static readonly object Gate = new();
+    // Runtime effective configuration is queried once, never per collector tick.
+    // Only a fixed allowlist of GC numbers is exposed (no environment dump).
+    private static readonly IReadOnlyDictionary<string, object> GcConfiguration = GC.GetConfigurationVariables();
+    private static int? ConfigInteger(string key)
+    {
+        if (!GcConfiguration.TryGetValue(key, out var value)) return null;
+        try { return Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception) { return null; }
+    }
+    private static readonly List<ProcessPerformanceSample> Samples = [];
+    private static ProcessPerformanceSample? _current;
+    private static double _previousCpuSeconds, _previousAllocatedBytes;
+    private static DateTimeOffset _previousTimestamp;
+
+    public static ProcessPerformanceSample Snapshot() =>
+        Volatile.Read(ref _current) ?? Sample();
+
+    public static ProcessPerformanceSample[] History()
+    {
+        lock (Gate) return Samples.ToArray();
+    }
+
+    public static ProcessPerformanceSample Sample()
     {
         using var process = Process.GetCurrentProcess();
-        return new
+        var now = DateTimeOffset.UtcNow;
+        var cpu = process.TotalProcessorTime.TotalSeconds;
+        var allocated = GC.GetTotalAllocatedBytes(false);
+        var gc = GC.GetGCMemoryInfo();
+        var timings = CollectorPerformance.Drain();
+        lock (Gate)
         {
-            workingSetBytes = process.WorkingSet64,
-            privateBytes = process.PrivateMemorySize64,
-            managedHeapBytes = GC.GetTotalMemory(false),
-            threadCount = process.Threads.Count
-        };
+            var elapsed = _previousTimestamp == default ? 0 : (now - _previousTimestamp).TotalSeconds;
+            var cpuPercent = elapsed > 0 ? Math.Max(0, (cpu - _previousCpuSeconds) / elapsed * 100) : (double?)null;
+            var allocationRate = elapsed > 0 ? Math.Max(0, (allocated - _previousAllocatedBytes) / elapsed) : (double?)null;
+            var uptime = Math.Max(0, (now.UtcDateTime - process.StartTime.ToUniversalTime()).TotalSeconds);
+            var sample = new ProcessPerformanceSample(now, uptime, process.WorkingSet64,
+                process.PrivateMemorySize64, GC.GetTotalMemory(false), gc.TotalCommittedBytes,
+                allocated, cpuPercent, allocationRate, GC.CollectionCount(0), GC.CollectionCount(1),
+                GC.CollectionCount(2), process.Threads.Count, process.HandleCount,
+                timings.CycleMs, timings.ScanMs, timings.IpcMs, timings.IpcBytes,
+                timings.Cycles, timings.Responses,
+                GCSettings.IsServerGC, ConfigInteger("GCHeapCount"),
+                ConfigInteger("GCConserveMemory"),
+                gc.Index > 0 ? gc.HeapSizeBytes : null,
+                gc.Index > 0 ? gc.FragmentedBytes : null,
+                gc.Index > 0 ? gc.PauseTimePercentage : null,
+                gc.Index > 0 ? gc.Index : null);
+            _previousTimestamp = now;
+            _previousCpuSeconds = cpu;
+            _previousAllocatedBytes = allocated;
+            Samples.Add(sample);
+            // Both bounds matter when long sleep/resume gaps occur.
+            // One sample a minute is sufficient for memory trends. Never allow
+            // this history to grow indefinitely when the desktop stays open.
+            while (Samples.Count > 1440 || (Samples.Count > 1 &&
+                now - Samples[0].Timestamp > TimeSpan.FromHours(24)))
+                Samples.RemoveAt(0);
+            Volatile.Write(ref _current, sample);
+            return sample;
+        }
+    }
+}
+public sealed class PerformanceSamplerWorker : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try { ProcessTelemetry.Sample(); }
+            catch (Exception) { /* Observability must never stop cooling or the tray. */ }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) { break; }
+        }
     }
 }
 public sealed record SensorReading(string Id, string Name, string Device, string DeviceType, string Type, double? Value, DateTimeOffset? ObservedAt = null, string? DeviceId = null);
@@ -706,12 +851,16 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
+                var cycleStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
                 var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
+                var scanStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
                 foreach (var hardware in _computer.Hardware)
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
+                var scanMs = OptionalPerformanceDiagnostics.Enabled
+                    ? Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds : 0;
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 // Fan control must never depend on local SQLite recording.
@@ -740,6 +889,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 if ((now - _lastCleanup).TotalHours >= 1 || cfg.RetentionDays != _lastRetentionDays) {
                     db.Cleanup(cfg.RetentionDays); _lastCleanup = now; _lastRetentionDays = cfg.RetentionDays;
                 }
+                if (OptionalPerformanceDiagnostics.Enabled)
+                    CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
             } catch (Exception ex) {
                 logger.LogError(ex, "Sensor collection failed");
                 controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");

@@ -55,46 +55,54 @@
 .w-chip>.btn{border:0;background:none;color:#e0a9a9;padding:1px 5px}
 .w-add-input{display:flex;gap:9px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .w-add-input select{flex:1;min-width:180px}
-/* Independent named grid tracks keep Precision from overlapping Color/Remove.
-   The generic form-label min-width and flex rules must not apply to tray rows. */
+/* Tray badges render near 16–32 physical pixels. Preview each style at 32px. */
 .w-tray-row{
  display:grid;
- grid-template-columns:24px minmax(190px,2.8fr) minmax(130px,1.5fr) 92px 100px 36px;
- grid-template-areas:"index sensor label color precision remove";
+ grid-template-columns:24px 42px minmax(140px,2fr) minmax(110px,1.5fr) minmax(110px,1.1fr) minmax(96px,1fr) 95px;
+ grid-template-areas:"index preview sensor sensor label label remove" ". . style color text custom precision";
  gap:12px;align-items:end;border-top:1px solid var(--edge);padding:14px 0;
 }
-.w-tray-row>.w-tray-index{grid-area:index;color:var(--cyan);align-self:end;padding-bottom:10px;font-weight:750}
+.w-tray-row>.w-tray-index{grid-area:index;color:var(--cyan);align-self:center;font-weight:750}
+.w-tray-row>.w-tray-preview{grid-area:preview;align-self:center;justify-self:start}
 .w-tray-row>.w-tray-sensor{grid-area:sensor}
 .w-tray-row>.w-tray-label{grid-area:label}
+.w-tray-row>.w-tray-style{grid-area:style}
 .w-tray-row>.w-tray-color{grid-area:color}
+.w-tray-row>.w-tray-text{grid-area:text}
+.w-tray-row>.w-tray-custom{grid-area:custom}
 .w-tray-row>.w-tray-precision{grid-area:precision}
 .w-tray-row>.w-tray-remove{grid-area:remove;align-self:end}
 .w-tray-row>label{display:grid;gap:7px;min-width:0;width:100%;max-width:100%;font-size:12px;color:#a0b6c8;flex:none}
 .w-tray-row select,.w-tray-row input{display:block;width:100%;min-width:0;max-width:100%;height:34px;box-sizing:border-box}
 .w-tray-row input[type=color]{padding:3px;height:34px;cursor:pointer}
 .w-tray-remove>.btn{display:grid;place-items:center;min-width:36px;width:36px;height:34px;padding:0;font-size:17px}
-
-.w-sim-preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
-.w-sim-preview>div{background:#0f1c28;border:1px solid var(--edge);border-radius:9px;padding:13px;min-width:0}
-.w-sim-preview span{display:block;color:var(--muted);font-size:11px;margin-bottom:7px}
-.w-sim-preview strong{font-size:20px;font-variant-numeric:tabular-nums;color:var(--cyan)}
+.w-tray-preview{height:32px;width:32px;display:grid;place-items:center;
+ background:var(--tray-bg,#0e1c28);color:var(--tray-fg,#fff);font:bold 17px Arial,sans-serif;
+ letter-spacing:-1px;white-space:nowrap;overflow:hidden;position:relative}
+.w-tray-preview.accent-bar{border-bottom:4px solid var(--tray-accent,#62d5ce);padding-bottom:1px}
+.w-tray-preview.outline{border:2px solid var(--tray-accent,#62d5ce)}
+.w-tray-preview.solid{border:0}
 @media(max-width:1100px){
  .w-widget-grid{grid-template-columns:1fr}
  .w-tray-row{
-  grid-template-columns:24px minmax(110px,1fr) minmax(110px,1fr) 100px;
-  grid-template-areas:"index sensor sensor remove" ". label color precision";
-  align-items:end;
+  grid-template-columns:24px 42px minmax(0,1fr) minmax(90px,1fr);
+  grid-template-areas:"index preview sensor remove" ". . label label"
+    ". . style color" ". . text custom" ". . precision precision";
  }
 }
 @media(max-width:700px){
  .w-grid{grid-template-columns:1fr}
- .w-tray-row{
-  grid-template-columns:24px minmax(0,1fr) minmax(90px,1fr) 36px;
-  grid-template-areas:"index sensor sensor remove" ". label label ." ". color precision .";
- }
- .w-sim-preview{grid-template-columns:1fr}
+ .w-tray-row{grid-template-columns:24px 42px minmax(0,1fr) 36px;
+  grid-template-areas:"index preview sensor remove" ". . label label"
+    ". . style style" ". . color color" ". . text text"
+    ". . custom precision";}
  .w-actions label{min-width:100%;flex:1}
 }
+.w-sim-preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.w-sim-preview>div{background:#0f1c28;border:1px solid var(--edge);border-radius:9px;padding:13px;min-width:0}
+.w-sim-preview span{display:block;color:var(--muted);font-size:11px;margin-bottom:7px}
+.w-sim-preview strong{font-size:20px;font-variant-numeric:tabular-nums;color:var(--cyan)}
+@media(max-width:700px){.w-sim-preview{grid-template-columns:1fr}}
 
 .w-chip b{font-weight:700;color:#fbfcff;white-space:nowrap;margin-left:5px;font-variant-numeric:tabular-nums}
 .w-curve-plot{display:block;width:100%;max-width:740px;min-height:180px;margin:10px 0 18px;
@@ -258,6 +266,34 @@
 @media(max-width:760px){.fc-calibration-primary .fc-calibration-guards{grid-template-columns:1fr}}
 
 @media(max-width:850px){.fc-panel .fc-steps{grid-template-columns:1fr}}
+
+/* Daily fan control: compact live demand breakdown above infrequent profile setup.
+   These rows are previews of saved curves, not claims of approved PWM output. */
+.w-profile-demands{border:1px solid #345363;border-radius:10px;background:#112735;
+ padding:13px;margin:14px 0}
+.w-profile-demand-heading{display:flex;align-items:baseline;gap:8px 16px;
+ flex-wrap:wrap;margin-bottom:10px}
+.w-profile-demand-heading>strong{font-size:14px;color:#dcf7f4}
+.w-profile-demand-heading>.note{font-size:11px;line-height:1.5}
+.w-profile-demand-head,.w-profile-demand-row{display:grid;
+ grid-template-columns:minmax(150px,2fr) minmax(80px,1fr) minmax(90px,1fr) minmax(90px,1fr);
+ align-items:center;gap:8px 12px;padding:10px 12px}
+.w-profile-demand-head{font-size:10px;text-transform:uppercase;letter-spacing:.045em;color:#9db5c3;
+ border-bottom:1px solid #2c4959}
+.w-profile-demand-row{border-bottom:1px solid #264555;font-size:12px}
+.w-profile-demand-row:last-child{border-bottom:0}
+.w-profile-demand-row>span:first-child>strong{font-weight:650}
+.w-profile-demand-row>span:first-child>small{display:block;font-size:10px;color:#97b4c1;margin-top:3px}
+.w-profile-demand-row>strong{font-size:13px;font-variant-numeric:tabular-nums}
+.w-profile-demand-row>[data-profile-winning]{font-size:10px;color:#87eadc;min-height:1em}
+.w-profile-demand-row.w-demand-highest{background:#163c42;border-radius:6px}
+.w-profile-curve-editors>.w-fan-fold{margin:9px 0}
+.w-profile-curve-editors:empty{display:none}
+@media(max-width:670px){
+ .w-profile-demand-head{display:none}
+ .w-profile-demand-row{grid-template-columns:minmax(115px,2fr) 1fr 1fr;gap:7px;padding:9px 6px}
+ .w-profile-demand-row>[data-profile-winning]{grid-column:1/-1}
+}
 
 /* Persistent fan profiles: one profile controls independent channels via
    MAX-mixed temperature curves; responsive editing stays legible. */

@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
     <OutputType>WinExe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -13,13 +12,29 @@
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Explicit opt-in memory experiments only; baseline release is unchanged. -->
+    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'workstation'">false</ServerGarbageCollection>
+    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'server'">true</ServerGarbageCollection>
   </PropertyGroup>
   <Target Name="GenerateSensorDashApplicationIcon" BeforeTargets="PrepareForBuild">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Generate-SensorDashIcon.ps1&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\Assets\SensorDash.ico&quot;" />
   </Target>
+  <ItemGroup Condition="'$(SensorDashGcConserveMemory)' != ''">
+    <!-- Valid values: 0-9; never set by normal release builds. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="$(SensorDashGcConserveMemory)" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="TrayIconFactory.cs" />
+    <Compile Remove="TraySensorIcon.cs" />
+    <!-- Legacy privileged helper and general-user pipe were replaced by the
+         service's authenticated local API. Do not ship their endpoints. -->
+    <Compile Remove="AdminFanControl.cs" />
+    <Compile Remove="ServiceBridge.cs" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="Assets\SensorDash.ico" CopyToPublishDirectory="Always" TargetPath="SensorDash.ico" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.14" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
     <EmbeddedResource Include="../../presets/cooling/*.json" LogicalName="SensorDash.CoolingPresets.%(Filename)%(Extension)" />

@@ -1,4 +1,4 @@
-// No browser or hardware needed: test guided identification and UAC gating.
+// No browser or hardware needed: test guided identification and local browser confirmations.
 'use strict';
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -138,7 +138,7 @@ async function click(action,duty){
   model.includes('m.VerifiedAt=null'),
   'Server-side normalization must refuse pump data, unsafe points and invalid verification');
  assert.ok(workspace.includes('FanCommissioning.render(S)') &&
-  workspace.includes("'calibration','Fan control & calibration'") &&
+  workspace.includes("'calibration','Hardware setup & calibration'") &&
   !workspace.includes("FanControlUx.section(S,'manual'") &&
   !workspace.includes("FanControlUx.section(S,'quick'") &&
   workspace.includes("mapping(o.id)?.label") &&
@@ -255,7 +255,7 @@ async function click(action,duty){
  const requestCount=requests.length;
  await click('start-auto');
  assert.equal(requests.length,requestCount,
-  'Other fan calibration must be blocked before attempting elevation');
+  'Other fan calibration must be blocked before requesting service control');
  await click('view-active-calibration');
  const returned=controller.render(S);
  assert.match(returned,/Cancel and restore control/,
