@@ -49,7 +49,11 @@
                           Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
         <Component Id="NativeTrayExecutable" Guid="*">
-          <File Id="NativeTrayExe" Source="$(var.PublishDir)\SensorDash.Tray.exe" KeyPath="yes" />
+          <File Id="NativeTrayExe" Source="$(var.PublishDir)\SensorDash.Tray.exe" KeyPath="yes">
+            <Shortcut Id="OpenSensorDashTray" Directory="ProgramMenuFolder" Name="SensorDash Tray"
+                      Description="Launch SensorDash notification icons" Advertise="yes"
+                      Icon="SensorDashShortcutIcon.exe" WorkingDirectory="INSTALLFOLDER" />
+          </File>
         </Component>
         <Component Id="TrayAutoStart" Guid="*">
           <RegistryValue Root="HKLM"
