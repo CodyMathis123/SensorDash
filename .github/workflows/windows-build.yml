@@ -257,7 +257,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$install) { throw 'MSVC x64 tools are missing' }
           $vcvars = Join-Path $install 'VC/Auxiliary/Build/vcvars64.bat'
           if (!(Test-Path $vcvars)) { throw 'MSVC environment script is missing' }
-          $command = 'call "' + $vcvars + '" && rc /nologo /fo tray\\SensorDashTray.res tray\\SensorDashTray.rc && cl /nologo /std:c++17 /O2 /EHsc /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /Fe:dist\\SensorDash.Tray.exe tray\\SensorDashTray.cpp tray\\SensorDashTray.res user32.lib shell32.lib gdi32.lib winhttp.lib'
+          $command = 'call "' + $vcvars + '" && rc /nologo /fo tray\\SensorDashTray.res tray\\SensorDashTray.rc && cl /nologo /std:c++17 /O2 /MT /EHsc /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /Fe:dist\\SensorDash.Tray.exe tray\\SensorDashTray.cpp tray\\SensorDashTray.res user32.lib shell32.lib gdi32.lib winhttp.lib'
           & cmd.exe /d /c $command
           if ($LASTEXITCODE -ne 0) { throw 'Native Win32 tray build failed' }
           if (!(Test-Path dist/SensorDash.Tray.exe)) { throw 'Native tray executable missing' }
