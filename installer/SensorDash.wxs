@@ -42,7 +42,7 @@
           </File>
           <ServiceInstall Id="InstallSensorDashCollector" Name="SensorDashCollector"
                           DisplayName="SensorDash Collector"
-                          Description="Hardware telemetry and opt-in fan control; local named-pipe IPC only."
+                          Description="Hardware telemetry, local web dashboard and validated cooling control."
                           Type="ownProcess" Start="auto" ErrorControl="normal"
                           Arguments="--collector" Vital="yes" />
           <ServiceControl Id="ControlSensorDashCollector" Name="SensorDashCollector"
