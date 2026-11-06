@@ -39,7 +39,9 @@ var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     ContentRootPath = AppContext.BaseDirectory
 });
 builder.Services.AddWindowsService(options => options.ServiceName = "SensorDashCollector");
-builder.WebHost.UseUrls("http://127.0.0.1:8765");
+// Kestrel binds both IPv4 and IPv6 loopback for the canonical localhost URL.
+// This remains local-only: no LAN or wildcard interfaces are exposed.
+builder.WebHost.UseUrls("http://localhost:8765");
 builder.Services.AddSingleton(new DashboardState(data));
 builder.Services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
 builder.Services.AddSingleton<SimulationState>();
