@@ -132,26 +132,30 @@ jobs:
           if ($workspace -match 'toggle-dashboard-lock' -or $workspace -match 'renderVirtual') {
             throw 'Retired desktop dashboards or virtual sensor UI must not ship'
           }
-      - name: Verify experimental fan-control security boundary
+      - name: Verify service-hosted fan-control authorization boundary
         shell: pwsh
         run: |
-          $backend = Get-Content 'src/SensorDash/ServiceBridge.cs' -Raw
-          $admin = Get-Content 'src/SensorDash/AdminFanControl.cs' -Raw
+          $backend = Get-Content 'src/SensorDash/Program.cs' -Raw
           $runtime = Get-Content 'src/SensorDash/FanControlRuntime.cs' -Raw
-          if ($backend -notmatch 'fanOutputs' -or $backend -match '"arm"\s*=>') {
-            throw 'Only read-only control status may be accessible from telemetry pipe'
+          $project = Get-Content 'src/SensorDash/SensorDash.csproj' -Raw
+          if ($backend -notmatch 'AddNegotiate\(' -or
+              $backend -notmatch 'RequireAuthorization\(' -or
+              $backend -notmatch 'ValidBrowserMutation' -or
+              $backend -match 'Verb="runas"') {
+            throw 'Authenticated browser actions must be checked inside the service without UAC'
           }
-          if ($admin -notmatch 'BuiltinAdministratorsSid' -or
-              $admin -match 'AuthenticatedUserSid') {
-            throw 'Hardware-control pipe must remain administrator-only'
+          if ($project -notmatch 'Compile Remove="AdminFanControl.cs"' -or
+              $project -notmatch 'Compile Remove="ServiceBridge.cs"') {
+            throw 'Legacy elevated helper and unprivileged write-capable pipes must not ship'
           }
           if ($runtime -notmatch 'SetDefault\(' -or $runtime -notmatch 'SetSoftware\(' -or
               $runtime -notmatch 'MaxSessionSeconds') {
             throw 'Timed hardware ownership/release implementation missing'
           }
           $ui = Get-Content 'src/SensorDash/wwwroot/workspace.js' -Raw
-          if ($ui -notmatch 'Request elevated takeover' -or $ui -notmatch 'fan-release') {
-            throw 'Missing explicit live fan-control UI actions'
+          if ($ui -notmatch 'Confirm temporary fan control' -or
+              $ui -notmatch 'fan-release' -or $ui -notmatch 'confirm\(') {
+            throw 'Explicit browser control confirmations or firmware-release actions missing'
           }
       - name: Verify fan control accepts LHM initial modes and honors duty range
         shell: pwsh
