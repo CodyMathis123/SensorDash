@@ -1,0 +1,3 @@
+Native tray MSI validation request 001
+Purpose: Test the unified Windows service, native tray, Windows Negotiate loopback smoke tests, and installer servicing after fixing PowerShell's AllowUnencryptedAuthentication guard.
+This file is only a workflow trigger; it is never packed into SensorDash.
