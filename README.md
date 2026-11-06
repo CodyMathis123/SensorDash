@@ -79,6 +79,28 @@ to verify the actual Windows identity or select **Connect Windows account**
 if not authenticated. Authentication never elevates the browser process;
 the SYSTEM collector still validates every hardware command and safety guard.
 
+## Optional performance diagnostics
+
+Process memory / GC diagnostics are **disabled by default** in the service-hosted
+web + native C++ tray build. In normal operation, the service does not start
+the one-minute memory sampler, build in-memory sample history, enumerate
+process/GC metrics or measure per-cycle diagnostic timing. The Settings
+performance panel is hidden, and the read-only performance-history endpoint
+returns an empty, disabled response. Hardware monitoring, fan control,
+sleep/resume recovery and Pi telemetry export remain enabled.
+
+To temporarily collect diagnostics, set the **system-level environment variable**
+`SENSORDASH_PERFORMANCE_DIAGNOSTICS=1` for the Windows service and restart
+`SensorDashCollector`. Remove the variable (or set it to `0`) and restart
+the service to return to the default. This is deliberately an operator/service
+configuration rather than an ordinary browser setting; it cannot silently
+re-enable itself. Restart only when safe for the physical cooling system.
+
+When enabled, scan/cycle durations over 10 seconds are excluded from
+performance averages, as a suspend/resume interval may otherwise look like
+a minutes-long hardware scan. Such exclusion is diagnostic-only and does not
+skip collection cycles or alter fan control.
+
 ## Cooling control and sleep/resume
 
 The fan controller uses cached configuration snapshots that require explicit approval before becoming active. Routine changes to aliases, cooling assignments or draft curves never silently change an approved PWM target. The collector samples physical sensors and controls on its own hardware thread; the Pi is not involved.
