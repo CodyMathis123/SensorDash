@@ -46,7 +46,8 @@ builder.Services.AddSingleton(new DashboardState(data));
 builder.Services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
 builder.Services.AddSingleton<SimulationState>();
 builder.Services.AddSingleton(new FanControlRuntime(data));
-builder.Services.AddHostedService<PerformanceSamplerWorker>();
+if (OptionalPerformanceDiagnostics.Enabled)
+    builder.Services.AddHostedService<PerformanceSamplerWorker>();
 builder.Services.AddHostedService<TelemetryExportWorker>();
 builder.Services.AddHostedService<SensorWorker>();
 builder.Services.AddHostedService<SimulationWorker>();
@@ -125,7 +126,8 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     pawnIo = state.Latest?.PawnIo,
     sensorCount = state.Latest?.Sensors.Count ?? 0,
-    process = ProcessTelemetry.Snapshot(),
+    performanceDiagnosticsEnabled = OptionalPerformanceDiagnostics.Enabled,
+    process = OptionalPerformanceDiagnostics.Enabled ? ProcessTelemetry.Snapshot() : null,
     lastSample = state.Latest?.Timestamp,
     error = state.Latest?.Error
 }));
@@ -136,7 +138,9 @@ app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(
 // settings, paths, tokens or device identifiers.
 app.MapGet("/api/performance-history", async (CancellationToken ct) =>
 {
-    return Results.Ok(new { desktop = Array.Empty<ProcessPerformanceSample>(), collector = ProcessTelemetry.History() });
+    return OptionalPerformanceDiagnostics.Enabled
+        ? Results.Ok(new { enabled = true, desktop = Array.Empty<ProcessPerformanceSample>(), collector = ProcessTelemetry.History() })
+        : Results.Ok(new { enabled = false, desktop = Array.Empty<ProcessPerformanceSample>(), collector = Array.Empty<ProcessPerformanceSample>() });
 });
 app.MapGet("/api/settings", (DashboardState state) => Results.Ok(state.Settings));
 app.MapGet("/api/collection-groups", () => Results.Ok(HardwareCollection.Groups));
@@ -267,7 +271,7 @@ object Diagnostics(DashboardState state)
         storagePollSeconds = state.Settings.StoragePollSeconds,
         storageDevices = storage,
         storageSensorCount = readings.Length,
-        process = ProcessTelemetry.Snapshot(),
+        process = OptionalPerformanceDiagnostics.Enabled ? ProcessTelemetry.Snapshot() : null,
         storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
         storageLastPolled = state.LastStoragePoll,
         note = storage.Length == 0
@@ -299,6 +303,17 @@ app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
 
 await app.RunAsync();
 
+// Optional, explicitly enabled process diagnostics. Disabled by default: no sampler,
+// no memory/GC enumeration, no history storage and no per-cycle measurement.
+public static class OptionalPerformanceDiagnostics
+{
+    public static readonly bool Enabled = string.Equals(
+        Environment.GetEnvironmentVariable("SENSORDASH_PERFORMANCE_DIAGNOSTICS"), "1",
+        StringComparison.Ordinal) || string.Equals(
+        Environment.GetEnvironmentVariable("SENSORDASH_PERFORMANCE_DIAGNOSTICS"), "true",
+        StringComparison.OrdinalIgnoreCase);
+}
+
 // One inexpensive sample per minute per process. Does not force GC, poll hardware,
 // retain sensor values or write to disk. History is bounded to 24h / 1440 samples.
 public sealed record ProcessPerformanceSample(
@@ -320,12 +335,18 @@ public static class CollectorPerformance
     private static long _responses, _responseBytes, _serializationMicroseconds;
     public static void ObserveCycle(double cycleMs, double scanMs)
     {
+        if (!OptionalPerformanceDiagnostics.Enabled) return;
+        // A suspended/resumed Windows process can make elapsed scan/cycle time
+        // appear enormous. Discard these intervals instead of polluting means.
+        if (!double.IsFinite(cycleMs) || !double.IsFinite(scanMs) ||
+            cycleMs < 0 || scanMs < 0 || cycleMs > 10_000 || scanMs > 10_000) return;
         Interlocked.Increment(ref _cycles);
         Interlocked.Add(ref _cycleMicroseconds, (long)(cycleMs * 1000));
         Interlocked.Add(ref _scanMicroseconds, (long)(scanMs * 1000));
     }
     public static void ObserveIpcResponse(int bytes, double serializationMs)
     {
+        if (!OptionalPerformanceDiagnostics.Enabled) return;
         Interlocked.Increment(ref _responses);
         Interlocked.Add(ref _responseBytes, bytes);
         Interlocked.Add(ref _serializationMicroseconds, (long)(serializationMs * 1000));
@@ -830,15 +851,16 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
-                var cycleStarted = Stopwatch.GetTimestamp();
+                var cycleStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
                 var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
-                var scanStarted = Stopwatch.GetTimestamp();
+                var scanStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
                 foreach (var hardware in _computer.Hardware)
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
-                var scanMs = Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds;
+                var scanMs = OptionalPerformanceDiagnostics.Enabled
+                    ? Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds : 0;
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
                 // Fan control must never depend on local SQLite recording.
@@ -867,7 +889,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 if ((now - _lastCleanup).TotalHours >= 1 || cfg.RetentionDays != _lastRetentionDays) {
                     db.Cleanup(cfg.RetentionDays); _lastCleanup = now; _lastRetentionDays = cfg.RetentionDays;
                 }
-                CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
+                if (OptionalPerformanceDiagnostics.Enabled)
+                    CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
             } catch (Exception ex) {
                 logger.LogError(ex, "Sensor collection failed");
                 controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");
