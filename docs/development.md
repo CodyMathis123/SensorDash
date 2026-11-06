@@ -36,36 +36,36 @@ in different ways. Inspect memory after startup, one hour, and 24 hours before
 changing collector sampling or fan-control hardware access. Collector/IPC
 timing fields are secondary diagnostic context, not extra polling.
 
-## Controlled .NET GC memory experiments
+## Windows CI and optional performance diagnostics
 
-The default MSI runtime settings remain unchanged. Diagnostic CSV now records
-`serverGc`, `gcHeapCount` and `gcConserveMemoryLevel` when the runtime
-exposes those settings, as well as last-GC heap size, fragmentation, and the
-cumulative fraction of runtime paused in GC. A null effective configuration
-entry is **unknown**, not proof of a default setting. The last-GC values are
-unavailable until the first GC. No collection is requested by diagnostics.
+The single **Windows MSI build** workflow now validates the service-hosted .NET
+collector/web API, native C++ tray, browser JavaScript and C# contracts, WiX
+packaging, and MSI upgrade/repair/downgrade/uninstall behavior. The duplicate
+native-tray marker workflow has been removed.
 
-The `Windows MSI build` workflow offers a manual `gc_profile` choice:
-`baseline` (normal installer and normal GC runtime policy) or `workstation`
-(explicit Workstation GC for **both** processes). On `Production`, the workflow
-always uses the baseline and rejects experimental selections. Every new
-workflow run has a unique MSI version/ProductCode; the experimental MSI filename
-ends with `-workstation-gc.msi` and is validated against the previous Production
-MSI in the existing installer servicing test.
+- Pushes to `Production` build the normal baseline GC MSI.
+- Pushes to `feature/fan-control-workspace-reorganization-20261106` validate
+  the known-good Workstation GC variant and native tray in the SAME workflow.
+- Manual workflow dispatch allows an explicit `gc_profile` selection; Production
+  builds never select an experimental GC configuration.
 
-To start the experiment against the feature branch, **prefer GitHub CLI** while
-the workflow input is not yet on `Production`: the web form may still show the
-default-branch workflow's older inputs.
+**Process memory / GC diagnostics are disabled by default** on installed
+SensorDash. No periodic memory sampler or history runs unless the service has
+`SENSORDASH_PERFORMANCE_DIAGNOSTICS=1` set in its environment before startup.
+The Workstation GC CI smoke test temporarily sets that variable for its
+runtime verification. No memory diagnostics are needed for normal fan control,
+sleep/wake rearm, or telemetry export.
+
+For a manual rerun from the combined feature branch:
 
 ```powershell
-gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/performance-diagnostics-and-footprint -f gc_profile=workstation
+gh workflow run windows-build.yml --repo CodyMathis123/SensorDash --ref feature/fan-control-workspace-reorganization-20261106 -f gc_profile=workstation
 ```
 
-After the run, check Actions → Windows MSI build and confirm the run SHA,
-`gc_profile=workstation` selection, the `-workstation-gc.msi` artifact name,
-successful automated checks, and the smoke-test assertion that both running
-processes report `serverGc=false`. This is a **manually requested run**;
-ordinary feature commits and PR edits still trigger no CI.
+Confirm the final run's commit SHA, complete successful Windows tests, and
+`-workstation-gc.msi` artifact. Tests must be green before the PR is merged.
+Unlike the previous separate marker-based workflow, ordinary feature-branch
+pushes now run this single validation path.
 
 **Supervised real-PC installation is a separate decision.** Before replacing an
 installed automatic fan-control service, retain its working installer and
