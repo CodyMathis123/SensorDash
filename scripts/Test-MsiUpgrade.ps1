@@ -67,6 +67,14 @@ function Start-Desktop($path) {
     if ($desktop.HasExited) { throw 'Desktop fixture failed to start.' }
     return $desktop
 }
+function Start-Tray($path) {
+    if (!(Test-Path $path)) { throw "Native tray executable missing: $path" }
+    $tray = Start-Process $path -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 3
+    if ($tray.HasExited) { throw 'Native tray exited before servicing test.' }
+    return $tray
+}
+
 function Assert-Closed($desktop) {
     # Retain the running-desktop regression: this is checked only AFTER
     # msiexec finishes, never pre-kill the test process before servicing.
@@ -98,8 +106,10 @@ if ($products.Count -ne 1 -or $products[0].DisplayVersion -ne $release.SensorDas
     $products[0].PSChildName -ne "{$($release.SensorDashProductCode)}") { throw 'Upgrade did not leave exactly the expected product.' }
 if ((Get-Service SensorDashCollector).Status -ne 'Running') { throw 'Upgrade did not restart collector.' }
 $exe = "$env:ProgramFiles/SensorDash/SensorDash.exe"
+$tray = "$env:ProgramFiles/SensorDash/SensorDash.Tray.exe"
+if (!(Test-Path $tray)) { throw 'Native tray executable not installed.' }
 if ((Get-Item $exe).VersionInfo.ProductVersion -notlike "$($release.SensorDashVersion)*") { throw 'Installed executable version mismatch.' }
-$desktop = Start-Desktop $exe
+$desktop = Start-Tray $tray
 Install-Msi $current '/i' 'repeat-install'
 Assert-Closed $desktop
 Install-Msi $current '/fa' 'repair'
@@ -109,18 +119,21 @@ Install-Msi $previous[0].FullName '/i' 'blocked-downgrade' $true
 if ((Products).Count -ne 1) { throw 'Downgrade changed product registration.' }
 $startupKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $startup = Get-ItemProperty -Path $startupKey -Name 'SensorDash' -ErrorAction Stop
-if (!$startup.SensorDash) { throw 'Missing tray autostart entry.' }
+if (!$startup.SensorDash -or $startup.SensorDash -notmatch 'SensorDash\.Tray\.exe') {
+    throw 'Native tray sign-in autostart registration missing.'
+}
 $startLink = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'SensorDash.lnk'
 if (!(Test-Path $startLink)) { throw 'Missing all-users Start Menu shortcut.' }
 $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
 Write-Host "Installed shortcut icon: $($shortcut.IconLocation)"
-$desktop = Start-Desktop $exe
+$desktop = Start-Tray $tray
 Install-Msi $current '/x' 'remove-upgraded-product'
 Assert-Closed $desktop
 if (Get-Service SensorDashCollector -ErrorAction SilentlyContinue) { throw 'Uninstall left collector service registered.' }
 if (Get-ItemProperty -Path $startupKey -Name SensorDash -ErrorAction SilentlyContinue) { throw 'Uninstall left tray startup entry.' }
 if (Test-Path $startLink) { throw 'Uninstall left Start Menu shortcut.' }
 if (Test-Path $exe) { throw 'Uninstall left installed executable.' }
+if (Test-Path $tray) { throw 'Uninstall left native tray executable.' }
 if ((Products).Count -ne 0) { throw 'Uninstall left product registrations.' }
 if (!(Test-Path $marker) -or (Get-Content $marker) -ne 'user data must survive') { throw 'Servicing removed user data.' }
 Write-Host 'PASS: previous Production major upgrade, repeat install, repair, downgrade rejection, uninstall and data preservation'
