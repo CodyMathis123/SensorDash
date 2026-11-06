@@ -13,12 +13,12 @@ assert.ok(fs.readFileSync('installer/SensorDash.wixproj','utf8').includes('Senso
 const workflow=fs.readFileSync('.github/workflows/windows-build.yml','utf8');
 const wix=fs.readFileSync('installer/SensorDash.wixproj','utf8');
 assert.match(workflow,/workflow_dispatch:\s+inputs:\s+gc_profile:/,'Manual dispatch must expose GC experiment choice');
-assert.match(workflow,/workflow_call:\s+inputs:\s+gc_profile:/,'Feature marker must be able to reuse the full MSI workflow');
-const featureWorkflow=fs.readFileSync('.github/workflows/native-tray-development-ci.yml','utf8');
-assert.match(featureWorkflow,/branches:\s+- feature\/service-hosted-web-native-tray/);
-assert.match(featureWorkflow,/paths:\s+- \.ci\/native-tray-trigger\/\*\*/);
-assert.match(featureWorkflow,/uses: \.\/\.github\/workflows\/windows-build.yml/);
-assert.match(featureWorkflow,/gc_profile: workstation/);
+assert.match(workflow,/workflow_call:\s+inputs:\s+gc_profile:/,'Explicit reusable entry must remain available');
+assert.match(workflow,/branches: \[Production, feature\/fan-control-workspace-reorganization-20261106\]/);
+assert.equal(fs.existsSync('.github/workflows/native-tray-development-ci.yml'),false,
+ 'Duplicate native-tray marker workflow must be removed');
+assert.match(workflow,/SENSORDASH_PERFORMANCE_DIAGNOSTICS/,
+ 'GC verification must explicitly opt into otherwise disabled diagnostics');
 assert.match(workflow,/AllowUnencryptedAuthentication/,'Loopback Negotiate smoke test must explicitly allow HTTP Windows credentials');
 assert.match(workflow,/SENSORDASH_GC_PROFILE/,'CI must explicitly resolve GC profile');
 assert.match(workflow,/Production branch must use baseline GC configuration/,'Production must never use an experiment');
