@@ -63,8 +63,10 @@ assert.match(backend,/gc\.FragmentedBytes/);
 assert.match(backend,/gc\.PauseTimePercentage/);
 assert.match(backend,/gc\.Index > 0/);
 const project=fs.readFileSync('src/SensorDash/SensorDash.csproj','utf8');
-assert.match(project,/SensorDashGcMode/);
-assert.match(project,/ServerGarbageCollection/);
+assert.match(project,/<ServerGarbageCollection>false<\/ServerGarbageCollection>/,
+ 'Workstation GC must be the permanent default');
+assert.doesNotMatch(project,/SensorDashGcMode|<ServerGarbageCollection[^>]+Condition=/,
+ 'Deprecated configurable GC modes must not return');
 assert.match(project,/SensorDashGcConserveMemory/);
 assert.match(project,/System\.GC\.ConserveMemory/);
 assert.match(source,/gcConserveMemoryLevel/);

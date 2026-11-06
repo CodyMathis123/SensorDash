@@ -15,10 +15,10 @@ function Install-Msi($package, $operation, $label, $expectFailure = $false) {
     $start = [System.Diagnostics.ProcessStartInfo]::new('msiexec.exe')
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
-    # The test deliberately keeps the desktop process running. Disable MSI
-    # Restart Manager so unattended CI cannot wait for a FilesInUse shutdown
-    # response before WiX's CloseApplication action runs. The MSI itself still
-    # must close that process (and StopServices still controls the collector).
+    # The test deliberately keeps the native tray process running. Disable
+    # MSI Restart Manager so CI cannot wait for FilesInUse before WiX's
+    # CloseApplication action runs. The MSI itself must close the tray
+    # (and StopServices still controls the collector).
     # This is CI-only: do not force-stop any app on a real owner's machine.
     foreach ($argument in @($operation, $package, '/qn', '/norestart',
                            'MSIRESTARTMANAGERCONTROL=Disable',
@@ -61,12 +61,6 @@ function Products {
     @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' |
         Where-Object { $_.DisplayName -eq 'SensorDash' -and $_.Publisher -eq 'CodyMathis' })
 }
-function Start-Desktop($path) {
-    $desktop = Start-Process $path -ArgumentList '--desktop --no-browser' -WindowStyle Hidden -PassThru
-    Start-Sleep -Seconds 3
-    if ($desktop.HasExited) { throw 'Desktop fixture failed to start.' }
-    return $desktop
-}
 function Start-Tray($path) {
     if (!(Test-Path $path)) { throw "Native tray executable missing: $path" }
     $tray = Start-Process $path -WindowStyle Hidden -PassThru
@@ -75,16 +69,15 @@ function Start-Tray($path) {
     return $tray
 }
 
-function Assert-Closed($desktop) {
-    # Retain the running-desktop regression: this is checked only AFTER
-    # msiexec finishes, never pre-kill the test process before servicing.
+function Assert-Closed($tray) {
+    # Verify WiX closed the tray itself. Do not pre-kill the process.
     try {
-        if (!$desktop.WaitForExit(15000)) {
-            throw 'MSI failed to close the running desktop dashboard.'
+        if (!$tray.WaitForExit(15000)) {
+            throw 'MSI failed to close the running native tray.'
         }
-        Write-Host "PASS: installer closed running desktop process PID $($desktop.Id)"
+        Write-Host "PASS: installer closed native tray PID $($tray.Id)"
     } finally {
-        $desktop.Dispose()
+        $tray.Dispose()
     }
 }
 if ((Products).Count) { throw 'Runner already has SensorDash installed.' }
@@ -98,9 +91,10 @@ $data = Join-Path $env:ProgramData 'SensorDash'
 New-Item -ItemType Directory -Force $data | Out-Null
 $marker = Join-Path $data 'upgrade-preservation-test.txt'
 Set-Content $marker 'user data must survive'
-$desktop = Start-Desktop "$env:ProgramFiles/SensorDash/SensorDash.exe"
+$previousTray = "$env:ProgramFiles/SensorDash/SensorDash.Tray.exe"
+$trayFixture = Start-Tray $previousTray
 Install-Msi $current '/i' 'upgrade'
-Assert-Closed $desktop
+Assert-Closed $trayFixture
 $products = Products
 if ($products.Count -ne 1 -or $products[0].DisplayVersion -ne $release.SensorDashVersion -or
     $products[0].PSChildName -ne "{$($release.SensorDashProductCode)}") { throw 'Upgrade did not leave exactly the expected product.' }
@@ -109,9 +103,9 @@ $exe = "$env:ProgramFiles/SensorDash/SensorDash.exe"
 $tray = "$env:ProgramFiles/SensorDash/SensorDash.Tray.exe"
 if (!(Test-Path $tray)) { throw 'Native tray executable not installed.' }
 if ((Get-Item $exe).VersionInfo.ProductVersion -notlike "$($release.SensorDashVersion)*") { throw 'Installed executable version mismatch.' }
-$desktop = Start-Tray $tray
+$trayFixture = Start-Tray $tray
 Install-Msi $current '/i' 'repeat-install'
-Assert-Closed $desktop
+Assert-Closed $trayFixture
 Install-Msi $current '/fa' 'repair'
 if ((Get-Service SensorDashCollector).Status -ne 'Running') { throw 'Maintenance did not restore the collector service.' }
 if ((Products).Count -ne 1) { throw 'Maintenance created a duplicate registration.' }
@@ -128,9 +122,9 @@ $trayLink = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'SensorDa
 if (!(Test-Path $trayLink)) { throw 'Native tray Start Menu shortcut missing.' }
 $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
 Write-Host "Installed shortcut icon: $($shortcut.IconLocation)"
-$desktop = Start-Tray $tray
+$trayFixture = Start-Tray $tray
 Install-Msi $current '/x' 'remove-upgraded-product'
-Assert-Closed $desktop
+Assert-Closed $trayFixture
 if (Get-Service SensorDashCollector -ErrorAction SilentlyContinue) { throw 'Uninstall left collector service registered.' }
 if (Get-ItemProperty -Path $startupKey -Name SensorDash -ErrorAction SilentlyContinue) { throw 'Uninstall left tray startup entry.' }
 if (Test-Path $startLink) { throw 'Uninstall left Start Menu shortcut.' }
@@ -139,4 +133,4 @@ if (Test-Path $exe) { throw 'Uninstall left installed executable.' }
 if (Test-Path $tray) { throw 'Uninstall left native tray executable.' }
 if ((Products).Count -ne 0) { throw 'Uninstall left product registrations.' }
 if (!(Test-Path $marker) -or (Get-Content $marker) -ne 'user data must survive') { throw 'Servicing removed user data.' }
-Write-Host 'PASS: previous Production major upgrade, repeat install, repair, downgrade rejection, uninstall and data preservation'
+Write-Host 'PASS: previous Production major upgrade, native tray close on upgrade/maintenance/uninstall, repeat install, repair, downgrade rejection and data preservation'
