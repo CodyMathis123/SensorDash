@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <OutputName>SensorDash-Setup-$(SensorDashVersion)-x64$(SensorDashMsiVariantSuffix)</OutputName>
+    <OutputName>SensorDash-Setup-$(SensorDashVersion)-x64</OutputName>
     <DefineConstants>SensorDashVersion=$(SensorDashVersion);SensorDashProductCode=$(SensorDashProductCode);SensorDashUpgradeCode=$(SensorDashUpgradeCode);PublishDir=$(MSBuildThisFileDirectory)..\dist</DefineConstants>
     <OutputPath>$(MSBuildThisFileDirectory)..\installer-output\</OutputPath>
   </PropertyGroup>
