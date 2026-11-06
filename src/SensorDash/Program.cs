@@ -34,7 +34,8 @@ var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Comm
 Directory.CreateDirectory(data);
 var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
 {
-    Args = args,
+    // --collector is an executable mode switch, not an ASP.NET configuration key.
+    Args = Array.Empty<string>(),
     ContentRootPath = AppContext.BaseDirectory
 });
 builder.Services.AddWindowsService(options => options.ServiceName = "SensorDashCollector");
