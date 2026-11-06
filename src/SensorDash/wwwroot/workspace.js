@@ -729,7 +729,8 @@ const SDWorkspace = (() => {
    const curves=S.settings?.simulatedFanCurves||[];
    const simulation=S.simulation?.results||[];
    const editing=!WorkspaceLocks.fan(S);
-   const cards=curves.filter(c=>!filterIds||filterIds.has(c.id)).map(curve=>{
+   const allocated=new Set((S.settings?.fanProfiles||[]).flatMap(p=>p.curveIds||[]));
+   const cards=curves.filter(c=>inline?filterIds?.has(c.id):!allocated.has(c.id)).map(curve=>{
      const sample=simulation.find(s=>s.id===curve.id);
      const source=S.byId.get(curve.sourceSensorId);
      const scope=curve.id;
@@ -780,7 +781,6 @@ const SDWorkspace = (() => {
        'Editor locked · Live control and emergency release remain available')+'</span></div>';
    const calibration=S.fanControl?.persistent?.calibration;
    const activeCalibration=calibration?.state==='running';
-   const allocated=new Set((S.settings?.fanProfiles||[]).flatMap(p=>p.curveIds||[]));
    const unassigned=new Set(curves.filter(c=>!allocated.has(c.id)).map(c=>c.id));
    return controls+
       (activeCalibration?'<aside class="fc-global-calibration" role="status">'+
@@ -790,7 +790,7 @@ const SDWorkspace = (() => {
       renderProfiles(S)+
       FanControlUx.section(S,'curves','Curve library',
         'Create reusable curves · '+unassigned.size+' not assigned',
-        renderCurves(S,unassigned,false),false)+
+        curveContent,false)+
       FanControlUx.section(S,'calibration','Hardware setup & calibration',
         'PWM pairing, tach verification and calibration · occasional maintenance',
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
