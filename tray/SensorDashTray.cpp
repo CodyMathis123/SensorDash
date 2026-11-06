@@ -26,7 +26,7 @@ HWND windowHandle = nullptr;
 HICON images[7] = {};
 bool added[7] = {};
 std::wstring previous[7];
-struct Widget { std::wstring label, value, unit, color; };
+struct Widget { std::wstring label, value, unit, color, style, textColor; };
 
 std::wstring Wide(const std::string& utf8) {
     if (utf8.empty()) return {};
@@ -106,7 +106,14 @@ COLORREF Color(const std::wstring& input) {
         return RGB(31, 71, 120);
     return RGB(red, green, blue);
 }
-HICON DrawIcon(const std::wstring& value, const std::wstring& color) {
+COLORREF AutomaticTextColor(COLORREF background) {
+    // Bright yellow / lime fills need dark text; dark fills need white.
+    unsigned int brightness = GetRValue(background) * 299 +
+        GetGValue(background) * 587 + GetBValue(background) * 114;
+    return brightness >= 150000 ? RGB(13, 21, 31) : RGB(255, 255, 255);
+}
+HICON DrawIcon(const std::wstring& value, const std::wstring& color,
+               const std::wstring& style, const std::wstring& textColor) {
     HDC screen = GetDC(nullptr);
     if (!screen) return LoadIconW(nullptr, IDI_APPLICATION);
     HDC dc = CreateCompatibleDC(screen);
@@ -121,11 +128,37 @@ HICON DrawIcon(const std::wstring& value, const std::wstring& color) {
     }
     auto old = SelectObject(dc, bitmap);
     RECT rect{0, 0, kSize, kSize};
-    HBRUSH brush = CreateSolidBrush(Color(color));
+    const COLORREF accent = Color(color);
+    const bool solid = style == L"solid";
+    const bool outline = style == L"outline";
+    const COLORREF background = solid ? accent : RGB(14, 28, 40);
+    HBRUSH brush = CreateSolidBrush(background);
     FillRect(dc, &rect, brush);
     DeleteObject(brush);
+    if (!solid) {
+        HBRUSH accentBrush = CreateSolidBrush(accent);
+        if (outline) {
+            constexpr int thickness = 2;
+            RECT top{0, 0, kSize, thickness};
+            RECT bottom{0, kSize - thickness, kSize, kSize};
+            RECT left{0, thickness, thickness, kSize - thickness};
+            RECT right{kSize - thickness, thickness, kSize, kSize - thickness};
+            FillRect(dc, &top, accentBrush);
+            FillRect(dc, &bottom, accentBrush);
+            FillRect(dc, &left, accentBrush);
+            FillRect(dc, &right, accentBrush);
+        } else {
+            // The original WinForms look: dark badge, white digits, thin
+            // user-selected colored stripe along the bottom.
+            RECT stripe{0, kSize - 4, kSize, kSize};
+            FillRect(dc, &stripe, accentBrush);
+            rect.bottom = kSize - 4;
+        }
+        DeleteObject(accentBrush);
+    }
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(255, 255, 255));
+    SetTextColor(dc, textColor == L"auto"
+        ? AutomaticTextColor(background) : Color(textColor));
     int fontSize = value.size() > 3 ? 15 : (value.size() > 2 ? 19 : 23);
     HFONT font = CreateFontW(-fontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
@@ -169,12 +202,13 @@ void RemoveIcon(int id) {
     previous[id].clear();
 }
 void SetIcon(int id, const std::wstring& value,
-             const std::wstring& tooltip, const std::wstring& color) {
-    auto signature = value + L"|" + tooltip + L"|" + color;
+             const std::wstring& tooltip, const std::wstring& color,
+             const std::wstring& style = L"accent-bar", const std::wstring& textColor = L"auto") {
+    auto signature = value + L"|" + tooltip + L"|" + color + L"|" + style + L"|" + textColor;
     if (added[id] && signature == previous[id]) return;
     HICON image = id == 0
         ? CopyIcon(LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101)))
-        : DrawIcon(ShortText(value), color);
+        : DrawIcon(ShortText(value), color, style, textColor);
     if (!image) return;
     NOTIFYICONDATAW info{};
     info.cbSize = sizeof(info);
@@ -196,7 +230,7 @@ void SetIcon(int id, const std::wstring& value,
 }
 void Open(bool configure) {
     ShellExecuteW(windowHandle, L"open",
-        configure ? L"http://127.0.0.1:8765/#tray" : L"http://127.0.0.1:8765/",
+        configure ? L"http://localhost:8765/#tray" : L"http://localhost:8765/",
         nullptr, nullptr, SW_SHOWNORMAL);
 }
 void Refresh() {
@@ -212,8 +246,9 @@ void Refresh() {
             auto parts = Fields(line);
             if (parts.size() == 2 && parts[0] == "status")
                 online = parts[1] == "online";
-            else if (parts.size() == 5 && parts[0] == "widget" && widgets.size() < 6)
-                widgets.push_back({Wide(parts[1]), Wide(parts[2]), Wide(parts[3]), Wide(parts[4])});
+            else if (parts.size() == 7 && parts[0] == "widget" && widgets.size() < 6)
+                widgets.push_back({Wide(parts[1]), Wide(parts[2]), Wide(parts[3]), Wide(parts[4]),
+                                   Wide(parts[5]), Wide(parts[6])});
         }
     }
     SetIcon(0, L"SD", online ? L"SensorDash - Online" : L"SensorDash - Collector offline",
@@ -222,7 +257,7 @@ void Refresh() {
         if (connected && static_cast<size_t>(i) <= widgets.size()) {
             const auto& widget = widgets[static_cast<size_t>(i-1)];
             auto tooltip = widget.label + L": " + widget.value + L" " + widget.unit;
-            SetIcon(i, widget.value, tooltip, widget.color);
+            SetIcon(i, widget.value, tooltip, widget.color, widget.style, widget.textColor);
         } else {
             RemoveIcon(i);
         }
