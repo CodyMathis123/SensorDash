@@ -1,26 +1,11 @@
 name: Windows MSI build
-# Single Windows validation workflow: Production releases, explicit manual runs,
-# and the current service-hosted Fan Control feature branch. No second workflow.
+# Standard Workstation GC MSI for pull requests and Production.
 on:
   push:
-    branches: [Production, feature/fan-control-workspace-reorganization-20261106]
-  workflow_call:
-    inputs:
-      gc_profile:
-        description: "GC profile for an explicitly requested reusable workflow build"
-        type: string
-        required: false
-        default: baseline
+    branches: [Production]
+  pull_request:
+    branches: [Production]
   workflow_dispatch:
-    inputs:
-      gc_profile:
-        description: "Runtime GC profile for this manually requested MSI"
-        type: choice
-        required: true
-        default: baseline
-        options:
-          - baseline
-          - workstation
 permissions:
   contents: read
   actions: read
@@ -32,26 +17,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Select and validate GC profile
-        shell: pwsh
-        env:
-          GC_PROFILE_INPUT: ${{ inputs.gc_profile || (github.ref == 'refs/heads/Production' && 'baseline' || 'workstation') }}
-        run: |
-          $profile = $env:GC_PROFILE_INPUT
-          if ($profile -notin @('baseline', 'workstation')) {
-            throw "Unrecognized GC profile: $profile"
-          }
-          # Production builds must never silently switch the installed GC policy.
-          if ('${{ github.ref }}' -eq 'refs/heads/Production' -and $profile -ne 'baseline') {
-            throw 'Production branch must use baseline GC configuration.'
-          }
-          "SENSORDASH_GC_PROFILE=$profile" >> $env:GITHUB_ENV
-          if ($profile -eq 'workstation') {
-            "SENSORDASH_MSI_SUFFIX=-workstation-gc" >> $env:GITHUB_ENV
-            Write-Host 'GC experiment: Workstation GC (both desktop and collector).'
-          } else {
-            Write-Host 'Normal release GC configuration; no override applied.'
-          }
       - name: Validate release identity
         shell: pwsh
         run: |
@@ -226,9 +191,6 @@ jobs:
         run: |
           $publishArgs = @('publish', 'src/SensorDash/SensorDash.csproj', '-c', 'Release',
             '-r', 'win-x64', '--no-restore', '-o', 'dist')
-          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
-            $publishArgs += '-p:SensorDashGcMode=workstation'
-          }
           & dotnet @publishArgs
           if ($LASTEXITCODE -ne 0) { throw 'SensorDash publish failed' }
       - name: Validate generic models and simulation engine
@@ -292,9 +254,6 @@ jobs:
         shell: pwsh
         run: |
           $msiArgs = @('build', 'installer/SensorDash.wixproj', '-c', 'Release', '-p:Platform=x64')
-          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
-            $msiArgs += '-p:SensorDashMsiVariantSuffix=-workstation-gc'
-          }
           & dotnet @msiArgs
           if ($LASTEXITCODE -ne 0) { throw 'SensorDash MSI build failed' }
       - name: Confirm installer created
@@ -303,13 +262,10 @@ jobs:
           $msis = @(Get-ChildItem 'installer-output' -Filter '*.msi' -Recurse)
           if ($msis.Count -ne 1) { throw "Expected exactly one MSI; found $($msis.Count)" }
           $msi = $msis[0]
-          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation' -and !$msi.Name.EndsWith('-workstation-gc.msi')) {
-            throw 'Experimental MSI must be clearly labeled workstation-gc.'
+          if ($msi.Name -notmatch '^SensorDash-Setup-\d+\.\d+\.\d+-x64\.msi$') {
+            throw "Unexpected installer name: $($msi.Name)"
           }
-          if ($env:SENSORDASH_GC_PROFILE -eq 'baseline' -and $msi.Name.EndsWith('-workstation-gc.msi')) {
-            throw 'Normal MSI must not be labeled as a GC experiment.'
-          }
-          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes); GC profile: $env:SENSORDASH_GC_PROFILE"
+          Write-Host "MSI: $($msi.FullName) ($($msi.Length) bytes); Workstation GC"
       - name: Smoke-test local HTTP API and dashboard
         shell: pwsh
         run: |
@@ -321,11 +277,8 @@ jobs:
           Copy-Item 'dist/SensorDash.Tray.exe' (Join-Path $standaloneDir 'SensorDash.Tray.exe')
           # Exercise both components, including named-pipe service communication,
           # without installing a service on the CI runner.
-          # Only the explicit GC verification path opts into memory diagnostics.
-          # Ordinary installs and smoke tests keep process telemetry disabled.
-          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
-            $env:SENSORDASH_PERFORMANCE_DIAGNOSTICS = '1'
-          }
+          # Extra diagnostics are enabled only in CI to verify GC.
+          $env:SENSORDASH_PERFORMANCE_DIAGNOSTICS = '1'
           $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
           Start-Sleep -Seconds 3
           $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.Tray.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru
@@ -342,16 +295,14 @@ jobs:
             if ($status.mode -ne 'service') { throw 'The local dashboard must run in the collector service' }
             $trayState = Invoke-WebRequest -Uri 'http://localhost:8765/api/tray-state' -UseBasicParsing
             if ($trayState.Content -notmatch '^status\t') { throw 'Native tray status protocol unavailable' }
-            if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
-              if ($status.process.serverGc -ne $false) {
-                throw 'Experimental service-hosted web process is not using Workstation GC.'
-              }
-              $diagnostics = Invoke-RestMethod -Uri 'http://localhost:8765/api/diagnostics' -TimeoutSec 8
-              if ($diagnostics.process.serverGc -ne $false) {
-                throw 'Service GC diagnostics disagree with the unified service status.'
-              }
-              Write-Host 'PASS: unified web/collector service reports Workstation GC.'
+            if ($status.process.serverGc -ne $false) {
+              throw 'Standard service-hosted web process must use Workstation GC.'
             }
+            $diagnostics = Invoke-RestMethod -Uri 'http://localhost:8765/api/diagnostics' -TimeoutSec 8
+            if ($diagnostics.process.serverGc -ne $false) {
+              throw 'Service GC diagnostics disagree with the unified service status.'
+            }
+            Write-Host 'PASS: standard service-hosted build reports Workstation GC.'
             $presets = Invoke-RestMethod -Uri 'http://localhost:8765/api/cooling-presets' -TimeoutSec 5
             $sourcePresets = @(Get-ChildItem 'presets/cooling/*.json')
             if ($presets.Count -ne $sourcePresets.Count) { throw 'Packaged preset count does not match source catalog' }

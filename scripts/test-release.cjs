@@ -12,21 +12,28 @@ assert.ok(fs.readFileSync('installer/SensorDash.wxs','utf8').includes('ProductCo
 assert.ok(fs.readFileSync('installer/SensorDash.wixproj','utf8').includes('SensorDash-Setup-$(SensorDashVersion)-x64'));
 const workflow=fs.readFileSync('.github/workflows/windows-build.yml','utf8');
 const wix=fs.readFileSync('installer/SensorDash.wixproj','utf8');
-assert.match(workflow,/workflow_dispatch:\s+inputs:\s+gc_profile:/,'Manual dispatch must expose GC experiment choice');
-assert.match(workflow,/workflow_call:\s+inputs:\s+gc_profile:/,'Explicit reusable entry must remain available');
-assert.match(workflow,/branches: \[Production, feature\/fan-control-workspace-reorganization-20261106\]/);
+assert.match(workflow,/push:\s+branches: \[Production\]/,'Production pushes must build an MSI');
+assert.match(workflow,/pull_request:\s+branches: \[Production\]/,
+ 'Production-targeted pull requests must validate the MSI before merge');
+assert.match(workflow,/workflow_dispatch:/,'Manual MSI builds must remain available');
+assert.doesNotMatch(workflow,/gc_profile|SENSORDASH_GC_PROFILE|SensorDashGcMode|workstation-gc/,
+ 'CI must not expose legacy GC build variants');
 assert.equal(fs.existsSync('.github/workflows/native-tray-development-ci.yml'),false,
- 'Duplicate native-tray marker workflow must be removed');
+ 'Duplicate native-tray marker workflow must remain absent');
 assert.match(workflow,/SENSORDASH_PERFORMANCE_DIAGNOSTICS/,
- 'GC verification must explicitly opt into otherwise disabled diagnostics');
-assert.match(workflow,/AllowUnencryptedAuthentication/,'Loopback Negotiate smoke test must explicitly allow HTTP Windows credentials');
-assert.match(workflow,/SENSORDASH_GC_PROFILE/,'CI must explicitly resolve GC profile');
-assert.match(workflow,/Production branch must use baseline GC configuration/,'Production must never use an experiment');
-assert.match(workflow,/-p:SensorDashGcMode=workstation/,'Only experimental publish must override GC mode');
-assert.match(workflow,/Experimental service-hosted web process is not using Workstation GC/);
+ 'CI must opt into otherwise-disabled process diagnostics only for verification');
+assert.match(workflow,/AllowUnencryptedAuthentication/,
+ 'Loopback Negotiate smoke test must explicitly allow HTTP Windows credentials');
+assert.match(workflow,/Standard service-hosted web process must use Workstation GC/);
 assert.match(workflow,/Service GC diagnostics disagree with the unified service status/);
-assert.match(workflow,/-p:SensorDashMsiVariantSuffix=-workstation-gc/);
-assert.match(wix,/x64\$\(SensorDashMsiVariantSuffix\)/,'Experimental MSI name must carry label');
+assert.match(workflow,/SensorDash-Setup-/);
+assert.match(wix,/SensorDash-Setup-\$\(SensorDashVersion\)-x64/);
+assert.doesNotMatch(wix,/SensorDashMsiVariantSuffix/);
+const gcProject=fs.readFileSync('src/SensorDash/SensorDash.csproj','utf8');
+assert.match(gcProject,/<ServerGarbageCollection>false<\/ServerGarbageCollection>/,
+ 'Workstation GC must be default for every build');
+assert.doesNotMatch(gcProject,/SensorDashGcMode|<ServerGarbageCollection[^>]+Condition=/,
+ 'There must be no selectable server/baseline GC mode');
 const wxs=fs.readFileSync('installer/SensorDash.wxs','utf8');
 const backend=fs.readFileSync('src/SensorDash/Program.cs','utf8');
 const project=fs.readFileSync('src/SensorDash/SensorDash.csproj','utf8');
