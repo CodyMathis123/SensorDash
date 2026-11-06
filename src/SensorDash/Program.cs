@@ -71,6 +71,7 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 bool ValidBrowserMutation(HttpContext context, string action) =>
+    string.Equals(context.Request.Host.Host, "localhost", StringComparison.OrdinalIgnoreCase) &&
     context.Request.Headers.Origin.ToString() == "http://localhost:8765" &&
     context.Request.Headers["X-SensorDash-Action"].ToString() == action &&
     context.Request.ContentType is string mime &&
