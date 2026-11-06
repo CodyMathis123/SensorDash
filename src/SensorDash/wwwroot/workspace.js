@@ -509,7 +509,7 @@ const SDWorkspace = (() => {
   const curveOptions=(S.settings?.simulatedFanCurves||[]).map(c=>
     '<option value="'+attr(c.id)+'">'+safe(c.name)+'</option>').join('');
   return card('Manual fan tests','Select one output · 30–120-second tests · 70–100% PWM',
-    '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and approve Windows elevation. '+
+    '<p class="note">Exit other fan-control apps, choose the PWM output you want to test, and confirm the change in your browser. '+
       'Avoid essential pump outputs until their safe behavior is verified.</p>'+
     '<div class="w-live-status"><strong>Control state: <span data-fan-status>'+
        safe(state.state||'Loading…')+'</span></strong>'+
@@ -535,7 +535,7 @@ const SDWorkspace = (() => {
     '<label class="w-fan-ack"><input id="liveFanExclusive" type="checkbox" />'+
     '<span>I have closed other fan-control software and want SensorDash to control this output.</span></label>'+
     '<div class="w-actions">'+
-       button('fan-authorize','Request elevated takeover','',false)+
+       button('fan-authorize','Confirm temporary fan control','',false)+
        button('fan-release','Release to firmware control')+
      '</div>'+
     '<p class="note">For these short tests, SensorDash limits duty to at least 70% (or a higher channel minimum) '+
@@ -733,7 +733,7 @@ const SDWorkspace = (() => {
    if(state.dirty)saveStatus(S,'Saving…');
    const run=state.tail.then(async()=>{
      const body=JSON.stringify(S.settings);
-     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body});
+     const response=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-SensorDash-Action':'settings'},body});
      if(!response.ok)throw Error(await response.text());
      const saved=await response.json();
      // A response must never replace newer local edits.
@@ -912,12 +912,16 @@ const SDWorkspace = (() => {
         percent:action==='quick-apply'?percent:100,
         durationSeconds:action==='quick-apply'?300:30,
         confirmExclusiveOwnership:action==='quick-apply'};
+       if(action==='quick-apply'&&!confirm('Apply a temporary '+percent+'% PWM override to '+channel+
+          ' for up to 5 minutes? Confirm no other fan-control program is active. Temperature guards remain enabled.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
         method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
         body:JSON.stringify(command)});
        if(!response.ok){h.toast('Override unavailable: '+(await response.text()).slice(0,150));return true;}
        if(S.quickFanDrafts)delete S.quickFanDrafts[channel];
-       h.toast('Approve Windows elevation to '+(action==='quick-apply'?'set temporary fan speed.':'restore the fan curve.'));
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         (action==='quick-apply'?'Temporary override requested.':'Fan curve restoration requested.'));
        return true;
       }
       if(action==='fan-authorize'||action==='fan-release'){
@@ -939,12 +943,16 @@ const SDWorkspace = (() => {
        if(!release&&mode==='curve'&&!command.curveId){
          h.toast('Select a saved temperature curve.');return true;
        }
+       if(!release&&!confirm('Take direct control of '+channel+' at '+command.percent+'% PWM for up to '+
+         command.durationSeconds+' seconds? This must be a fan output, not a pump; no other controller should be active.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
          method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
          body:JSON.stringify(command)
        });
        if(!response.ok){h.toast('Authorization not started: '+(await response.text()).slice(0,150));return true;}
-       h.toast('Windows elevation requested. The status above shows the actual hardware result.');
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         'Request submitted. Check the live hardware-control status.');
        return true;
      }
      if(['starter-radiators','starter-nvme','add-profile'].includes(action)){
@@ -970,12 +978,16 @@ const SDWorkspace = (() => {
          profileId:id||'',confirmExclusiveOwnership:action==='start-profile',
          durationSeconds:60,percent:100
        };
+       if(action==='start-profile'&&!confirm('Enable approved fan profile '+(id||'')+
+         '? It will control the assigned PWM channels until stopped, with safety guards active.'))return true;
        const response=await fetch('/api/fan-control/authorize',{
          method:'POST',headers:{'Content-Type':'application/json','X-SensorDash-Action':'fan-control'},
          body:JSON.stringify(command)
        });
        if(!response.ok){h.toast('Authorization unavailable: '+(await response.text()).slice(0,160));return true;}
-       h.toast('Confirm Windows elevation. Collector status will update.');
+       const result=await response.json().catch(()=>({}));
+       h.toast(result.accepted===false?(result.message||'Control request rejected.'):
+         'Request submitted. Review the live collector status.');
        return true;
      }
      if(action==='remove-profile'){
