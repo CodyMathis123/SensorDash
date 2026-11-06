@@ -26,6 +26,10 @@
   <ItemGroup>
     <Compile Remove="TrayIconFactory.cs" />
     <Compile Remove="TraySensorIcon.cs" />
+    <!-- Legacy privileged helper and general-user pipe were replaced by the
+         service's authenticated local API. Do not ship their endpoints. -->
+    <Compile Remove="AdminFanControl.cs" />
+    <Compile Remove="ServiceBridge.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\SensorDash.ico" CopyToPublishDirectory="Always" TargetPath="SensorDash.ico" />
