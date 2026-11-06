@@ -200,21 +200,73 @@ const SDWorkspace = (() => {
      'Grafana handles history; this local editor owns cooling assignments and live sensor context.')+
      starter+systemHtml;
  };
+ const trayTextMode=w=>{
+   const v=(w.textColor||'auto').toLowerCase();
+   if(v==='auto')return 'auto';
+   if(v==='#ffffff')return 'white';
+   if(v==='#0d151f')return 'dark';
+   return 'custom';
+ };
+ const trayAppearance=(style,accent,textColor)=>{
+   const safeAccent=/^#[0-9a-f]{6}$/i.test(accent||'')?accent:'#62d5ce';
+   const kind=['accent-bar','solid','outline'].includes(style)?style:'accent-bar';
+   const bg=kind==='solid'?safeAccent:'#0e1c28';
+   const red=parseInt(bg.slice(1,3),16),green=parseInt(bg.slice(3,5),16),blue=parseInt(bg.slice(5,7),16);
+   const auto=(red*299+green*587+blue*114)>=150000?'#0d151f':'#ffffff';
+   return {kind,accent:safeAccent,background:bg,
+     foreground:/^#[0-9a-f]{6}$/i.test(textColor||'')?textColor:auto};
+ };
+ const paintTrayPreview=target=>{
+   const row=target?.closest?.('.w-tray-row');
+   const preview=row?.querySelector?.('[data-tray-preview]');
+   if(!preview)return false;
+   const style=row.querySelector('[data-tray-style]')?.value||'accent-bar';
+   const accent=row.querySelector('[data-tray-color]')?.value||'#62d5ce';
+   const mode=row.querySelector('[data-tray-text-mode]')?.value||'auto';
+   const custom=row.querySelector('[data-tray-text-custom]')?.value||'#ffffff';
+   const color=mode==='white'?'#ffffff':mode==='dark'?'#0d151f':mode==='custom'?custom:'auto';
+   const appearance=trayAppearance(style,accent,color);
+   preview.className='w-tray-preview '+appearance.kind;
+   preview.style.setProperty('--tray-accent',appearance.accent);
+   preview.style.setProperty('--tray-bg',appearance.background);
+   preview.style.setProperty('--tray-fg',appearance.foreground);
+   return true;
+ };
  const renderTray=(S)=>{
    const list=S.settings?.trayWidgets||[];
    const options=S.sensors.length?'':nothing('The collector has not reported sensors yet.');
    return card('Notification-area sensors','Choose up to six independent, live Windows tray badges',
-      '<p class="note">Choose up to six tray readouts. Double-click one to open SensorDash.</p>'+
-      options+list.map((w,i)=>
-        '<div class="w-tray-row"><span class="w-tray-index">'+(i+1)+'</span>'+
-        '<label class="w-tray-sensor">Sensor'+
-        select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+'</label>'+
-        '<label class="w-tray-label">Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
-        '<label class="w-tray-color">Color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(w.color||'#62d5ce')+'"></label>'+
-        '<label class="w-tray-precision">Precision<select data-tray-decimals="'+attr(w.id)+'">'+opts(['0','1'],String(w.decimals))+'</select></label>'+
-        '<div class="w-tray-remove">'+button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div></div>').join('')+
-      '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
-      (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
+     '<p class="note">Choose a style for each icon. Accent bar restores the original dark badge with a thin colored dash. Solid fills and outlines are alternatives; Automatic text color adapts for bright backgrounds.</p>'+
+     options+list.map((w,i)=>{
+       const appearance=trayAppearance(w.style,w.color,w.textColor);
+       const mode=trayTextMode(w);
+       const reading=S.byId?.get(w.sensorId);
+       const number=Number.isFinite(reading?.value)?String(Math.round(reading.value)):'--';
+       const selected=(value,label)=>'<option value="'+value+'" '+(mode===value?'selected':'')+'>'+label+'</option>';
+       return '<div class="w-tray-row" data-tray-row="'+attr(w.id)+'">'+
+         '<span class="w-tray-index">'+(i+1)+'</span>'+
+         '<span class="w-tray-preview '+appearance.kind+'" data-tray-preview="'+attr(w.id)+'" '+
+           'style="--tray-accent:'+appearance.accent+';--tray-bg:'+appearance.background+
+           ';--tray-fg:'+appearance.foreground+'">'+safe(number.slice(0,3))+'</span>'+
+         '<label class="w-tray-sensor">Sensor'+
+         select(S,w.sensorId,()=>true,'Choose sensor','data-tray-sensor="'+attr(w.id)+'"')+'</label>'+
+         '<label class="w-tray-label">Label<input data-tray-label="'+attr(w.id)+'" maxlength="40" value="'+attr(w.label)+'" placeholder="Optional label"></label>'+
+         '<label class="w-tray-style">Style<select data-tray-style="'+attr(w.id)+'">'+
+           '<option value="accent-bar" '+(appearance.kind==='accent-bar'?'selected':'')+'>Accent bar · original</option>'+
+           '<option value="solid" '+(appearance.kind==='solid'?'selected':'')+'>Solid background</option>'+
+           '<option value="outline" '+(appearance.kind==='outline'?'selected':'')+'>Accent outline</option></select></label>'+
+         '<label class="w-tray-color">Accent color<input data-tray-color="'+attr(w.id)+'" type="color" value="'+attr(appearance.accent)+'"></label>'+
+         '<label class="w-tray-text">Text color<select data-tray-text-mode="'+attr(w.id)+'">'+
+           selected('auto','Automatic')+selected('white','White')+selected('dark','Dark')+selected('custom','Custom')+
+           '</select></label>'+
+         '<label class="w-tray-custom">Custom text<input type="color" data-tray-text-custom="'+attr(w.id)+
+           '" value="'+attr(mode==='custom'?w.textColor:'#ffffff')+'" title="Choose a custom text color (select Custom to apply it)"></label>'+
+         '<label class="w-tray-precision">Precision<select data-tray-decimals="'+attr(w.id)+'">'+
+           opts(['0','1'],String(w.decimals))+'</select></label>'+
+         '<div class="w-tray-remove">'+button('remove-tray','×','data-id="'+attr(w.id)+'"')+'</div></div>';
+     }).join('')+
+     '<div class="w-actions">'+button('save-editor','Save tray icons','',false)+
+     (list.length<6?button('add-tray','+ Add sensor icon'):'<span class="note">Six-icon limit reached.</span>')+'</div>');
  };
  const curveDiagram=(points,activeTemperature,activePercent)=>{
   // Keep source-row identity when sorting graph points by temperature.
@@ -833,12 +885,22 @@ const SDWorkspace = (() => {
  function syncInputs(S){
    syncCoolingInputs(S);
    const d=S.settings;
-   for(const e of document.querySelectorAll('[data-tray-sensor],[data-tray-label],[data-tray-color],[data-tray-decimals]')){
-     const id=e.dataset.traySensor||e.dataset.trayLabel||e.dataset.trayColor||e.dataset.trayDecimals;
+   for(const e of document.querySelectorAll('[data-tray-sensor],[data-tray-label],[data-tray-color],[data-tray-decimals],[data-tray-style],[data-tray-text-mode],[data-tray-text-custom]')){
+     const id=e.dataset.traySensor||e.dataset.trayLabel||e.dataset.trayColor||
+       e.dataset.trayDecimals||e.dataset.trayStyle||e.dataset.trayTextMode||e.dataset.trayTextCustom;
      const o=d.trayWidgets.find(w=>w.id===id);
      if(!o)continue;
-     const field=e.dataset.traySensor?'sensorId':e.dataset.trayLabel?'label':e.dataset.trayColor?'color':'decimals';
-     o[field]=field==='decimals'?Number(e.value):e.value;
+     if(e.dataset.traySensor)o.sensorId=e.value;
+     else if(e.dataset.trayLabel)o.label=e.value;
+     else if(e.dataset.trayColor)o.color=e.value;
+     else if(e.dataset.trayDecimals)o.decimals=Number(e.value);
+     else if(e.dataset.trayStyle)o.style=e.value;
+     else if(e.dataset.trayTextMode)
+       o.textColor=e.value==='auto'?'auto':e.value==='white'?'#ffffff':
+         e.value==='dark'?'#0d151f':document.querySelector(
+           '[data-tray-text-custom="'+CSS.escape(id)+'"]')?.value||'#ffffff';
+     else if(e.dataset.trayTextCustom&&document.querySelector(
+         '[data-tray-text-mode="'+CSS.escape(id)+'"]')?.value==='custom')o.textColor=e.value;
    }
    for(const e of document.querySelectorAll('[data-profile-name],[data-profile-min],[data-profile-response]')){
      const id=e.dataset.profileName||e.dataset.profileMin||e.dataset.profileResponse;
@@ -1070,7 +1132,7 @@ const SDWorkspace = (() => {
      }
      if(action==='add-tray'){
        const candidate=S.sensors.find(s=>s.value!=null&&!isHidden(S,s)&&!cfg.trayWidgets.some(w=>w.sensorId===s.id));
-       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',decimals:0});
+       cfg.trayWidgets.push({id:uid(),sensorId:candidate?.id||S.sensors.find(s=>!isHidden(S,s))?.id||'',label:'',color:'#62d5ce',style:'accent-bar',textColor:'auto',decimals:0});
      }
      if(action==='remove-tray')cfg.trayWidgets=cfg.trayWidgets.filter(w=>w.id!==id);
      if(action==='add-curve'){
