@@ -610,6 +610,9 @@ const SDWorkspace = (() => {
     if(!curveOwners.has(id))curveOwners.set(id,draft.id);
   const curveDemand=p=>{
     const reports=S.simulation?.results||[];
+    const valid=(p.curveIds||[]).map(id=>reports.find(x=>x.id===id)?.targetPercent)
+      .filter(Number.isFinite);
+    const maxDemand=valid.length?Math.max(...valid):null;
     return '<div class="w-profile-demands"><div class="w-profile-demand-heading">'+
       '<strong>Temperature inputs · MAX</strong>'+
       '<span class="note">Saved curve preview; actual applied PWM may differ due to approval, smoothing or overrides.</span></div>'+
@@ -617,14 +620,18 @@ const SDWorkspace = (() => {
       (p.curveIds||[]).map(id=>{
         const curve=curves.find(c=>c.id===id), sample=reports.find(r=>r.id===id);
         const other=curveOwners.get(id)!==p.id?all.find(q=>q.id===curveOwners.get(id))?.name:null;
-        return '<div class="w-profile-demand-row" data-profile-curve-row="'+attr(p.id)+'" data-curve-id="'+attr(id)+'">'+
+        const highest=Number.isFinite(maxDemand)&&Number.isFinite(sample?.targetPercent)&&
+          Math.abs(sample.targetPercent-maxDemand)<0.01;
+        return '<div class="w-profile-demand-row'+(highest?' w-demand-highest':'')+
+          '" data-profile-curve-row="'+attr(p.id)+'" data-curve-id="'+attr(id)+'">'+
           '<span><strong>'+safe(curve?.name||id)+'</strong>'+
           (other?'<small>Shared · edit in '+safe(other)+'</small>':'')+'</span>'+
           '<strong data-sim="'+attr(id)+':input">'+
           (Number.isFinite(sample?.inputTemperature)?sample.inputTemperature.toFixed(1)+' °C':'—')+'</strong>'+
           '<strong data-sim="'+attr(id)+':output">'+
           (Number.isFinite(sample?.targetPercent)?sample.targetPercent.toFixed(1)+' %':'—')+'</strong>'+
-          '<small data-profile-winning="'+attr(p.id)+'|'+attr(id)+'"></small></div>';
+          '<small data-profile-winning="'+attr(p.id)+'|'+attr(id)+'">'+
+          (highest?'Highest request':'')+'</small></div>';
       }).join('')+
       (!(p.curveIds||[]).length?'<p class="note">No curves assigned yet.</p>':'')+
       '</div>';
@@ -639,11 +646,10 @@ const SDWorkspace = (() => {
   const cards=all.map(p=>{
     const running=active.find(a=>a.id===p.id),status=reports.find(x=>x.id===p.id);
     if(!editing){
-      const content=card(p.name,(running?'ENABLED':'DRAFT')+' · locked configuration',
+      const content=card('Current control',(running?'ENABLED':'DRAFT')+' · locked configuration',
         '<div class="w-live-status"><strong>'+safe(status?.state|| (running?'Starting':'Not enabled'))+
           '</strong><span>'+safe(status?.message||'Editor locked')+'</span></div>'+
-        '<p class="note">Curves: '+safe((p.curveIds||[]).map(id=>curves.find(c=>c.id===id)?.name||id).join(', ')||'None')+
-          ' · Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
+        '<p class="note">Outputs: '+safe((p.channelIds||[]).map(id=>FanFeedback.label(S,id)).join(', ')||'None')+'</p>'+
         curveDemand(p)+FanFeedback.render(S,p.channelIds,p.id)+
         (running?.needsReapproval?'<p class="w-fan-unsaved">Saved changes still need approval. Unlock Fan Control to reapprove.</p>':'')+
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
@@ -652,7 +658,7 @@ const SDWorkspace = (() => {
          content,!!running);
     }
     const review=FanControlUx.profile(S,p);
-    const form=card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
+    const form=card('Current control',(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
       review+
       '<div class="w-live-status"><strong data-profile-state="'+attr(p.id)+'">'+safe(status?.state|| (running?'Starting':'Not enabled'))+'</strong>'+
         '<span data-profile-message="'+attr(p.id)+'">'+safe(status?.message||(running?'Waiting for the collector':'Ready to configure'))+'</span>'+
