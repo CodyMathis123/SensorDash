@@ -9,7 +9,6 @@ const code=read('src/SensorDash/wwwroot/fan-control-debug.js');
 const program=read('src/SensorDash/Program.cs');
 const app=read('src/SensorDash/wwwroot/app.js');
 const workspace=read('src/SensorDash/wwwroot/workspace.js');
-const bridge=read('src/SensorDash/ServiceBridge.cs');
 const writer=read('src/SensorDash/FanPwmChannels.cs');
 const persistent=read('src/SensorDash/PersistentFanProfiles.cs');
 const trace=read('src/SensorDash/FanControlTrace.cs');
@@ -46,7 +45,7 @@ const button=kind=>{
  assert.ok(workspace.includes('FanControlDebug.render(S)'));
  assert.ok(program.includes('"/api/fan-control/debug"'));
  assert.ok(program.includes('FanResumeSelfTest.Run()'));
- assert.ok(bridge.includes('"fanDebug" => liveFan.DebugLog()'));
+ assert.ok(program.includes('Results.Ok(control.DebugLog())'));
  assert.ok(persistent.includes('FanResumePolicy.NeedsRearm'));
  assert.ok(program.includes('WindowsPowerResumeNotifications(logger)'));
  assert.ok(program.includes('resumeNotifications.ConsumePending()'));
