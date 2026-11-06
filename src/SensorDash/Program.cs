@@ -4,7 +4,6 @@ using System.Runtime;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
-using System.Windows.Forms;
 using LibreHardwareMonitor.Hardware;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -22,87 +21,60 @@ if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-// An explicit UAC-elevated helper sends exactly one privileged fan-control
-// command to an administrator-only pipe, then exits. There is deliberately no
-// unprivileged fan-control operation on the telemetry pipe.
-if (args.Contains("--fan-admin-command", StringComparer.OrdinalIgnoreCase))
+// Only the installed service hosts the browser UI. A desktop launch simply
+// opens that local URL. The separate native tray has its own executable.
+if (!args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
 {
-    try
-    {
-        var at=Array.FindIndex(args,a=>a.Equals("--fan-admin-command",StringComparison.OrdinalIgnoreCase));
-        if(at<0||at+1>=args.Length)throw new ArgumentException("Missing command payload.");
-        var decoded=Convert.FromBase64String(args[at+1]);
-        if(decoded.Length>4096)throw new ArgumentException("Command too large.");
-        var command=JsonSerializer.Deserialize<FanCommand>(decoded, JsonSerializerOptions.Web);
-        await AdminFanControlClient.SendAsync(command ?? throw new ArgumentException("Invalid command."));
-    }
-    catch(Exception ex)
-    {
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(),"SensorDash-Fan-Admin.log"),
-            DateTimeOffset.UtcNow+" "+ex.GetType().Name+": "+ex.Message+Environment.NewLine); }catch{}
-        Environment.ExitCode=1;
-    }
+    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
+        try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765/") { UseShellExecute = true }); }
+        catch { }
     return;
 }
-
-// Same signed executable, two separate Windows processes.
-// Windows Service (--collector) owns elevated sensor hardware access and the database.
-// Desktop (default) owns the tray icon + loopback web server, never opens the hardware.
-if (args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
-{
-    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
-    Directory.CreateDirectory(data);
-    var service = Host.CreateDefaultBuilder(args)
-        .UseWindowsService(options => options.ServiceName = "SensorDashCollector")
-        .ConfigureServices(services =>
-        {
-            services.AddSingleton(new DashboardState(data));
-            services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
-            services.AddSingleton<SimulationState>();
-            services.AddSingleton(new FanControlRuntime(data));
-            // If telemetry is enabled, build its timestamp index before fan
-            // collection starts. Otherwise no telemetry work is performed.
-            services.AddHostedService<PerformanceSamplerWorker>();
-            services.AddHostedService<TelemetryExportWorker>();
-            services.AddHostedService<SensorWorker>();
-            services.AddHostedService<SimulationWorker>();
-            services.AddHostedService<CollectorPipeServer>();
-            services.AddHostedService<AdminFanControlPipeServer>();
-        }).Build();
-    await service.RunAsync();
-    return;
-}
-
-// An existing tray process owns localhost:8765. Double-click only opens its UI.
-try
-{
-    using var probe = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
-    using var response = await probe.GetAsync("http://127.0.0.1:8765/api/status");
-    if (response.IsSuccessStatusCode)
-    {
-        if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); } catch { }
-        return;
-    }
-}
-catch (HttpRequestException) { }
-catch (TaskCanceledException) { }
-
-var userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash");
-Directory.CreateDirectory(userDir);
-// The desktop process only serves loopback minimal APIs and embedded assets.
-// SlimBuilder avoids unrelated MVC/configuration defaults in the tray host;
-// the elevated collector keeps its normal Windows Service host.
+var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
+Directory.CreateDirectory(data);
 var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
 {
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
+builder.Services.AddWindowsService(options => options.ServiceName = "SensorDashCollector");
 builder.WebHost.UseUrls("http://127.0.0.1:8765");
-builder.Services.AddSingleton(new DashboardState(userDir));
+builder.Services.AddSingleton(new DashboardState(data));
+builder.Services.AddSingleton(new HistoryStore(Path.Combine(data, "telemetry.db")));
+builder.Services.AddSingleton<SimulationState>();
+builder.Services.AddSingleton(new FanControlRuntime(data));
 builder.Services.AddHostedService<PerformanceSamplerWorker>();
-builder.Services.AddHostedService<DashboardBridgeWorker>();
+builder.Services.AddHostedService<TelemetryExportWorker>();
+builder.Services.AddHostedService<SensorWorker>();
+builder.Services.AddHostedService<SimulationWorker>();
+// Keep privilege decisions server-side. Windows Negotiate authenticates the
+// interactive user for mutations; read-only status and assets remain local.
+builder.Services.AddAuthentication(
+    Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate();
+builder.Services.AddAuthorization();
 var app = builder.Build();
+// Bind exclusively to IPv4 loopback, and reject alternate Host headers to
+// avoid local browser DNS-rebinding requests to a SYSTEM-owned web process.
+app.Use(async (context, next) =>
+{
+    if (!string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+        || context.Request.Host.Port != 8765)
+    {
+        context.Response.StatusCode = 403;
+        return;
+    }
+    await next();
+});
+app.UseAuthentication();
+app.UseAuthorization();
+bool ValidBrowserMutation(HttpContext context, string action) =>
+    context.Request.Headers.Origin.ToString() == "http://127.0.0.1:8765" &&
+    context.Request.Headers["X-SensorDash-Action"].ToString() == action &&
+    context.Request.ContentType is string mime &&
+    mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) &&
+    context.Request.ContentLength is not > 65_536;
+
 IResult Resource(string name, string mediaType)
 {
     var resource = typeof(DashboardState).Assembly.GetManifestResourceStream("SensorDash.Web." + name);
@@ -126,7 +98,7 @@ app.MapGet("/style.css", () => Resource("style.css", "text/css; charset=utf-8"))
 app.MapGet("/api/cooling-presets", () => Results.Ok(CoolingPresetCatalog.Items));
 app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 {
-    app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "desktop",
+    app = "SensorDash", version = typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown", mode = "service",
     collectorOnline = state.Latest is { Error: null },
     localOnly = true, started = state.Started, now = DateTimeOffset.UtcNow,
     pawnIo = state.Latest?.PawnIo,
@@ -137,36 +109,31 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 }));
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
-app.MapGet("/api/diagnostics", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("diagnostics"), ct));
+app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(state)));
 // Read-only, bounded performance history. Browser download never contains sensor readings,
 // settings, paths, tokens or device identifiers.
 app.MapGet("/api/performance-history", async (CancellationToken ct) =>
 {
-    var collector = await CollectorClient.AskAsync(new PipeCommand("performanceHistory"), ct);
-    return Results.Ok(new { desktop = ProcessTelemetry.History(), collector });
+    return Results.Ok(new { desktop = Array.Empty<ProcessPerformanceSample>(), collector = ProcessTelemetry.History() });
 });
-app.MapGet("/api/settings", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("settings"), ct));
-app.MapGet("/api/collection-groups", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("collectionGroups"), ct));
-app.MapPut("/api/settings", async (HttpContext ctx) =>
+app.MapGet("/api/settings", (DashboardState state) => Results.Ok(state.Settings));
+app.MapGet("/api/collection-groups", () => Results.Ok(HardwareCollection.Groups));
+app.MapPut("/api/settings", async (HttpContext ctx, DashboardState state) =>
 {
     try
     {
         var updated = await JsonSerializer.DeserializeAsync<DashboardSettings>(
             ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
-        return updated == null
-            ? Results.BadRequest("Invalid settings.")
-            : await ProxyAsync(new PipeCommand("saveSettings", Settings: updated), ctx.RequestAborted);
+        if (updated is null) return Results.BadRequest("Invalid settings.");
+        state.UpdateSettings(updated);
+        return Results.Ok(state.Settings);
     }
     catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
 });
 // Configuration changes are local to the Windows collector. No HTTP endpoint
 // ever returns the bearer token or certificate PEM. Never trust cross-origin
 // pages with service-owned secrets.
-app.MapGet("/api/telemetry-config", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("telemetrySettings"), ct));
+app.MapGet("/api/telemetry-config", () => Results.Ok(TelemetryConfiguration.Snapshot()));
 app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
 {
     if (ctx.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
@@ -186,14 +153,12 @@ app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
     }
     catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
 });
-app.MapGet("/api/events", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("events"), ct));
-app.MapGet("/api/simulation", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("simulation"), ct));
-app.MapGet("/api/fan-control", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("fanOutputs"), ct));
-app.MapGet("/api/fan-control/debug", async (CancellationToken ct) =>
-    await ProxyAsync(new PipeCommand("fanDebug"), ct));
+app.MapGet("/api/events", (HistoryStore db) => Results.Ok(db.ReadEvents()));
+app.MapGet("/api/simulation", (SimulationState simulation) =>
+    Results.Ok(new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest }));
+app.MapGet("/api/fan-control", (FanControlRuntime control, DashboardState state) =>
+    Results.Ok(control.Snapshot(state.Settings)));
+app.MapGet("/api/fan-control/debug", (FanControlRuntime control) => Results.Ok(control.DebugLog()));
 app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
 {
     // Browser mutations require same-origin JSON with a non-simple custom
@@ -245,13 +210,28 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
         return Results.Problem("Elevation was cancelled or unavailable.",statusCode:403);
     }
 });
-async Task<IResult> ProxyAsync(PipeCommand request, CancellationToken ct)
+object Diagnostics(DashboardState state)
 {
-    try { return Results.Json(await CollectorClient.AskAsync(request, ct), JsonSerializerOptions.Web); }
-    catch (Exception ex) when (ex is IOException or TimeoutException or OperationCanceledException)
+    var frame = state.Latest;
+    var storage = frame?.Devices?.Where(d => d.Type == "Storage").ToArray() ?? [];
+    var readings = frame?.Sensors.Where(s => s.DeviceType == "Storage").ToArray() ?? [];
+    return new
     {
-        return Results.Problem("Collector service unavailable: " + ex.Message, statusCode: 503);
-    }
+        pawnIo = frame?.PawnIo,
+        isAdministrator = SecurityInfo.IsAdministrator(),
+        storageEnabled = true,
+        storagePollSeconds = state.Settings.StoragePollSeconds,
+        storageDevices = storage,
+        storageSensorCount = readings.Length,
+        process = ProcessTelemetry.Snapshot(),
+        storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
+        storageLastPolled = state.LastStoragePoll,
+        note = storage.Length == 0
+            ? "The collector did not discover storage devices. Check the Windows service event log."
+            : readings.All(s => s.Type != "Temperature")
+                ? "Storage devices were found, but the library exposed no temperature sensor."
+                : "Storage readings are available. Assign the desired SSD sensor in Settings."
+    };
 }
 app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
 {
@@ -273,26 +253,6 @@ app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
     finally { state.Unsubscribe(id); }
 });
 
-// A dedicated STA UI thread supplies the notification-area menu.
-// The ASP.NET host runs asynchronously and never requires elevated privileges.
-var trayThread = new Thread(() =>
-{
-    Application.EnableVisualStyles();
-    using var context = new SensorDashTray(app.Services.GetRequiredService<DashboardState>(),app.Lifetime);
-    Application.Run(context);
-}) { IsBackground = true, Name = "SensorDash Tray" };
-trayThread.SetApartmentState(ApartmentState.STA);
-trayThread.Start();
-app.Lifetime.ApplicationStarted.Register(() =>
-{
-    if (!args.Contains("--no-browser", StringComparer.OrdinalIgnoreCase))
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(350);
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8765") { UseShellExecute = true }); }
-            catch { }
-        });
-});
 await app.RunAsync();
 
 // One inexpensive sample per minute per process. Does not force GC, poll hardware,
