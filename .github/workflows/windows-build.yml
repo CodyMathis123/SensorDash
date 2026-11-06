@@ -1,9 +1,9 @@
 name: Windows MSI build
-# Run only on explicit manual dispatch or a push to Production (including merges).
-# Feature-branch commits and pull-request updates do not automatically build an MSI.
+# Single Windows validation workflow: Production releases, explicit manual runs,
+# and the current service-hosted Fan Control feature branch. No second workflow.
 on:
   push:
-    branches: [Production]
+    branches: [Production, feature/fan-control-workspace-reorganization-20261106]
   workflow_call:
     inputs:
       gc_profile:
@@ -321,6 +321,11 @@ jobs:
           Copy-Item 'dist/SensorDash.Tray.exe' (Join-Path $standaloneDir 'SensorDash.Tray.exe')
           # Exercise both components, including named-pipe service communication,
           # without installing a service on the CI runner.
+          # Only the explicit GC verification path opts into memory diagnostics.
+          # Ordinary installs and smoke tests keep process telemetry disabled.
+          if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
+            $env:SENSORDASH_PERFORMANCE_DIAGNOSTICS = '1'
+          }
           $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
           Start-Sleep -Seconds 3
           $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.Tray.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru
