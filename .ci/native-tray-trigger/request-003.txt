@@ -1,0 +1,9 @@
+Native tray architecture on-demand CI request 003
+Reason:
+- Default original icon style: dark badge + colored bottom dash
+- Optional solid / outline styles
+- Per-icon auto, white, dark and custom text color (yellow auto contrast)
+- Canonical localhost Windows integrated browser authentication
+- Settings Windows user identity and explicit login link
+- Service-tray style settings round-trip and MSI servicing
+Commit source checked out by the run must contain all changes preceding this marker.
