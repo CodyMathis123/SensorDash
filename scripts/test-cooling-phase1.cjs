@@ -10,7 +10,6 @@ const src=read('src/SensorDash/wwwroot/cooling-insights.js');
 const app=read('src/SensorDash/wwwroot/app.js');
 const workspace=read('src/SensorDash/wwwroot/workspace.js');
 const model=read('src/SensorDash/WorkspaceModels.cs');
-const admin=read('src/SensorDash/AdminFanControl.cs');
 const recorder=read('src/SensorDash/CoolingEventRecorder.cs');
 const program=read('src/SensorDash/Program.cs');
 const html=read('src/SensorDash/wwwroot/index.html');
