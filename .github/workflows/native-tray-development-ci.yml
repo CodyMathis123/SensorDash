@@ -1,0 +1,20 @@
+name: Native tray development CI
+# Intentionally run the full MSI validation only when a marker is pushed.
+# Regular feature-branch source edits do NOT trigger CI. Production retains
+# its own every-push policy in windows-build.yml.
+on:
+  push:
+    branches:
+      - feature/service-hosted-web-native-tray
+    paths:
+      - .ci/native-tray-trigger/**
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/windows-build.yml
+    with:
+      gc_profile: workstation
