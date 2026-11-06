@@ -316,7 +316,7 @@ function settingsView(){
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
  telemetryConfigPanel()+
-  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only service memory',
+  (S.status?.performanceDiagnosticsEnabled ? '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only service memory',
 
  [['Service (web + collector)',S.status?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
@@ -345,7 +345,7 @@ function settingsView(){
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
   '<p class="note">Memory-first diagnostics: private memory reflects committed process-private virtual memory, while working set includes resident shared pages. GC committed is not interchangeable with total native memory. Heap size and fragmentation are values from the last GC, not live heap measures; they remain unavailable until a GC occurs. The configured GC heap count is not necessarily the current active heap count; unavailable configuration values are not evidence of a particular default. GC pause is the cumulative percent of runtime spent paused in GC. Samples are taken once per minute, held only in memory for up to 24 hours (maximum 1,440 per process) and reset on restart. No collection is forced.</p>'+
  '<div class="w-actions"><button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>'+
- '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>'+
+ '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>' : '')+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
  '<div class="stat-row"><label>Web address</label><strong>localhost:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
