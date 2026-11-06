@@ -138,7 +138,7 @@ async function click(action,duty){
   model.includes('m.VerifiedAt=null'),
   'Server-side normalization must refuse pump data, unsafe points and invalid verification');
  assert.ok(workspace.includes('FanCommissioning.render(S)') &&
-  workspace.includes("'calibration','Fan control & calibration'") &&
+  workspace.includes("'calibration','Hardware setup & calibration'") &&
   !workspace.includes("FanControlUx.section(S,'manual'") &&
   !workspace.includes("FanControlUx.section(S,'quick'") &&
   workspace.includes("mapping(o.id)?.label") &&
