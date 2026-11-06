@@ -267,6 +267,34 @@
 
 @media(max-width:850px){.fc-panel .fc-steps{grid-template-columns:1fr}}
 
+/* Daily fan control: compact live demand breakdown above infrequent profile setup.
+   These rows are previews of saved curves, not claims of approved PWM output. */
+.w-profile-demands{border:1px solid #345363;border-radius:10px;background:#112735;
+ padding:13px;margin:14px 0}
+.w-profile-demand-heading{display:flex;align-items:baseline;gap:8px 16px;
+ flex-wrap:wrap;margin-bottom:10px}
+.w-profile-demand-heading>strong{font-size:14px;color:#dcf7f4}
+.w-profile-demand-heading>.note{font-size:11px;line-height:1.5}
+.w-profile-demand-head,.w-profile-demand-row{display:grid;
+ grid-template-columns:minmax(150px,2fr) minmax(80px,1fr) minmax(90px,1fr) minmax(90px,1fr);
+ align-items:center;gap:8px 12px;padding:10px 12px}
+.w-profile-demand-head{font-size:10px;text-transform:uppercase;letter-spacing:.045em;color:#9db5c3;
+ border-bottom:1px solid #2c4959}
+.w-profile-demand-row{border-bottom:1px solid #264555;font-size:12px}
+.w-profile-demand-row:last-child{border-bottom:0}
+.w-profile-demand-row>span:first-child>strong{font-weight:650}
+.w-profile-demand-row>span:first-child>small{display:block;font-size:10px;color:#97b4c1;margin-top:3px}
+.w-profile-demand-row>strong{font-size:13px;font-variant-numeric:tabular-nums}
+.w-profile-demand-row>[data-profile-winning]{font-size:10px;color:#87eadc;min-height:1em}
+.w-profile-demand-row.w-demand-highest{background:#163c42;border-radius:6px}
+.w-profile-curve-editors>.w-fan-fold{margin:9px 0}
+.w-profile-curve-editors:empty{display:none}
+@media(max-width:670px){
+ .w-profile-demand-head{display:none}
+ .w-profile-demand-row{grid-template-columns:minmax(115px,2fr) 1fr 1fr;gap:7px;padding:9px 6px}
+ .w-profile-demand-row>[data-profile-winning]{grid-column:1/-1}
+}
+
 /* Persistent fan profiles: one profile controls independent channels via
    MAX-mixed temperature curves; responsive editing stays legible. */
 .w-profile-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:15px 0}
