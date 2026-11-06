@@ -649,7 +649,7 @@ const SDWorkspace = (() => {
         (running?'<div class="w-actions">'+button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"')+'</div>':''));
       return FanControlUx.section(S,'profile:'+p.id,p.name,
          (running?'Live · ':'Draft · ')+(running?.needsReapproval?'approval pending':'locked'),
-         content,false);
+         content,!!running);
     }
     const review=FanControlUx.profile(S,p);
     const form=card(p.name,(running?'ENABLED':'DRAFT')+' · '+p.curveIds.length+' curve(s)',
@@ -684,7 +684,7 @@ const SDWorkspace = (() => {
       'Separate profiles cannot share the same output.</p>'),false);
     return FanControlUx.section(S,'profile:'+p.id,p.name,
       (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
-      p.curveIds.length+' curve(s)',form,!!running?.needsReapproval);
+      p.curveIds.length+' curve(s)',form,!!running);
   }).join('');
   const content=header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
     (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
@@ -796,7 +796,7 @@ const SDWorkspace = (() => {
         editing?(typeof FanCommissioning!=='undefined'?FanCommissioning.render(S):
           '<p class="note">Fan calibration module unavailable.</p>'):
           WorkspaceLocks.readonly('Fan control & calibration')+
-          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',false)+
+          '<div class="w-actions"><button class="btn secondary" data-commissioning="release">Release to firmware control</button></div>',activeCalibration)+
       FanControlUx.section(S,'advanced','Diagnostics','Fan-controller diagnostics and hardware-recovery log',
         FanControlUx.section(S,'fan-debug','Sleep / PWM diagnostic log',
           'Resume recovery, commands, RPM feedback and errors',
@@ -1304,6 +1304,22 @@ const SDWorkspace = (() => {
      const out=key==='input'?(row?.inputTemperature==null?'—':row.inputTemperature.toFixed(1)+' °C'):
        key==='output'?(row?.targetPercent==null?'—':row.targetPercent.toFixed(1)+' %'):row?.state||'waiting';
      if(el.textContent!==out)el.textContent=out;
+   });
+   // Diagnostic preview only: the approved profile can differ from saved curve
+   // demands until reapproval, or due to PWM minimums/overrides/ramping.
+   const profiles=S.settings?.fanProfiles||[];
+   document.querySelectorAll('[data-profile-curve-row]').forEach(el=>{
+     const id=el.dataset.profileCurveRow;
+     const profile=profiles.find(p=>p.id===id);
+     const candidates=(profile?.curveIds||[]).map(curveId=>
+       readings.find(r=>r.id===curveId)).filter(r=>Number.isFinite(r?.targetPercent));
+     const highest=candidates.length?Math.max(...candidates.map(r=>r.targetPercent)):null;
+     const candidate=readings.find(r=>r.id===el.dataset.curveId);
+     const winning=Number.isFinite(highest)&&Number.isFinite(candidate?.targetPercent)&&
+       Math.abs(candidate.targetPercent-highest)<0.01;
+     el.classList.toggle('w-demand-highest',winning);
+     const badge=el.querySelector('[data-profile-winning]');
+     if(badge)badge.textContent=winning?'Highest request':'';
    });
  };
  return {render,handle,hasPendingCooling:S=>saveState(S).dirty,saveSettings,flushCooling,handleCoolingInput,paintTrayPreview,paintSimulation,paintCooling,paintFanControl,paintProfiles,handleCurvePointInput,handleCurvePointEnter,handleCurvePointExit,handleCurvePointClick,quickInput,isHidden,displayName,usageIndex};
