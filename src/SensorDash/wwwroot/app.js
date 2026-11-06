@@ -11,7 +11,7 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Common types',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- status:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
+ status:null,auth:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -248,6 +248,10 @@ function settingsView(){
  const uniqueDevices=[...new Map(liveDevices.map(d=>[d.id,d])).values()]
    .sort((a,b)=>a.name.localeCompare(b.name));
  return '<div class="settings-grid">'+
+ panel('Windows authorization','Local Windows account · no UAC prompts',
+  (S.auth?.authenticated
+    ?'<p class="note">Authenticated as <strong>'+esc(S.auth.user||'Windows user')+'</strong>. Changes are authorized by your Windows session; cooling actions still require confirmation.</p>'
+    :'<p class="note">The browser has not established Windows authentication. Readings remain visible, but saving settings and hardware actions require an authenticated Windows session.</p><p><a class="btn" href="/api/auth/sign-in">Connect Windows account</a></p><p class="note">Use the localhost dashboard address; IP-address bookmarks can prevent automatic Windows sign-in.</p>'))+
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
  panel('Collection and history intervals','Live polling is independent from what is archived for Grafana',
  '<div class="form-grid">'+[
@@ -341,7 +345,7 @@ function settingsView(){
  '<div class="w-actions"><button class="btn secondary" id="refreshDiagnostics">Refresh diagnostics</button>'+
  '<button class="btn secondary" id="exportPerformance">Export memory history CSV</button></div>')+'</details>'+
  '<details class="panel full"><summary>About SensorDash</summary>'+panel('Service and storage','Local-only hardware access',
- '<div class="stat-row"><label>Web address</label><strong>127.0.0.1:8765</strong></div>'+
+ '<div class="stat-row"><label>Web address</label><strong>localhost:8765</strong></div>'+
  '<div class="stat-row"><label>Collector</label><strong>Windows Service</strong></div>'+
  '<div class="stat-row"><label>History and settings</label><strong>%ProgramData%\\SensorDash</strong></div>'+
  '<div class="stat-row"><label>Hardware controls</label><strong>Windows-authenticated requests with explicit browser confirmation</strong></div>'+
@@ -394,9 +398,20 @@ function updateLiveValues(){
  SDWorkspace.paintFanControl(S);
  SDWorkspace.paintProfiles(S);
 }
+async function probeWindowsAuth(){
+ try{
+   // Force a Windows Negotiate challenge once at dashboard startup, rather
+   // than discovering missing browser credentials only after a failed save.
+   const response=await fetch('/api/auth/me',{credentials:'same-origin'});
+   return response.ok?await response.json():{authenticated:false,status:response.status};
+ }catch(e){return {authenticated:false,error:String(e)};}
+}
 async function loadStatus(shouldRender=false){
  try{
-  S.status=await fetchJSON('/api/status');
+  const [status,auth]=await Promise.all([
+    fetchJSON('/api/status'),fetchJSON('/api/auth/status')
+  ]);
+  S.status=status;S.auth=auth;
   if(shouldRender&&S.view==='settings')render();
  }catch(e){console.warn('SensorDash service status unavailable:',e.message)}
 }
@@ -667,6 +682,7 @@ document.addEventListener('input',e=>{
    if(result)result.textContent=e.target.value+'%';
    return;
  }
+ if(S.view==='tray')SDWorkspace.paintTrayPreview(e.target);
  if(SDWorkspace.quickInput(e,S))return;
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;
  if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
@@ -687,6 +703,7 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ if(S.view==='tray')SDWorkspace.paintTrayPreview(e.target);
  if(SDWorkspace.handleCoolingInput(e,S,{render,toast}))return;if(S.view==='curves')FanControlUx.remindUnsaved(e.target);
  if(FanCommissioning.change(e,S,{render,toast}))return;
  if(e.target.id==='explorerDevice'){S.deviceFilter=e.target.value;render()}
@@ -702,13 +719,13 @@ document.addEventListener('visibilitychange',()=>{
 });
 async function bootstrap(){
  try{
-   const [cfg,frame,groups,status]=await Promise.all([
+   const [cfg,frame,groups,status,auth]=await Promise.all([
      fetchJSON('/api/settings'),fetchJSON('/api/live'),
-     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),CoolingElectrical.loadCatalog()
+     fetchJSON('/api/collection-groups'),fetchJSON('/api/status'),probeWindowsAuth(),CoolingElectrical.loadCatalog()
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
+   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
