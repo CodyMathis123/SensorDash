@@ -47,7 +47,6 @@ assert.match(source,/fields=\['timestamp','uptimeSeconds','workingSetBytes','pri
 assert.match(source,/\['desktop',data.desktop\],\['collector',data.collector\]/);
 assert.match(source,/if\(e.target.closest\('#exportPerformance'\)\)/);
 const backend=fs.readFileSync('src/SensorDash/Program.cs','utf8');
-const pipe=fs.readFileSync('src/SensorDash/ServiceBridge.cs','utf8');
 assert.match(backend,/class PerformanceSamplerWorker/);
 assert.match(backend,/GCSettings\.IsServerGC/);
 assert.match(backend,/GC\.GetConfigurationVariables\(\)/);
@@ -65,8 +64,8 @@ assert.match(source,/gcPauseTimePercent/);
 assert.match(backend,/Samples.Count > 1440/);
 assert.match(backend,/TimeSpan.FromHours\(24\)/);
 assert.match(backend,/MapGet\("\/api\/performance-history"/);
-assert.match(pipe,/"performanceHistory" => ProcessTelemetry.History\(\)/);
-assert.match(pipe,/ObserveIpcResponse/);
+assert.match(backend,/collector = ProcessTelemetry.History\(\)/);
+assert.doesNotMatch(backend,/CollectorClient.AskAsync/);
 nodes.storageHistorySeconds.value='75';
 nodes.networkHistorySeconds.value='120';assert.match(html,/In use · cooling/);assert.match(html,/All sensors · higher local archive and Pi ingest load/);
 fields.push({selector:'[data-alias]',dataset:{alias:'cpu'},value:'Edited processor'});
