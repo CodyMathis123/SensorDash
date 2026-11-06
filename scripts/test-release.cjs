@@ -41,6 +41,15 @@ const tray=fs.readFileSync('tray/SensorDashTray.cpp','utf8');
 assert.match(wxs,/Source="\$\(var.PublishDir\)\\SensorDash\.Tray\.exe"/);
 assert.match(wxs,/SensorDash\.Tray\.exe&quot;/);
 assert.match(wxs,/CloseSensorDashTray/);
+const servicing=fs.readFileSync('scripts/Test-MsiUpgrade.ps1','utf8');
+assert.doesNotMatch(servicing,/Start-Desktop|--desktop --no-browser/,
+ 'MSI upgrade tests must never launch the retired .NET desktop');
+assert.match(servicing,/\$previousTray = /,
+ 'Previous Production must be tested with its installed native tray');
+assert.match(servicing,/\$trayFixture = Start-Tray \$previousTray/,
+ 'Upgrade must exercise the running native tray process');
+assert.match(servicing,/Assert-Closed \$trayFixture/,
+ 'The installer must terminate the running tray via its CloseApplication action');
 assert.match(workflow,/Build native Win32 tray/);
 assert.match(workflow,/UseDefaultCredentials/);
 assert.match(backend,/AddWindowsService/);
