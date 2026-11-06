@@ -35,7 +35,7 @@ jobs:
       - name: Select and validate GC profile
         shell: pwsh
         env:
-          GC_PROFILE_INPUT: ${{ inputs.gc_profile || 'baseline' }}
+          GC_PROFILE_INPUT: ${{ inputs.gc_profile || (github.ref == 'refs/heads/Production' && 'baseline' || 'workstation') }}
         run: |
           $profile = $env:GC_PROFILE_INPUT
           if ($profile -notin @('baseline', 'workstation')) {
