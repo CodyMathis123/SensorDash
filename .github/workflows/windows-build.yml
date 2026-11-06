@@ -4,6 +4,13 @@ name: Windows MSI build
 on:
   push:
     branches: [Production]
+  workflow_call:
+    inputs:
+      gc_profile:
+        description: "GC profile for an explicitly requested reusable workflow build"
+        type: string
+        required: false
+        default: baseline
   workflow_dispatch:
     inputs:
       gc_profile:
@@ -28,7 +35,7 @@ jobs:
       - name: Select and validate GC profile
         shell: pwsh
         env:
-          GC_PROFILE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.gc_profile || 'baseline' }}
+          GC_PROFILE_INPUT: ${{ inputs.gc_profile || 'baseline' }}
         run: |
           $profile = $env:GC_PROFILE_INPUT
           if ($profile -notin @('baseline', 'workstation')) {
@@ -409,7 +416,7 @@ jobs:
             })
             $body = ConvertTo-Json $settings -Depth 30 -Compress
             $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put `
-              -UseDefaultCredentials -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='settings' } `
+              -UseDefaultCredentials -AllowUnencryptedAuthentication -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='settings' } `
               -ContentType 'application/json' -Body $body -TimeoutSec 8
             if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
               throw 'Cooling component role not persisted correctly'
@@ -440,7 +447,7 @@ jobs:
             # A valid local browser action changes only exporter settings; it
             # must not require a collector restart or expose token/CA contents.
             $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
-              -UseDefaultCredentials -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -UseDefaultCredentials -AllowUnencryptedAuthentication -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
               -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
               -TimeoutSec 8
             $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
