@@ -109,8 +109,13 @@ jobs:
             throw 'Missing numeric curve point editor'
           }
           if ($workspace -match 'data-curve-points=') { throw 'Comma-separated fan curve editor should be removed' }
-          if ($css -notmatch 'grid-template-areas:"index sensor label color precision remove"') {
-            throw 'Tray precision/color controls lack dedicated layout tracks'
+          if ($css -notmatch 'grid-template-areas:"index preview sensor sensor label label remove"') {
+            throw 'Tray appearance/preview controls must use dedicated layout tracks'
+          }
+          if ($workspace -notmatch 'data-tray-style' -or
+              $workspace -notmatch 'data-tray-text-mode' -or
+              $workspace -notmatch 'data-tray-text-custom') {
+            throw 'Per-tray icon style and text-color selectors missing'
           }
       - name: Check generic collection and visibility editor contracts
         shell: pwsh
