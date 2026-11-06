@@ -1,6 +1,6 @@
 'use strict';
 // Non-privileged identification and high-duty calibration assistant.
-// Never owns PWM: every timed write goes through the existing UAC-only endpoint.
+// Never owns PWM: confirmed browser requests are authorized by Windows identity and validated by the service.
 const FanCommissioning=(()=>{
  let selected='',seenKey='',activeSince=0;
  let pendingCalibration=null,calibrationNotice='';
@@ -28,6 +28,8 @@ const FanCommissioning=(()=>{
    body:JSON.stringify(payload)
   });
   if(!r.ok)throw Error((await r.text()).slice(0,150));
+  const result=await r.json().catch(()=>({}));
+  if(result.accepted===false)throw Error(result.message||'Hardware control request was rejected.');
  };
  const sensorHidden=(S,s)=>!!s&&(typeof SDWorkspace!=='undefined'&&typeof SDWorkspace.isHidden==='function'?SDWorkspace.isHidden(S,s):
   (S.settings?.hiddenSensorIds||[]).includes(s.id)||
@@ -249,7 +251,7 @@ const FanCommissioning=(()=>{
      '</tr></thead><tbody>'+sampleRows+'</tbody></table></div></div></details>'+
    '<p class="fc-setup-details">An observed 0-RPM cutoff is saved separately from stable running RPM samples; it does not establish a restart threshold. Calibration measures this fan output only; your CPU and GPU curves remain unchanged. A single RPM sensor cannot verify every fan on a shared hub.</p></div>'+
    '<details class="fc-advanced-toggle"><summary>Manual speed controls & diagnostics</summary><div>'+
-   '<p class="note">Run a 30-second test (70–100%) for unapproved channels, or temporarily override an approved fan curve. All changes require Windows elevation.</p>'+
+   '<p class="note">Run a 30-second test (70–100%) for unapproved channels, or temporarily override an approved fan curve. All changes require browser confirmation and Windows authentication.</p>'+
 
    '<div class="w-actions">'+dutyValues.map(percent=>'<button class="btn secondary" data-commissioning="test" data-duty="'+percent+
      '" '+(!isFan||!output.writable||owner?'disabled':'')+'>Test '+percent+'%</button>').join('')+
@@ -465,8 +467,8 @@ const FanCommissioning=(()=>{
    pendingCalibration={started:Date.now(),mode:identifying?'identify':'response'};
    if(byId('fcCalibrationBanner')){
     byId('fcCalibrationBanner').dataset.status='pending';
-    byId('fcCalibrationHeading').textContent='Requesting Windows approval';
-    byId('fcAutoStatus').textContent='Submitting the request to Windows. Calibration will begin only after the fan-control service accepts it.';
+    byId('fcCalibrationHeading').textContent='Submitting confirmed calibration';
+    byId('fcAutoStatus').textContent='Sending the confirmed request to the collector; thermal limits remain active.';
     byId('fcAutoProgress').textContent='No measurements recorded yet';
    }
    try{
@@ -479,16 +481,16 @@ const FanCommissioning=(()=>{
     throw error;
    }
    if(byId('fcCalibrationHeading'))
-     byId('fcCalibrationHeading').textContent='Waiting for Windows approval';
+     byId('fcCalibrationHeading').textContent='Waiting for collector acceptance';
    if(byId('fcAutoStatus'))
      byId('fcAutoStatus').textContent=
-       'Windows elevation requested. Awaiting the collector to confirm calibration started.';
+       'Calibration requested. Awaiting the collector to report measurements.';
    return;
   }
   if(action==='cancel-auto'){
    await command({action:'cancel-calibration',channelId:selected,percent:100,
      durationSeconds:30});
-   h.toast('Approve elevation to cancel and restore the prior controller.');
+   h.toast('Cancellation requested; the collector will restore the prior controller.');
    return;
   }
   if(action==='save-auto'){
@@ -547,20 +549,22 @@ const FanCommissioning=(()=>{
    const percent=Number(byId('fcOverrideDuty')?.value);
    if(!Number.isFinite(percent)||percent<10||percent>100)
     throw Error('Choose a supported PWM percentage.');
+   if(!confirm('Override '+(map.label||selected)+' at '+percent+
+     '% PWM for up to 5 minutes? No other fan controller should be active; thermal guards remain enabled.'))return;
    await command({action:'override',channelId:selected,percent,
       durationSeconds:300,confirmExclusiveOwnership:true});
-   h.toast('Approve elevation to apply this temporary 5-minute fan override.');
+   h.toast('Temporary fan override requested.');
    return;
   }
   if(action==='reset-override'){
    await command({action:'reset-override',channelId:selected,percent:100,
       durationSeconds:30});
-   h.toast('Approve elevation to restore the automatic fan curve.');
+   h.toast('Automatic fan curve restoration requested.');
    return;
   }
   if(action==='release'){
    await command({action:'release',channelId:'',durationSeconds:30,percent:100});
-   h.toast('Windows elevation requested to restore firmware control.');
+   h.toast('Firmware-default restoration requested.');
    return;
   }
   if(action==='test'){
@@ -571,10 +575,12 @@ const FanCommissioning=(()=>{
    if(!channel.writable||activeProfile(S,selected))
     throw Error('This channel is unavailable or assigned to an enabled profile.');
    if(!byId('fcExclusive')?.checked)throw Error('Confirm the fan/pump and controller safety checks.');
+   if(!confirm('Test '+(map.label||selected)+' at '+duty+
+     '% PWM for 30 seconds? Confirm it drives fans, not a pump, and observe the physical fan bank.'))return;
    await command({action:'arm',channelId:selected,curveId:'',percent:duty,
     durationSeconds:30,confirmExclusiveOwnership:true});
    seenKey='';activeSince=0;
-   h.toast('Approve Windows elevation. Observe the physical fan bank.');
+   h.toast('Temporary fan test requested. Observe the physical fan bank.');
    return;
   }
   if(action==='capture'){
