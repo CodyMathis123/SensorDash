@@ -244,6 +244,23 @@ jobs:
           Write-Host 'Published executable includes SensorDash icon'
           if (!(Test-Path dist/wwwroot/index.html)) { throw 'Missing dashboard' }
           Copy-Item README.md dist/README.txt
+      - name: Build native Win32 tray (MSVC, no .NET runtime)
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (!(Test-Path $vswhere)) { throw 'Visual Studio build tools were not found' }
+          $install = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or !$install) { throw 'MSVC x64 tools are missing' }
+          $vcvars = Join-Path $install 'VC/Auxiliary/Build/vcvars64.bat'
+          if (!(Test-Path $vcvars)) { throw 'MSVC environment script is missing' }
+          $command = 'call "' + $vcvars + '" && rc /nologo /fo tray\\SensorDashTray.res tray\\SensorDashTray.rc && cl /nologo /std:c++17 /O2 /EHsc /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /Fe:dist\\SensorDash.Tray.exe tray\\SensorDashTray.cpp tray\\SensorDashTray.res user32.lib shell32.lib gdi32.lib winhttp.lib'
+          & cmd.exe /d /c $command
+          if ($LASTEXITCODE -ne 0) { throw 'Native Win32 tray build failed' }
+          if (!(Test-Path dist/SensorDash.Tray.exe)) { throw 'Native tray executable missing' }
+          Add-Type -AssemblyName System.Drawing
+          $trayIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/SensorDash.Tray.exe).Path)
+          if (!$trayIcon -or $trayIcon.Width -lt 16) { throw 'Native tray icon not embedded' }
+          $trayIcon.Dispose()
       - name: Build tiny advertised-shortcut icon carrier
         run: dotnet build tools/SensorDashIconCarrier/SensorDashIconCarrier.csproj -c Release -r win-x64 -o installer-assets
       - name: Verify branded shortcut icon resource
@@ -285,11 +302,12 @@ jobs:
           $standaloneDir = Join-Path $env:RUNNER_TEMP 'SensorDashStandalone'
           New-Item -ItemType Directory -Path $standaloneDir -Force | Out-Null
           Copy-Item 'dist/SensorDash.exe' (Join-Path $standaloneDir 'SensorDash.exe')
+          Copy-Item 'dist/SensorDash.Tray.exe' (Join-Path $standaloneDir 'SensorDash.Tray.exe')
           # Exercise both components, including named-pipe service communication,
           # without installing a service on the CI runner.
           $svc = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--collector' -WorkingDirectory $env:RUNNER_TEMP -PassThru
           Start-Sleep -Seconds 3
-          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.exe') -ArgumentList '--no-browser' -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          $p = Start-Process -FilePath (Join-Path $standaloneDir 'SensorDash.Tray.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru
           try {
             $ready = $false
             for ($i = 0; $i -lt 40; $i++) {
@@ -300,13 +318,16 @@ jobs:
               } catch { }
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
+            if ($status.mode -ne 'service') { throw 'The local dashboard must run in the collector service' }
+            $trayState = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/tray-state' -UseBasicParsing
+            if ($trayState.Content -notmatch '^status\\t') { throw 'Native tray status protocol unavailable' }
             if ($env:SENSORDASH_GC_PROFILE -eq 'workstation') {
               if ($status.process.serverGc -ne $false) {
-                throw 'Experimental desktop process is not using Workstation GC.'
+                throw 'Experimental service-hosted web process is not using Workstation GC.'
               }
               $diagnostics = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/diagnostics' -TimeoutSec 8
               if ($diagnostics.process.serverGc -ne $false) {
-                throw 'Experimental collector process is not using Workstation GC.'
+                throw 'Service GC diagnostics disagree with the unified service status.'
               }
               Write-Host 'PASS: both processes report Workstation GC in the actual published executable.'
             }
@@ -346,7 +367,7 @@ jobs:
           $denied = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/fan-control/authorize' -Method Post `
             -ContentType 'application/json' -Body '{"action":"arm","channelId":"fake","percent":100,"durationSeconds":60,"confirmExclusiveOwnership":true}' `
             -SkipHttpErrorCheck
-          if ($denied.StatusCode -ne 403) {
+          if ($denied.StatusCode -notin @(401,403)) {
             throw 'Cross-origin or originless write requests must be rejected before UAC'
           }
             if ($script.Content -match 'chart-hover-overlay' -or
@@ -383,7 +404,9 @@ jobs:
               points=@(@{temperature=30;percent=25},@{temperature=75;percent=100})
             })
             $body = ConvertTo-Json $settings -Depth 30 -Compress
-            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put -ContentType 'application/json' -Body $body -TimeoutSec 8
+            $saved = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/settings' -Method Put `
+              -UseDefaultCredentials -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='settings' } `
+              -ContentType 'application/json' -Body $body -TimeoutSec 8
             if ($saved.coolingSystems[0].components[0].kind -ne 'fan-group') {
               throw 'Cooling component role not persisted correctly'
             }
@@ -413,7 +436,7 @@ jobs:
             # A valid local browser action changes only exporter settings; it
             # must not require a collector restart or expose token/CA contents.
             $allowedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -Method Put `
-              -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
+              -UseDefaultCredentials -Headers @{ Origin='http://127.0.0.1:8765'; 'X-SensorDash-Action'='telemetry-config' } `
               -ContentType 'application/json' -Body '{"enabled":false,"endpoint":"https://192.168.1.43:8429/ingest","hostLabel":"ci-desktop"}' `
               -TimeoutSec 8
             $confirmedTelemetry = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/telemetry-config' -TimeoutSec 8
@@ -434,7 +457,7 @@ jobs:
             }
             Write-Host 'Verified cooling systems, tray icons, curve simulation and redacted telemetry settings'
 
-            Write-Host 'Verified desktop + collector named pipe + browser shell'
+            Write-Host 'Verified SYSTEM-hostable browser API, native tray and Windows-authenticated configuration writes'
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $svc.Id -Force -ErrorAction SilentlyContinue
