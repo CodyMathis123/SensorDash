@@ -57,6 +57,10 @@ public sealed class TrayWidgetConfig
     public string SensorId { get; set; } = "";
     public string Label { get; set; } = "";
     public string Color { get; set; } = "#62d5ce";
+    // Existing saved tray widgets without a Style retain the original accent bar.
+    public string Style { get; set; } = "accent-bar";
+    // "auto" chooses readable contrast; explicit hex supports per-icon overrides.
+    public string TextColor { get; set; } = "auto";
     public int Decimals { get; set; } = 0;
 }
 // Generic physical-output profile. Drafts are editable via the normal settings
@@ -209,6 +213,8 @@ public static class WorkspaceLogic
                 w.SensorId=Short(w.SensorId,256);
                 w.Label=Short(w.Label,40);
                 if (!System.Text.RegularExpressions.Regex.IsMatch(w.Color ?? "", "^#[0-9a-fA-F]{6}$")) w.Color="#62d5ce";
+                if (w.Style is not ("accent-bar" or "solid" or "outline")) w.Style="accent-bar";
+                if (w.TextColor != "auto" && !System.Text.RegularExpressions.Regex.IsMatch(w.TextColor ?? "", "^#[0-9a-fA-F]{6}$")) w.TextColor="auto";
                 w.Decimals=Math.Clamp(w.Decimals,0,1);
                 return w;
             }).Where(w=>w.Id.Length>0 && w.SensorId.Length>0).DistinctBy(w=>w.Id).ToList();
