@@ -226,6 +226,8 @@ async function saveTelemetryConfig(){
    method:'PUT',headers:{'Content-Type':'application/json','X-SensorDash-Action':'telemetry-config'},
    body:JSON.stringify(payload)
   });
+  if(r.status===401)throw new Error('Windows authentication required. Open Settings and connect your Windows account.');
+  if(r.status===403)throw new Error('Request denied. Open SensorDash at http://localhost:8765/.');
   if(!r.ok)throw new Error('HTTP '+r.status+'. Verify HTTPS URL and credentials.');
   S.telemetryConfig=await r.json();
   toast('Exporter configuration saved. Outbound HTTPS reconnects automatically.');
@@ -408,10 +410,10 @@ async function probeWindowsAuth(){
 }
 async function loadStatus(shouldRender=false){
  try{
-  const [status,auth]=await Promise.all([
-    fetchJSON('/api/status'),fetchJSON('/api/auth/status')
-  ]);
-  S.status=status;S.auth=auth;
+  S.status=await fetchJSON('/api/status');
+  // Authentication is challenged explicitly at bootstrap or when the
+  // operator chooses Connect. Anonymous polling on a fresh connection
+  // cannot reliably identify an already authenticated browser session.
   if(shouldRender&&S.view==='settings')render();
  }catch(e){console.warn('SensorDash service status unavailable:',e.message)}
 }
