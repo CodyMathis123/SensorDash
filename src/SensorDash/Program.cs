@@ -120,6 +120,7 @@ app.MapGet("/api/settings", (DashboardState state) => Results.Ok(state.Settings)
 app.MapGet("/api/collection-groups", () => Results.Ok(HardwareCollection.Groups));
 app.MapPut("/api/settings", async (HttpContext ctx, DashboardState state) =>
 {
+    if (!ValidBrowserMutation(ctx, "settings")) return Results.StatusCode(403);
     try
     {
         var updated = await JsonSerializer.DeserializeAsync<DashboardSettings>(
@@ -129,45 +130,65 @@ app.MapPut("/api/settings", async (HttpContext ctx, DashboardState state) =>
         return Results.Ok(state.Settings);
     }
     catch (JsonException) { return Results.BadRequest("Invalid settings JSON."); }
-});
+}).RequireAuthorization();
 // Configuration changes are local to the Windows collector. No HTTP endpoint
 // ever returns the bearer token or certificate PEM. Never trust cross-origin
 // pages with service-owned secrets.
 app.MapGet("/api/telemetry-config", () => Results.Ok(TelemetryConfiguration.Snapshot()));
 app.MapPut("/api/telemetry-config", async (HttpContext ctx) =>
 {
-    if (ctx.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
-        ctx.Request.Headers["X-SensorDash-Action"].ToString() != "telemetry-config" ||
-        ctx.Request.ContentType is not string mime ||
-        !mime.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
-        return Results.StatusCode(403);
-    if (ctx.Request.ContentLength is > 24_576)
-        return Results.StatusCode(413);
+    if (!ValidBrowserMutation(ctx, "telemetry-config")) return Results.StatusCode(403);
+    if (ctx.Request.ContentLength is > 24_576) return Results.StatusCode(413);
     try
     {
         var update = await JsonSerializer.DeserializeAsync<TelemetryConfigurationUpdate>(
             ctx.Request.Body, JsonSerializerOptions.Web, ctx.RequestAborted);
-        return update is null
-            ? Results.BadRequest("Invalid telemetry configuration.")
-            : await ProxyAsync(new PipeCommand("saveTelemetrySettings", Telemetry: update), ctx.RequestAborted);
+        return update is null ? Results.BadRequest("Invalid telemetry configuration.")
+            : Results.Ok(TelemetryConfiguration.Save(update));
     }
     catch (JsonException) { return Results.BadRequest("Invalid telemetry configuration JSON."); }
-});
+}).RequireAuthorization();
 app.MapGet("/api/events", (HistoryStore db) => Results.Ok(db.ReadEvents()));
 app.MapGet("/api/simulation", (SimulationState simulation) =>
     Results.Ok(new { mode = "simulation-only", frequencyHz = 1, results = simulation.Latest }));
 app.MapGet("/api/fan-control", (FanControlRuntime control, DashboardState state) =>
     Results.Ok(control.Snapshot(state.Settings)));
 app.MapGet("/api/fan-control/debug", (FanControlRuntime control) => Results.Ok(control.DebugLog()));
-app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
+// Minimal, read-only local protocol for the native tray. No web framework,
+// GC, hardware polling or full sensor-frame deserialization in the tray.
+app.MapGet("/api/tray-state", (DashboardState state) =>
 {
-    // Browser mutations require same-origin JSON with a non-simple custom
-    // header. Cross-origin pages cannot satisfy this through ordinary forms.
-    if(context.Request.Headers.Origin.ToString() != "http://127.0.0.1:8765" ||
-       context.Request.Headers["X-SensorDash-Action"].ToString() != "fan-control" ||
-       context.Request.ContentType is not string mime ||
-       !mime.StartsWith("application/json",StringComparison.OrdinalIgnoreCase))
-        return Results.StatusCode(403);
+    var frame = state.Latest;
+    var sensors = frame?.Sensors.ToDictionary(s => s.Id) ?? new Dictionary<string, SensorReading>();
+    var result = new System.Text.StringBuilder();
+    var online = frame is not null && string.IsNullOrEmpty(frame.Error);
+    result.Append("status\t").Append(online ? "online" : "offline").Append('\n');
+    static string Safe(string? text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+    foreach (var config in state.Settings.TrayWidgets.Take(6))
+    {
+        if (string.IsNullOrEmpty(config.SensorId)) continue;
+        sensors.TryGetValue(config.SensorId, out var sensor);
+        var decimals = Math.Clamp(config.Decimals, 0, 2);
+        var number = sensor?.Value is double value && double.IsFinite(value)
+            ? value.ToString("F" + decimals, System.Globalization.CultureInfo.InvariantCulture)
+            : "--";
+        var unit = sensor?.Type switch
+        {
+            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" => "%",
+            "Power" => "W", "Voltage" => "V", "Clock" => "MHz", _ => ""
+        };
+        var name = Safe(string.IsNullOrWhiteSpace(config.Label) ? sensor?.Name ?? config.SensorId : config.Label);
+        var color = System.Text.RegularExpressions.Regex.IsMatch(config.Color ?? "",
+            "^#[0-9a-fA-F]{6}$") ? config.Color : "#24334A";
+        result.Append("widget\t").Append(name).Append('\t').Append(number)
+            .Append('\t').Append(unit).Append('\t').Append(color).Append('\n');
+    }
+    return Results.Text(result.ToString(), "text/plain; charset=utf-8");
+});
+app.MapPost("/api/fan-control/authorize", async (HttpContext context, FanControlRuntime control,
+    DashboardState state, HistoryStore db) =>
+{
+    if (!ValidBrowserMutation(context, "fan-control")) return Results.StatusCode(403);
     FanCommand? command;
     try
     {
@@ -193,23 +214,19 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context) =>
        ((command.Action=="arm" || command.Action=="start-profile" || command.Action=="override" || command.Action=="calibrate") &&
            !command.ConfirmExclusiveOwnership) || command.ProfileId.Length>80)
         return Results.BadRequest("Invalid or unconfirmed control request.");
-    try
+    // The authenticated Windows session authorizes this request. The service
+    // already owns the hardware; it must not create a UAC helper in Session 0.
+    var result = control.Request(command, state.Settings);
+    if (CoolingEventRecorder.Accepted(result))
     {
-        var process=new ProcessStartInfo(Environment.ProcessPath ??
-            throw new InvalidOperationException("Cannot locate SensorDash executable"))
-        {
-            UseShellExecute=true,Verb="runas"
-        };
-        process.ArgumentList.Add("--fan-admin-command");
-        process.ArgumentList.Add(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(command,JsonSerializerOptions.Web)));
-        Process.Start(process);
-        return Results.Accepted(value:new { message="Windows elevation requested. Check live status for the actual result." });
+        var entry = CoolingEventRecorder.Describe(command);
+        if (entry is not null)
+            try { db.Event("info", entry.Sensor, entry.Message, null); }
+            catch (Exception) { /* An audit write must not block safe control. */ }
     }
-    catch(System.ComponentModel.Win32Exception)
-    {
-        return Results.Problem("Elevation was cancelled or unavailable.",statusCode:403);
-    }
-});
+    return Results.Ok(result);
+}).RequireAuthorization();
+
 object Diagnostics(DashboardState state)
 {
     var frame = state.Latest;
