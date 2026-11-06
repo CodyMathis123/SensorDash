@@ -39,7 +39,7 @@ dotnet publish src/SensorDash/SensorDash.csproj -c Release -r win-x64 -o dist
 
 The manually requested GitHub Actions Windows workflow runs JavaScript tests, C# self-tests, MSVC native tray compilation, service-hosted HTTP/Windows-auth smoke tests, MSI packaging, and installer upgrade/repair/downgrade-rejection tests against a previous Production artifact. Use the feature-branch MSI only after CI has passed and a supervised hardware-control validation window is available. Keep your existing approved curves, service data and last working installer until radiator/NVMe/pump parity has been proven.
 
-The loopback UI is `http://127.0.0.1:8765`, hosted by the SYSTEM collector service. Browser mutations use Windows Negotiate authentication and action-specific, same-origin JSON checks. Fan-control changes also require unmistakable in-browser confirmation and are checked again by the collector. No UAC helper is launched for each change. The collector keeps working when the tray exits, the user signs out, or the Pi disappears.
+The browser UI is `http://localhost:8765`, hosted by the SYSTEM collector service and bound only to IPv4 loopback (`127.0.0.1`). Old bookmarks to `http://127.0.0.1:8765/` redirect to the canonical browser URL to enable integrated Windows sign-in by default in more browsers. Browser mutations use Windows Negotiate authentication and action-specific, same-origin JSON checks. Fan-control changes also require unmistakable in-browser confirmation and are checked again by the collector. No UAC helper is launched for each change. The collector keeps working when the tray exits, the user signs out, or the Pi disappears.
 
 ## Experimental native-tray/service layout
 
@@ -61,6 +61,23 @@ a rollback source; newer MSI product versions reject direct downgrades, so
 returning to an older MSI requires a planned uninstall/reinstall (with settings
 preservation confirmed separately). Do not replace the working cooling service
 with an unvalidated feature-branch MSI.
+
+### Native tray appearance and Windows login
+
+Tray icons can independently use the original dark badge with an accent bar
+(default for existing configurations), a solid accent-color background, or an
+accent outline. Each badge supports automatic high-contrast text color
+(especially useful for yellow solid backgrounds), white, dark, or a custom
+font color. Values and all appearance choices remain in the existing
+`%ProgramData%\\SensorDash` workspace settings.
+
+Authenticated browser edits use Windows Negotiate. Unlike PowerShell's
+explicit `-UseDefaultCredentials`, browsers only automatically respond to
+integrated-auth challenges for allowed local/intranet hosts. Use the
+canonical `localhost` address, and see **Settings → Windows authorization**
+to verify the actual Windows identity or select **Connect Windows account**
+if not authenticated. Authentication never elevates the browser process;
+the SYSTEM collector still validates every hardware command and safety guard.
 
 ## Cooling control and sleep/resume
 
