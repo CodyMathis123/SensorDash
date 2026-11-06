@@ -310,7 +310,7 @@ function settingsView(){
  '<option value="'+esc(s.id)+'">'+esc(label(s)+' ('+s.type+')')+'</option>').join('')+
  '</select><button type="button" class="btn secondary" id="addThreshold" '+(!thresholdChoices.length?'disabled':'')+'>+ Threshold</button></div>')+
  telemetryConfigPanel()+
-  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only collector and browser memory',
+  '<details class="panel full"><summary>Performance diagnostics</summary>'+panel('Performance diagnostics','Read-only service memory',
 
  [['Service (web + collector)',S.status?.process]].map(([name,p])=>
   '<h3 class="sensor-used-title">'+esc(name)+'</h3>'+
@@ -332,8 +332,8 @@ function settingsView(){
   '<div class="stat-row"><label>Process threads</label><strong>'+(p?.threadCount??'—')+'</strong></div>'+
   '<div class="stat-row"><label>Handles</label><strong>'+(p?.handleCount??'—')+'</strong></div>'+
   '<div class="stat-row"><label>CPU · one logical core</label><strong>'+perfNumber(p?.cpuPercentOneCore,'%',2)+'</strong></div>'+
-  (name.startsWith('Service')?'<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
-    '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'+
+  '<div class="stat-row"><label>Collection cycle · mean</label><strong>'+perfNumber(p?.collectorCycleMeanMs,' ms',2)+'</strong></div>'+
+    '<div class="stat-row"><label>Hardware scan · mean</label><strong>'+perfNumber(p?.hardwareScanMeanMs,' ms',2)+'</strong></div>'
  ).join('')+
  '<h3 class="sensor-used-title">Historical analysis</h3>'+
   '<p class="note">Grafana owns long-term charts and archive retention. Windows retains the durable export buffer.</p>'+
