@@ -12,9 +12,8 @@
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <!-- Explicit opt-in memory experiments only; baseline release is unchanged. -->
-    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'workstation'">false</ServerGarbageCollection>
-    <ServerGarbageCollection Condition="'$(SensorDashGcMode)' == 'server'">true</ServerGarbageCollection>
+    <!-- One supported .NET GC mode for both service and local app processes. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
   <Target Name="GenerateSensorDashApplicationIcon" BeforeTargets="PrepareForBuild">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Generate-SensorDashIcon.ps1&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\Assets\SensorDash.ico&quot;" />
