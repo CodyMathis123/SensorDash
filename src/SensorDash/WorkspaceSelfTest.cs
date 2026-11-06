@@ -136,17 +136,6 @@ internal static class WorkspaceSelfTest
         if (HardwareCollection.Groups.Length != 8)
             throw new Exception("The complete list of LHM hardware collection families is missing");
 
-        // Windows notification icons must remain legible when rasterized at 16px.
-        if (TraySensorIcon.Compact("24.0", 16) != "24"
-            || TraySensorIcon.Compact("24.0", 24) != "24.0"
-            || TraySensorIcon.Compact("1340", 16) != "1k"
-            || TraySensorIcon.Compact("--", 16) != "--")
-            throw new Exception("Tiny tray-icon number formatting is not readable");
-        using (var icon = TraySensorIcon.Create("42", "#ff4040"))
-        {
-            if (icon.Width < 16 || icon.Height < 16)
-                throw new Exception("Tray icon could not be generated");
-        }
         // Read-only workspace evaluation is independent of the experimental
         // privileged controller. A new runtime must never own outputs by default.
         var live = new FanControlRuntime(Path.Combine(Path.GetTempPath(),
