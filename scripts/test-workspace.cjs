@@ -134,7 +134,11 @@ const h={
  assert.ok(explorerHtml.includes('data-usage-component="probe-1"'));
  assert.ok(explorerHtml.includes('Cooling: Workstation loop / Water probes'));
  assert.ok(explorerHtml.includes('data-select="coolant"'));
- assert.ok(css.includes('grid-template-areas:"index sensor label color precision remove"'));
+ assert.ok(css.includes('grid-template-areas:"index preview sensor sensor label label remove"'),
+  'Tray appearance editor must expose preview, style, accent and text color on dedicated grid tracks');
+ assert.ok(script.includes('data-tray-style')&&script.includes('data-tray-text-mode')&&
+  script.includes('data-tray-text-custom')&&script.includes('paintTrayPreview'),
+  'Every tray widget must independently configure style and text color');
  assert.ok(script.includes('data-curve-temperature')&&script.includes('data-curve-percentage'));
  assert.ok(!script.includes('data-curve-points='));
 
