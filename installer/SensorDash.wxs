@@ -14,7 +14,14 @@
          StopServices and can terminate only SensorDash.exe if it does not
          respond within ten seconds. The collector service is handled by
          ServiceControl, not by forcibly killing that service. -->
+    <!-- Close both the legacy WinForms desktop on upgrade and the new native
+         user-session tray. The collector is stopped by ServiceControl only. -->
     <util:CloseApplication Id="CloseSensorDash" Target="SensorDash.exe"
+                           CloseMessage="yes" EndSessionMessage="yes"
+                           ElevatedCloseMessage="yes" ElevatedEndSessionMessage="yes"
+                           PromptToContinue="no" Timeout="10"
+                           RebootPrompt="no" TerminateProcess="0" />
+    <util:CloseApplication Id="CloseSensorDashTray" Target="SensorDash.Tray.exe"
                            CloseMessage="yes" EndSessionMessage="yes"
                            ElevatedCloseMessage="yes" ElevatedEndSessionMessage="yes"
                            PromptToContinue="no" Timeout="10"
@@ -41,12 +48,15 @@
           <ServiceControl Id="ControlSensorDashCollector" Name="SensorDashCollector"
                           Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
+        <Component Id="NativeTrayExecutable" Guid="*">
+          <File Id="NativeTrayExe" Source="$(var.PublishDir)\SensorDash.Tray.exe" KeyPath="yes" />
+        </Component>
         <Component Id="TrayAutoStart" Guid="*">
           <RegistryValue Root="HKLM"
                          Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
                          Name="SensorDash"
                          Type="string"
-                         Value="&quot;[INSTALLFOLDER]SensorDash.exe&quot; --desktop --no-browser"
+                         Value="&quot;[INSTALLFOLDER]SensorDash.Tray.exe&quot;"
                          KeyPath="yes" />
         </Component>
       </Directory>
@@ -54,6 +64,7 @@
 
     <Feature Id="Complete" Title="SensorDash" Level="1">
       <ComponentRef Id="SensorDashExecutable" />
+      <ComponentRef Id="NativeTrayExecutable" />
       <ComponentRef Id="TrayAutoStart" />
     </Feature>
   </Package>
