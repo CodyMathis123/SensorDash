@@ -1,2 +1,0 @@
-Explicit validation request 004
-Scope: Ensure Kestrel binds localhost IPv4 and IPv6, Windows authentication is exercised in local HTTP smoke test, and tray icon appearance settings persist in service and native tray. Also validate MSI servicing.
