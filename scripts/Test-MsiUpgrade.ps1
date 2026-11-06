@@ -124,6 +124,8 @@ if (!$startup.SensorDash -or $startup.SensorDash -notmatch 'SensorDash\.Tray\.ex
 }
 $startLink = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'SensorDash.lnk'
 if (!(Test-Path $startLink)) { throw 'Missing all-users Start Menu shortcut.' }
+$trayLink = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'SensorDash Tray.lnk'
+if (!(Test-Path $trayLink)) { throw 'Native tray Start Menu shortcut missing.' }
 $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startLink)
 Write-Host "Installed shortcut icon: $($shortcut.IconLocation)"
 $desktop = Start-Tray $tray
@@ -132,6 +134,7 @@ Assert-Closed $desktop
 if (Get-Service SensorDashCollector -ErrorAction SilentlyContinue) { throw 'Uninstall left collector service registered.' }
 if (Get-ItemProperty -Path $startupKey -Name SensorDash -ErrorAction SilentlyContinue) { throw 'Uninstall left tray startup entry.' }
 if (Test-Path $startLink) { throw 'Uninstall left Start Menu shortcut.' }
+if (Test-Path $trayLink) { throw 'Uninstall left native tray shortcut.' }
 if (Test-Path $exe) { throw 'Uninstall left installed executable.' }
 if (Test-Path $tray) { throw 'Uninstall left native tray executable.' }
 if ((Products).Count -ne 0) { throw 'Uninstall left product registrations.' }
