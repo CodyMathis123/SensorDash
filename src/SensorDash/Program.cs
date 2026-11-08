@@ -639,6 +639,12 @@ public sealed partial class HistoryStore {
         if (sensor.Type == "Load" &&
             !(sensor.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
               sensor.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase))) return true;
+        // A handful of GPU memory-occupancy counters complements the already
+        // retained GPU core/memory activity (%). Do not archive all Data sensors.
+        // The raw LHM GPU Data values are bytes; no unit conversion occurs here.
+        if (sensor.Type == "Data" && sensor.DeviceType is "GpuAmd" or "GpuNvidia" or "GpuIntel" &&
+            sensor.Name is "GPU Memory Used" or "GPU Memory Total" or
+               "D3D Dedicated Memory Used") return true;
         return sensor.Type == "Clock" &&
             (sensor.Name.Contains("Average") || sensor.Name is "GPU Core" or "GPU Memory");
     }
