@@ -26,7 +26,7 @@ const SDWorkspace = (() => {
   'coolant-probe':['Temperature'],
   'case-air':['Temperature'],
   'room-ambient':['Temperature'],
-  'flow-meter':['Flow']
+  'flow-meter':['Flow','Temperature','Conductivity','Level','Voltage','Factor','Power']
  };
  // Fitting/physical parts aren't sensor types: descriptions remain optional.
  const suitable=(kind,s)=>!typesByComponent[kind]||typesByComponent[kind].includes(s.type);
