@@ -12,6 +12,8 @@ public sealed class PersistentFanProfiles
     private readonly FanPwmWriter _writer = new();
     private readonly FanPwmFeedbackMonitor _feedback = new();
     private readonly Queue<FanRecoveryEvent> _pendingEvents = new();
+    // In-memory transition tracking keeps telemetry events bounded to state changes.
+    private readonly Dictionary<string,string> _guardStates = new(StringComparer.Ordinal);
     private FanAutoCalibration? _calibration;
     private bool _calibrationFinalized=true;
     private bool _standaloneCalibrationOwned;
@@ -422,7 +424,7 @@ public sealed class PersistentFanProfiles
             outputResets=[..outputResets,.._pendingOutputResets];
             _pendingOutputResets.Clear();
         }
-        foreach(var id in profileResets)_planner.Reset(id);
+        foreach(var id in profileResets) { _planner.Reset(id); lock(_sync)_guardStates.Remove(id); }
         _writer.ResetProfile(outputResets);
         foreach(var id in releases)
             if(!_writer.Release(id,controls))
@@ -432,6 +434,27 @@ public sealed class PersistentFanProfiles
         foreach(var profile in profiles)
         {
             var demand=_planner.Evaluate(profile,frame,now);
+            var safetyState=demand.Failsafe?"failsafe":demand.GuardActive?"guard":
+                demand.GuardWarning?"warning":"normal";
+            lock(_sync)
+            {
+                _guardStates.TryGetValue(profile.Id,out var oldSafety);
+                if(oldSafety!=safetyState)
+                {
+                    if(safetyState!="normal")
+                    {
+                        _pendingEvents.Enqueue(new FanRecoveryEvent("warning",
+                            "fan:profile:"+profile.Id,demand.Reason,null));
+                        _trace?.Event("THERMAL-GUARD",
+                            "profile="+profile.Id+" "+demand.Reason,now);
+                    }
+                    else if(oldSafety is "failsafe" or "guard" or "warning")
+                        _pendingEvents.Enqueue(new FanRecoveryEvent("info",
+                            "fan:profile:"+profile.Id,
+                            "Cooling safety condition cleared; normal curve restored.",null));
+                    _guardStates[profile.Id]=safetyState;
+                }
+            }
             var problems=new List<string>();
             foreach(var id in profile.ChannelIds)
             {
@@ -657,6 +680,7 @@ public sealed class PersistentFanProfiles
     {
         _writer.ReleaseAll(controls);
         _planner.Clear();
+        lock(_sync)_guardStates.Clear();
         lock(_sync)
         {
             _latest=[];
