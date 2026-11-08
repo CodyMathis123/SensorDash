@@ -50,7 +50,7 @@ const CoolingInsights=(()=>{
   const flow=unique([...roleSensors('flow-meter','flows'),...roleSensors('pump','flows'),...nextBy('Flow','Flow')]);
   const fanRPM=roleSensors('fan-group','fans');
   const pumpRPM=roleSensors('pump','fans');
-  const heatReadings=heats.flatMap(p=>[...p.temperatures.slice(0,2),...p.powers.slice(0,1)]);
+  const heatTiles=heats.map(p=>tile(p.part.name,[...p.temperatures.slice(0,2),...p.powers.slice(0,1)],'Assign CPU/GPU readings'));
   const conductivity=nextBy('Conductivity','Conductivity');
   const air=unique([...roleSensors('case-air','temperatures'),...roleSensors('room-ambient','temperatures')])
    .filter(s=>Number.isFinite(s.value));
@@ -58,9 +58,9 @@ const CoolingInsights=(()=>{
   const cards=[
    tile('Coolant temperature',coolant,'Assign a coolant sensor'),
    tile('Flow rate',flow,'Assign a flow meter'),
-   tile('Radiator fan RPM',fanRPM,'Assign radiator tachometer'),
+   tile('Radiator fans · RPM',fanRPM,'Assign radiator tachometer'),
    tile('Pump RPM',pumpRPM,'Assign pump tachometer'),
-   ...(heatReadings.length?[tile('Heat sources',heatReadings,'Assign CPU/GPU sources')]:[]),
+   ...heatTiles,
    ...(conductivity.length?[tile('Coolant conductivity',conductivity,'Requires NEXT data')]:[]),
    ...(air.length?[tile('Air temperatures',air,'External probe not connected')]:[]),
    ...(alarms.length?[tile('Active NEXT alarm',alarms,'')]:[])
