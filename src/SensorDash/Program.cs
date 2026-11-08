@@ -200,7 +200,8 @@ app.MapGet("/api/tray-state", (DashboardState state) =>
             : "--";
         var unit = sensor?.Type switch
         {
-            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" => "%",
+            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" or "Level" => "%",
+            "Flow" => "L/h", "Conductivity" => "µS/cm",
             "Power" => "W", "Voltage" => "V", "Clock" => "MHz", _ => ""
         };
         var name = Safe(string.IsNullOrWhiteSpace(config.Label) ? sensor?.Name ?? config.SensorId : config.Label);
