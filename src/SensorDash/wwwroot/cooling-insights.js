@@ -37,10 +37,9 @@ const CoolingInsights=(()=>{
   const heats=byRole('heat-source'),fans=byRole('fan-group'),pumps=byRole('pump');
   // Discovery-based NEXT cards do not depend on the user having created
   // an explicit cooling component. Physical IDs are read from the live frame.
-  const next=(S.sensors||[]).filter(s=>/high flow next/i.test(s.device||''))
+  const next=(S.sensors||[]).filter(s=>/high flow next/i.test(s.device||'') && !SDWorkspace.isHidden(S,s))
     .map(s=>({...s,name:S.settings?.aliases?.[s.id]||s.name}));
-  const nextCirculation=next.filter(s=>s.type==='Flow'||
-    (s.type==='Temperature'&&s.name==='Water Temperature'));
+  const nextCirculation=next.filter(s=>s.type==='Flow'||s.type==='Temperature');
   const nextChemistry=next.filter(s=>s.type==='Conductivity'||s.type==='Level');
   const nextDiagnostics=next.filter(s=>s.type==='Voltage'||s.type==='Factor');
   const makeComponents=(groups)=>groups.map(p=>tile(p.part.name,
