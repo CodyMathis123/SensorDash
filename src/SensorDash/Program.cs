@@ -629,7 +629,12 @@ public sealed partial class HistoryStore {
         if (config.HistoryMode == "in-use")
             return (used ?? WorkspaceLogic.ReferencedSensorIds(config)).Contains(sensor.Id);
         if (config.PinnedSensors.Contains(sensor.Id)) return true;
-        if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput") return true;
+        // External liquid-cooling controllers expose flow, conductivity, coolant
+        // quality and alarm states that must survive to the history/export spool.
+        // Keep these types for controller devices without pinning USB sensor IDs.
+        if (sensor.DeviceType is "Controller" or "Cooler" or "EmbeddedController" &&
+            sensor.Type is "Flow" or "Conductivity" or "Level" or "Factor" or "Voltage") return true;
+        if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput" or "Flow" or "Conductivity") return true;
         if (sensor.Type == "Load" &&
             !(sensor.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
               sensor.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase))) return true;
