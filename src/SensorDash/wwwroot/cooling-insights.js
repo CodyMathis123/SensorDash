@@ -8,7 +8,7 @@ const CoolingInsights=(()=>{
   {id:'case-air',name:'Case air probe',hint:'Air temperature inside the PC case, not room ambient'},
   {id:'room-ambient',name:'Room ambient probe',hint:'Room air temperature, not case air or coolant'}
  ];
- const unit={Temperature:'°C',Power:'W',Fan:'RPM',Control:'%',Flow:'L/h'};
+ const unit={Temperature:'°C',Power:'W',Fan:'RPM',Control:'%',Flow:'L/h',Conductivity:'µS/cm',Level:'%',Voltage:'V',Factor:''};
  const fmt=(s)=>Number.isFinite(s?.value)?Number(s.value).toLocaleString(undefined,{
   maximumFractionDigits:s.type==='Fan'?0:1})+' '+(unit[s.type]||''):'—';
  const sensor=(S,id)=>S.byId?.get(id);
@@ -18,7 +18,8 @@ const CoolingInsights=(()=>{
  const sections=(S,sys)=> (sys.components||[]).map(part=>({
   part, temperatures:assigned(S,part,'Temperature'),powers:assigned(S,part,'Power'),
   fans:assigned(S,part,'Fan'),controls:assigned(S,part,'Control'),
-  flows:assigned(S,part,'Flow')
+  flows:assigned(S,part,'Flow'),conductivity:assigned(S,part,'Conductivity'),
+  quality:assigned(S,part,'Level'),alarms:assigned(S,part,'Factor')
  }));
  const names=(arr)=>arr.map(s=>esc(s.name)).join(', ');
  const tile=(title,readings,empty)=>{
@@ -34,6 +35,14 @@ const CoolingInsights=(()=>{
  const overview=(S,sys)=>{
   const parts=sections(S,sys),byRole=kind=>parts.filter(p=>p.part.kind===kind);
   const heats=byRole('heat-source'),fans=byRole('fan-group'),pumps=byRole('pump');
+  // Discovery-based NEXT cards do not depend on the user having created
+  // an explicit cooling component. Physical IDs are read from the live frame.
+  const next=(S.sensors||[]).filter(s=>/high flow next/i.test(s.device||''))
+    .map(s=>({...s,name:S.settings?.aliases?.[s.id]||s.name}));
+  const nextCirculation=next.filter(s=>s.type==='Flow'||
+    (s.type==='Temperature'&&s.name==='Water Temperature'));
+  const nextChemistry=next.filter(s=>s.type==='Conductivity'||s.type==='Level');
+  const nextDiagnostics=next.filter(s=>s.type==='Voltage'||s.type==='Factor');
   const makeComponents=(groups)=>groups.map(p=>tile(p.part.name,
    [...p.temperatures.slice(0,3),...p.powers.slice(0,2),...p.fans.slice(0,1),...p.flows.slice(0,1)],
    'Assign a compatible sensor')).join('');
@@ -49,6 +58,9 @@ const CoolingInsights=(()=>{
       'Optional sensor inside the case')+
      tile('Room ambient',byRole('room-ambient').flatMap(p=>p.temperatures),
       'Optional room sensor; case air is not ambient')+
+     (next.length?tile('NEXT · circulation',nextCirculation,'Flow and coolant temperature')+
+       tile('NEXT · coolant chemistry',nextChemistry,'Conductivity and calculated quality')+
+       tile('NEXT · diagnostics',nextDiagnostics,'Device voltage and alarm flags'):'')+
    '</div>'+
 
    '</section>';
