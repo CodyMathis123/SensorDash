@@ -85,6 +85,13 @@ internal static class HistoryRecordingSelfTest
                 "unnecessary GPU Data counters excluded");
             Check(!Stored("disk-data","GPU Memory Used","Storage","Data"),
                 "GPU memory labels on other families do not bypass policy");
+            var vr = new SensorReading("vram-used","GPU Memory Used","Radeon",
+                "GpuAmd","Data",987654321);
+            Check(HistoryRecordingPolicy.EffectiveIntervalSeconds(vr,balanced,[])==30,
+                "unreferenced GPU VRAM history uses low-overhead 30-second cadence");
+            Check(HistoryRecordingPolicy.EffectiveIntervalSeconds(vr,balanced,["vram-used"])==
+                balanced.SaveEverySeconds,
+                "pinned or referenced VRAM can use important history cadence");
             Check(!HistoryStore.ShouldRecord(new SensorReading("vram-used","GPU Memory Used",
                 "Radeon","GpuAmd","Data",42),
                 new DashboardSettings { HistoryMode="in-use" },[]),
