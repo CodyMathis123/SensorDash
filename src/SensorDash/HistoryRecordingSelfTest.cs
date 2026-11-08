@@ -63,6 +63,33 @@ internal static class HistoryRecordingSelfTest
                 new DashboardSettings { HistoryMode="in-use" },[]),
                 "in-use history must continue respecting configured sensor references");
 
+            // Workload sensors are already collected by LibreHardwareMonitor.
+            // Balanced should store aggregate CPU/GPU activity but not every
+            // CPU thread or D3D engine. Only selected VRAM capacity is added.
+            bool Stored(string id,string name,string family,string kind)=>
+                HistoryStore.ShouldRecord(new SensorReading(id,name,family,family,
+                    kind,42),balanced,[]);
+            Check(Stored("cpu-total","CPU Total","Cpu","Load"),"total CPU load retained");
+            Check(Stored("cpu-max","CPU Core Max","Cpu","Load"),"CPU max core retained");
+            Check(!Stored("cpu-thread","CPU Core #1","Cpu","Load"),"individual core load omitted");
+            Check(Stored("gpu-core","GPU Core","GpuAmd","Load"),"GPU core activity retained");
+            Check(Stored("gpu-mem","GPU Memory","GpuAmd","Load"),"GPU memory activity retained");
+            Check(!Stored("gpu-d3d","D3D 3D","GpuAmd","Load"),"no per-engine D3D flood");
+            Check(Stored("vram-used","GPU Memory Used","GpuAmd","Data"),
+                "GPU dedicated memory occupancy retained");
+            Check(Stored("vram-total","GPU Memory Total","GpuAmd","Data"),
+                "GPU dedicated memory capacity retained");
+            Check(Stored("vram-alt","D3D Dedicated Memory Used","GpuAmd","Data"),
+                "D3D dedicated VRAM fallback retained");
+            Check(!Stored("other-data","D3D Shared Memory Total","GpuAmd","Data"),
+                "unnecessary GPU Data counters excluded");
+            Check(!Stored("disk-data","GPU Memory Used","Storage","Data"),
+                "GPU memory labels on other families do not bypass policy");
+            Check(!HistoryStore.ShouldRecord(new SensorReading("vram-used","GPU Memory Used",
+                "Radeon","GpuAmd","Data",42),
+                new DashboardSettings { HistoryMode="in-use" },[]),
+                "in-use mode retains explicit references only");
+
             // Explicit user pin and cooling/threshold references override the
             // family interval without altering the global fan-controller loop.
             config.PinnedSensors = ["/network/0/throughput/0"];
