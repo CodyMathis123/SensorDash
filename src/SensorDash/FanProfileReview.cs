@@ -38,6 +38,18 @@ internal static class FanProfileReview
                !points.Zip(latest,(a,b)=>a.Temperature==b.Temperature&&a.Percent==b.Percent).All(x=>x))
                 reasons.Add("Temperature curve edited: "+approved.Name);
         }
+        // Editing a guard must never modify an already approved running profile.
+        var liveGuards=live.ThermalGuards ?? [];
+        var draftGuards=draft.ThermalGuards ?? [];
+        if(liveGuards.Count!=draftGuards.Count ||
+           !liveGuards.Zip(draftGuards,(a,b)=>
+             a.Id==b.Id && a.SourceSensorId==b.SourceSensorId &&
+             a.TriggerCelsius==b.TriggerCelsius && a.ReleaseCelsius==b.ReleaseCelsius &&
+             a.TriggerAfterSeconds==b.TriggerAfterSeconds &&
+             a.MinimumHoldSeconds==b.MinimumHoldSeconds &&
+             a.MaxSampleAgeSeconds==b.MaxSampleAgeSeconds &&
+             a.MissingInputPolicy==b.MissingInputPolicy).All(x=>x))
+            reasons.Add("Thermal guard configuration changed");
         return new(reasons.Count>0,reasons.ToArray());
     }
 }
