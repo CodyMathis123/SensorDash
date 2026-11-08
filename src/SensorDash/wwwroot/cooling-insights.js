@@ -50,7 +50,7 @@ const CoolingInsights=(()=>{
   const flow=unique([...roleSensors('flow-meter','flows'),...roleSensors('pump','flows'),...nextBy('Flow','Flow')]);
   const fanRPM=roleSensors('fan-group','fans');
   const pumpRPM=roleSensors('pump','fans');
-  const heatTiles=heats.map(p=>tile(p.part.name,[...p.temperatures.slice(0,2),...p.powers.slice(0,1)],'Assign CPU/GPU readings'));
+  const heatTiles=heats.map(p=>tile(p.part.name,[...p.temperatures.slice(0,2),...p.powers.slice(0,2)],'Assign CPU/GPU readings'));
   const conductivity=nextBy('Conductivity','Conductivity');
   const air=unique([...roleSensors('case-air','temperatures'),...roleSensors('room-ambient','temperatures')])
    .filter(s=>Number.isFinite(s.value));
