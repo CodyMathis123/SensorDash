@@ -66,11 +66,29 @@ public sealed class TrayWidgetConfig
 // Generic physical-output profile. Drafts are editable via the normal settings
 // API but have NO hardware authority until explicitly approved via UAC. Approved
 // snapshots are held separately by FanControlRuntime.
+// First-class emergency guards are deliberately separate from fan curves.
+// A guard is never part of normal MAX curve arbitration.
+public sealed class ThermalGuardConfig
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Thermal guard";
+    public string SourceSensorId { get; set; } = "";
+    public double TriggerCelsius { get; set; } = 85;
+    public double ReleaseCelsius { get; set; } = 80;
+    public int TriggerAfterSeconds { get; set; } = 10;
+    public int MinimumHoldSeconds { get; set; } = 30;
+    public int MaxSampleAgeSeconds { get; set; } = 30;
+    // "failsafe" commands maximum PWM when an input is absent; "warn"
+    // keeps the normal curve unless a guard was already latched.
+    public string MissingInputPolicy { get; set; } = "failsafe";
+}
+
 public sealed class FanProfileConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "New fan profile";
     public List<string> CurveIds { get; set; } = [];
+    public List<ThermalGuardConfig> ThermalGuards { get; set; } = [];
     public List<string> ChannelIds { get; set; } = [];
     public string Mix { get; set; } = "max";
     public double MinimumPercent { get; set; } = 20;
@@ -132,8 +150,10 @@ public static class WorkspaceLogic
         foreach(var tray in cfg.TrayWidgets ?? [])Include([tray.SensorId]);
         foreach(var curve in cfg.SimulatedFanCurves ?? [])
             Include([curve.SourceSensorId]);
-        foreach(var profile in cfg.FanProfiles ?? [])
+        foreach(var profile in cfg.FanProfiles ?? []) {
             Include(profile.ChannelIds);
+            foreach(var guard in profile.ThermalGuards ?? []) Include([guard.SourceSensorId]);
+        }
         foreach(var mapping in cfg.FanChannelMappings ?? [])
             Include([mapping.RpmSensorId]);
         return used;
@@ -222,6 +242,19 @@ public static class WorkspaceLogic
         cfg.FanProfiles = (cfg.FanProfiles ?? []).Take(20).Select(p=>{
             p.Id=Short(p.Id,80);p.Name=Short(p.Name);
             p.CurveIds=Ids(p.CurveIds,8);
+            p.ThermalGuards=(p.ThermalGuards ?? []).Where(g=>g!=null).Take(8).Select(g=>{
+                g.Id=Short(g.Id,80);
+                g.Name=Short(g.Name,100);
+                g.SourceSensorId=Short(g.SourceSensorId,256);
+                g.TriggerCelsius=Math.Clamp(double.IsFinite(g.TriggerCelsius)?g.TriggerCelsius:85,0,150);
+                g.ReleaseCelsius=Math.Clamp(double.IsFinite(g.ReleaseCelsius)?g.ReleaseCelsius:g.TriggerCelsius-5,-30,g.TriggerCelsius-0.1);
+                g.TriggerAfterSeconds=Math.Clamp(g.TriggerAfterSeconds,0,60);
+                g.MinimumHoldSeconds=Math.Clamp(g.MinimumHoldSeconds,0,300);
+                g.MaxSampleAgeSeconds=Math.Clamp(g.MaxSampleAgeSeconds,3,300);
+                g.MissingInputPolicy=g.MissingInputPolicy=="warn"?"warn":"failsafe";
+                return g;
+            }).Where(g=>g.Id.Length>0&&g.Name.Length>0&&g.SourceSensorId.Length>0)
+                .DistinctBy(g=>g.Id).ToList();
             p.ChannelIds=Ids(p.ChannelIds,12);
             p.Mix="max"; // single predictable mixing function for v0.6
             p.MinimumPercent=Math.Clamp(double.IsFinite(p.MinimumPercent)?p.MinimumPercent:20,0,100);
