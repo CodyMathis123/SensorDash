@@ -177,8 +177,12 @@ const SDWorkspace = (() => {
      }).join('');
      return card(sys.name,sys.kind.toUpperCase()+' system · '+(sys.components||[]).length+
          ' logical components · '+live.length+' live readings',
-       CoolingInsights.overview(S,sys)+summary+
-       CoolingElectrical.summaryCard(S,sys)+
+       CoolingInsights.overview(S,sys)+(sys.kind==='liquid'?'':summary)+
+       (sys.kind==='liquid'
+         ?'<details class="cooling-config-fold"><summary><span>Fan and pump electrical estimates</span>'+
+           '<small>Advanced · modeled wattage, not measured hardware power</small></summary>'+
+           '<div class="w-cooling-configuration">'+CoolingElectrical.summaryCard(S,sys)+'</div></details>'
+         :CoolingElectrical.summaryCard(S,sys))+
        '<details class="cooling-config-fold" data-cooling-config="'+attr(sys.id)+'" '+
        (S.coolingConfigOpen?.[sys.id]?'open':'')+'><summary><span>Cooling system components</span>'+
        '<small>'+safe((sys.components||[]).length)+' configured · '+(editing?'Click to edit':'Read-only configuration')+'</small></summary>'+
