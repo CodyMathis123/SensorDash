@@ -632,8 +632,8 @@ public sealed partial class HistoryStore {
         // External liquid-cooling controllers expose flow, conductivity, coolant
         // quality and alarm states that must survive to the history/export spool.
         // Keep these types for controller devices without pinning USB sensor IDs.
-        if (sensor.DeviceType is "Controller" or "Cooler" or "EmbeddedController" &&
-            sensor.Type is "Flow" or "Conductivity" or "Level" or "Factor" or "Voltage") return true;
+        if ((sensor.DeviceType is "Controller" or "Cooler" or "EmbeddedController") &&
+            (sensor.Type is "Flow" or "Conductivity" or "Level" or "Factor" or "Voltage")) return true;
         if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput" or "Flow" or "Conductivity") return true;
         if (sensor.Type == "Load" &&
             !(sensor.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
