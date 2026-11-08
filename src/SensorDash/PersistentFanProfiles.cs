@@ -66,6 +66,17 @@ public sealed class PersistentFanProfiles
         p.ChannelIds.Distinct(StringComparer.Ordinal).Count()==p.ChannelIds.Count &&
         p.Curves.Count is >0 and <=8 &&
         p.Curves.Select(c=>c.Id).Distinct(StringComparer.Ordinal).Count()==p.Curves.Count &&
+        p.ThermalGuards is { Count: <=8 } &&
+        p.ThermalGuards.Select(g=>g.Id).Distinct(StringComparer.Ordinal).Count()==p.ThermalGuards.Count &&
+        p.ThermalGuards.All(g=>g.Id.Length is >0 and <=80 &&
+            g.SourceSensorId.Length is >0 and <=256 && g.Name.Length is >0 and <=100 &&
+            double.IsFinite(g.TriggerCelsius) && g.TriggerCelsius is >=0 and <=150 &&
+            double.IsFinite(g.ReleaseCelsius) && g.ReleaseCelsius is >=-30 &&
+            g.ReleaseCelsius<g.TriggerCelsius &&
+            g.TriggerAfterSeconds is >=0 and <=60 &&
+            g.MinimumHoldSeconds is >=0 and <=300 &&
+            g.MaxSampleAgeSeconds is >=3 and <=300 &&
+            g.MissingInputPolicy is "warn" or "failsafe") &&
         p.ChannelIds.All(id=>id.Length is >0 and <=256) &&
         p.Curves.All(c=>c.Points.Count>=2 && c.Points.Count<=16 &&
             c.SourceSensorId.Length>0 && c.MaxSampleAgeSeconds is >=3 and <=300 &&
@@ -99,6 +110,7 @@ public sealed class PersistentFanProfiles
             profiles = _approved.Values.Select(p=>new {id=p.Id,name=p.Name,
                 channelIds=p.ChannelIds.ToArray(), minimumPercent=p.MinimumPercent,
                 curveNames=p.Curves.Select(c=>c.Name).ToArray(),
+                guardNames=p.ThermalGuards.Select(g=>g.Name).ToArray(),
                 needsReapproval=FanProfileReview.Compare(p,settings).NeedsReapproval,
                 reviewReasons=FanProfileReview.Compare(p,settings).Reasons}).ToArray(),
             readings = _latest.ToArray(),
@@ -302,6 +314,14 @@ public sealed class PersistentFanProfiles
                         Points=c.Points.Select(pt=>new CurvePointConfig {
                             Temperature=pt.Temperature,Percent=pt.Percent }).ToList()
                     }).ToList(),
+                ThermalGuards=(configured.ThermalGuards ?? []).Select(g=>new ThermalGuardConfig {
+                    Id=g.Id,Name=g.Name,SourceSensorId=g.SourceSensorId,
+                    TriggerCelsius=g.TriggerCelsius,ReleaseCelsius=g.ReleaseCelsius,
+                    TriggerAfterSeconds=g.TriggerAfterSeconds,
+                    MinimumHoldSeconds=g.MinimumHoldSeconds,
+                    MaxSampleAgeSeconds=g.MaxSampleAgeSeconds,
+                    MissingInputPolicy=g.MissingInputPolicy
+                }).ToList(),
                 MinimumPercent=configured.MinimumPercent,
                 HysteresisDegrees=configured.HysteresisDegrees,
                 ResponseSeconds=configured.ResponseSeconds
@@ -419,7 +439,7 @@ public sealed class PersistentFanProfiles
                 // An intentional 100% fan boost remains allowed during high demand.
                 // Reclassifying an output as a pump or unknown immediately revokes it.
                 var manual=overrides.TryGetValue(id,out var entry) ? entry : null;
-                if(manual!=null && (demand.Failsafe ||
+                if(manual!=null && (demand.Failsafe || demand.GuardActive ||
                     (demand.Percent>=80 && manual.Percent<demand.Percent) ||
                     (settings!=null && !settings.FanChannelMappings.Any(m=>
                         m.ChannelId==id && m.Kind=="fan"))))
@@ -462,6 +482,12 @@ public sealed class PersistentFanProfiles
                             calibrating=null;
                         }
                     }
+                }
+                // Emergency guard or critical sensor fault interrupts calibration.
+                if(calibrating!=null && (demand.Failsafe || demand.GuardActive))
+                {
+                    lock(_sync)calibrating.Abort("Emergency thermal guard/failsafe interrupted calibration.");
+                    calibrating=null;
                 }
                 var applied=calibrating!=null
                     ?new FanDutyDecision(calibrating.CurrentDuty,false,"Bounded automatic calibration")
@@ -544,7 +570,8 @@ public sealed class PersistentFanProfiles
                         Math.Abs((now-s.ObservedAt.Value).TotalSeconds)<=10 &&
                         s.Value is double v && double.IsFinite(v))?.Value;
                     _trace.Observe(profile.Id,id,error!=null?"degraded":
-                        demand.Failsafe?"failsafe":manual!=null?"override":"running",applied.Percent,
+                        demand.Failsafe?"failsafe":demand.GuardActive?"guard":
+                        demand.GuardWarning?"warning":manual!=null?"override":"running",applied.Percent,
                         _writer.LastDuty(id),channel.IsSoftwareMode,
                         registerDuty,mapped?.RpmSensorId,reading?.Value,now);
                 }
@@ -552,6 +579,7 @@ public sealed class PersistentFanProfiles
             readouts.Add(new FanProfileReadout(profile.Id,profile.Name,
                 profile.ChannelIds.ToArray(),
                 problems.Count>0?"degraded":demand.Failsafe?"failsafe":
+                    demand.GuardActive?"guard":demand.GuardWarning?"warning":
                     profile.ChannelIds.Any(overrides.ContainsKey)?"override":"running",
                 demand.Percent,problems.Count>0?string.Join("; ",problems):demand.Reason));
         }
