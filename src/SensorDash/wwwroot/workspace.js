@@ -72,6 +72,8 @@ const SDWorkspace = (() => {
    add(c.sourceSensorId,'Curve input: '+c.name,'curves');
    // Physical RPM feedback follows the PWM mapping, never a curve-level sensor.
   }
+  for(const p of cfg.fanProfiles||[])for(const guard of p.thermalGuards||[])
+   add(guard.sourceSensorId,'Thermal guard: '+guard.name,'profiles');
   for(const id of cfg.pinnedSensors||[])add(id,'Pinned for history','explorer');
   for(const [id] of Object.entries(cfg.highThresholds||{}))add(id,'Monitoring threshold','settings');
   return index;
@@ -605,6 +607,30 @@ const SDWorkspace = (() => {
    !isHidden(S,S.byId.get(o.id)||S.sensors.find(s=>s.id===o.id)));
   const curves=S.settings?.simulatedFanCurves||[];
   // A reusable curve is edited in exactly one profile, even when shared.
+  const guardEditor=p=>{
+    const guards=p.thermalGuards||[];
+    const rows=guards.map(g=>'<details class="w-thermal-guard"><summary>'+safe(g.name||'Thermal guard')+
+      ' · '+Number(g.triggerCelsius).toFixed(0)+'°C</summary><div class="w-guard-grid">'+
+      '<label>Name<input data-guard-profile="'+attr(p.id)+'" data-guard-id="'+attr(g.id)+'" data-guard-field="name" value="'+attr(g.name)+'"></label>'+
+      '<label>Temperature sensor'+select(S,g.sourceSensorId,s=>s.type==='Temperature',
+        'Select temperature sensor','data-guard-profile="'+attr(p.id)+'" data-guard-id="'+attr(g.id)+'" data-guard-field="sourceSensorId"')+'</label>'+
+      [['triggerCelsius','Activate at (°C)',0,150],['releaseCelsius','Release below (°C)',-30,150],
+       ['triggerAfterSeconds','Sustained time (seconds)',0,60],['minimumHoldSeconds','Minimum hold (seconds)',0,300],
+       ['maxSampleAgeSeconds','Sensor stale after (seconds)',3,300]].map(([field,label,min,max])=>
+        '<label>'+safe(label)+'<input type="number" step="1" min="'+min+'" max="'+max+'" '+
+        'data-guard-profile="'+attr(p.id)+'" data-guard-id="'+attr(g.id)+'" data-guard-field="'+field+'" value="'+attr(g[field])+'"></label>').join('')+
+      '<label>When sensor is missing<select data-guard-profile="'+attr(p.id)+'" data-guard-id="'+attr(g.id)+'" data-guard-field="missingInputPolicy">'+
+      '<option value="failsafe" '+(g.missingInputPolicy==='warn'?'':'selected')+'>100% fans (fail-safe)</option>'+
+      '<option value="warn" '+(g.missingInputPolicy==='warn'?'selected':'')+'>Warn only (unless latched)</option></select></label>'+
+      '</div><div class="w-actions">'+button('remove-thermal-guard','Remove guard',
+        'data-id="'+attr(p.id)+'" data-guard-id="'+attr(g.id)+'"')+'</div></details>').join('');
+    const legacy=(p.curveIds||[]).some(id=>curves.some(c=>c.id===id&&/guard/i.test(c.name)));
+    return '<div class="w-guard-editor"><h3>Emergency thermal guards</h3>'+
+      '<p class="note">Independent of normal fan curves. A sustained threshold activates 100% PWM; '+
+      'release requires cooling below the recovery point and minimum hold. Reapproval is required.</p>'+
+      rows+(guards.length<8?'<div class="w-actions">'+button('add-thermal-guard','+ Add thermal guard','data-id="'+attr(p.id)+'"')+'</div>':'')+
+      (legacy?'<div class="w-actions">'+button('convert-legacy-guards','Convert legacy guard curves (draft)','data-id="'+attr(p.id)+'"')+'</div>':'')+'</div>';
+  };
   const curveOwners=new Map();
   for(const draft of all)for(const id of draft.curveIds||[])
     if(!curveOwners.has(id))curveOwners.set(id,draft.id);
@@ -681,7 +707,7 @@ const SDWorkspace = (() => {
            o.device+' / '+o.name+(isHidden(S,S.byId.get(o.id))?' [Hidden]':''))+'<small>'+safe(
           (mapping(o.id)?.kind==='pump'?'PUMP · ':mapping(o.id)?.verifiedAt?'Verified response · ':'')+
           o.id)+'</small></span></label>').join(''):
-        '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+
+        '<p class="note">Waiting for writable channels.</p>')+'</div></div>'+guardEditor(p)+
       '<div class="w-actions">'+button('save-editor','Save draft')+
         button('start-profile',running?(running.needsReapproval?'Approve pending changes':'Reapprove profile'):'Enable profile','data-id="'+attr(p.id)+'"',false)+
         (running?button('stop-profile','Stop & restore defaults','data-id="'+attr(p.id)+'"'):'')+
@@ -690,7 +716,7 @@ const SDWorkspace = (() => {
       'Separate profiles cannot share the same output.</p>'),false);
     return FanControlUx.section(S,'profile:'+p.id,p.name,
       (running?(running.needsReapproval?'Changes need approval · ':'Live · '):'Draft · ')+
-      p.curveIds.length+' curve(s)',form,!!running);
+      p.curveIds.length+' curve(s) · '+(p.thermalGuards||[]).length+' guard(s)',form,!!running);
   }).join('');
   const content=header+(cards||'<div class="empty">No profiles yet. Choose a starter above.</div>')+
     (active.length?'<div class="w-actions">'+button('stop-all-profiles','Stop all profiles and restore defaults','',false)+'</div>':'');
@@ -955,6 +981,15 @@ const SDWorkspace = (() => {
      if(e.dataset.profileMin)p.minimumPercent=Number(e.value);
      if(e.dataset.profileResponse)p.responseSeconds=Number(e.value);
    }
+   for(const e of document.querySelectorAll('[data-guard-field]')){
+     const p=(d.fanProfiles||[]).find(x=>x.id===e.dataset.guardProfile);
+     const g=(p?.thermalGuards||[]).find(x=>x.id===e.dataset.guardId);
+     if(!g)continue;
+     const field=e.dataset.guardField;
+     if(['name','sourceSensorId','missingInputPolicy'].includes(field))g[field]=e.value;
+     else if(['triggerCelsius','releaseCelsius','triggerAfterSeconds',
+       'minimumHoldSeconds','maxSampleAgeSeconds'].includes(field))g[field]=Number(e.value);
+   }
    for(const p of d.fanProfiles||[]){
      const selector=id=>'[data-profile-'+id+'="'+CSS.escape(p.id)+'"]';
      if(document.querySelector(selector('curve')))
@@ -1128,6 +1163,35 @@ const SDWorkspace = (() => {
      }
      // Preserve unsaved editor inputs when pressing Add/Remove.
      syncInputs(S);
+     if(['add-thermal-guard','remove-thermal-guard','convert-legacy-guards'].includes(action)){
+       const p=cfg.fanProfiles?.find(x=>x.id===id);
+       if(!p||WorkspaceLocks.fan(S))return true;
+       p.thermalGuards=p.thermalGuards||[];
+       if(action==='add-thermal-guard'&&p.thermalGuards.length<8){
+         const source=S.sensors.find(x=>x.type==='Temperature'&&!isHidden(S,x));
+         if(!source){h.toast('No temperature sensor discovered.');return true;}
+         p.thermalGuards.push({id:uid(),name:'New thermal guard',sourceSensorId:source.id,
+           triggerCelsius:85,releaseCelsius:80,triggerAfterSeconds:10,
+           minimumHoldSeconds:30,maxSampleAgeSeconds:30,missingInputPolicy:'failsafe'});
+       }
+       if(action==='remove-thermal-guard')p.thermalGuards=p.thermalGuards.filter(x=>x.id!==el.dataset.guardId);
+       if(action==='convert-legacy-guards'){
+         for(const curveId of [...p.curveIds]){
+           const c=cfg.simulatedFanCurves.find(x=>x.id===curveId);
+           if(!c||!/guard/i.test(c.name))continue;
+           const point=[...(c.points||[])].filter(x=>x.percent>=95).sort((a,b)=>a.temperature-b.temperature)[0];
+           if(!point||p.thermalGuards.length>=8)continue;
+           if(!p.thermalGuards.some(g=>g.sourceSensorId===c.sourceSensorId))
+             p.thermalGuards.push({id:uid(),name:c.name,sourceSensorId:c.sourceSensorId,
+               triggerCelsius:point.temperature,releaseCelsius:point.temperature-5,
+               triggerAfterSeconds:10,minimumHoldSeconds:30,
+               maxSampleAgeSeconds:c.maxSampleAgeSeconds||30,missingInputPolicy:'failsafe'});
+           p.curveIds=p.curveIds.filter(x=>x!==curveId);
+         }
+         h.toast('Converted draft. Review the sensor sources before reapproving.');
+       }
+       await persist(S,h);return true;
+     }
      if(action==='add-power-point'||action==='remove-power-point'){
        const [,sysId,componentId]=(el.dataset.electricalScope||'').split(':');
        if(WorkspaceLocks.cooling(S,sysId))return true;
