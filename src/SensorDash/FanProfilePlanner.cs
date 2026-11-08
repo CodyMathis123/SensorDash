@@ -1,11 +1,13 @@
 // Pure temperature-to-duty planning; holds hysteresis state, never opens hardware.
 // Missing, stale and invalid sources immediately demand maximum duty, with no
 // last-known-good grace period for a live controller.
-internal sealed record FanDutyDecision(double Percent, bool Failsafe, string Reason);
+internal sealed record FanDutyDecision(double Percent, bool Failsafe, string Reason,
+    bool GuardActive=false, bool GuardWarning=false);
 
 internal sealed class FanProfilePlanner
 {
     private readonly Dictionary<string, double> _held = new(StringComparer.Ordinal);
+    private readonly ThermalGuardEvaluator _guards = new();
 
     internal FanDutyDecision Evaluate(ApprovedFanProfile profile, SensorFrame frame, DateTimeOffset now)
     {
@@ -31,16 +33,21 @@ internal sealed class FanProfilePlanner
 
             targets.Add(FanCurveMath.Interpolate(curve.Points, current));
         }
-        return new FanDutyDecision(
-            Math.Clamp(Math.Max(profile.MinimumPercent, targets.Max()), 0, 100),
-            false, "Max of " + targets.Count + " active temperature curve(s).");
+        var normalDuty=Math.Clamp(Math.Max(profile.MinimumPercent, targets.Max()),0,100);
+        var guard=_guards.Evaluate(profile,frame,now);
+        if(guard.Active || guard.Failsafe)
+            return new FanDutyDecision(100,guard.Failsafe,guard.Message,guard.Active,guard.Warning);
+        return new FanDutyDecision(normalDuty,false,
+            guard.Warning?guard.Message:"Max of "+targets.Count+" active temperature curve(s).",
+            false,guard.Warning);
     }
 
     internal void Reset(string profileId)
     {
+        _guards.Reset(profileId);
         foreach (var key in _held.Keys.Where(k => k.StartsWith(profileId + "|", StringComparison.Ordinal)).ToArray())
             _held.Remove(key);
     }
 
-    internal void Clear() => _held.Clear();
+    internal void Clear() { _held.Clear(); _guards.Clear(); }
 }
