@@ -49,6 +49,20 @@ internal static class HistoryRecordingSelfTest
             Check(HistoryRecordingPolicy.EffectiveIntervalSeconds(Network(0), config, []) == 60,
                 "Network cadence default");
 
+            // NEXT readings must be retained in balanced mode even when not
+            // pinned. The sensor hardware IDs are intentionally not hardcoded.
+            var balanced = new DashboardSettings { HistoryMode="balanced" };
+            foreach(var kind in new[]{"Temperature","Flow","Conductivity","Level","Factor","Voltage"})
+            {
+                var sensor=new SensorReading("next/"+kind,kind,"high flow NEXT","Controller",kind,18);
+                Check(HistoryStore.ShouldRecord(sensor,balanced,[]),
+                    "Controller "+kind+" must be archived for dashboard telemetry");
+            }
+            Check(!HistoryStore.ShouldRecord(new SensorReading("next/alarm","Alarm",
+                "high flow NEXT","Controller","Factor",0),
+                new DashboardSettings { HistoryMode="in-use" },[]),
+                "in-use history must continue respecting configured sensor references");
+
             // Explicit user pin and cooling/threshold references override the
             // family interval without altering the global fan-controller loop.
             config.PinnedSensors = ["/network/0/throughput/0"];
