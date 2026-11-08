@@ -44,8 +44,8 @@ const CoolingInsights=(()=>{
   // NEXT chemistry readings without requiring duplicate SensorDash components.
   const ownsNext=nextDevices.some(s=>assignedIds.has(s.id))||
    (sys.kind==='liquid'&&liquidSystems.length===1);
-  const next=ownsNext?nextDevices.map(s=>({...s,name:S.settings?.aliases?.[s.id]||s.name})):[];
-  const nextBy=(type,name)=>next.filter(s=>s.type===type&&(!name||s.name===name||s.name.replace(/ /g,'_')===name));
+  const next=ownsNext?nextDevices.map(s=>({...s,rawName:s.name,name:S.settings?.aliases?.[s.id]||s.name})):[];
+  const nextBy=(type,name)=>next.filter(s=>s.type===type&&(!name||s.rawName.replace(/ /g,'_')===name));
   const coolant=unique([...roleSensors('coolant-probe','temperatures'),...nextBy('Temperature','Water_Temperature')]);
   const flow=unique([...roleSensors('flow-meter','flows'),...roleSensors('pump','flows'),...nextBy('Flow','Flow')]);
   const fanRPM=roleSensors('fan-group','fans');
