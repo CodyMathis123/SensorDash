@@ -157,7 +157,7 @@ function events(){
 }
 function settingsCandidates(field){
  return S.sensors.filter(s=>!SDWorkspace.isHidden(S,s)&&!Object.hasOwn(S.settings?.[field]||{},s.id)&&
-  (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control','Conductivity','Level','Voltage'].includes(s.type)))
+  (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control','Conductivity','Level'].includes(s.type)))
   .sort((a,b)=>label(a).localeCompare(label(b)));
 }
 
