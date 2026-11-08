@@ -125,7 +125,7 @@ const h={
  const explorerHtml=explorer();
  S.filter='Common types';
  const commonHtml=explorer();
- assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power and Load sensors"/,
+ assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power, Flow and coolant chemistry sensors"/,
   'The Common types preset must explain its included readings');
  assert.doesNotMatch(commonHtml,/data-filter="Key"/,
   'The ambiguous Key label must not remain');
