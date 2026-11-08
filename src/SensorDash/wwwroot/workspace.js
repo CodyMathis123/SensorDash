@@ -3,7 +3,7 @@
 // All persisted objects refer to actual discovered sensor IDs.
 const SDWorkspace = (() => {
  const uid=()=>crypto.randomUUID();
- const types=['Temperature','Fan','Control','Power','Load','Voltage','Clock','Flow','Throughput'];
+ const types=['Temperature','Fan','Control','Power','Load','Voltage','Clock','Flow','Conductivity','Level','Factor','Throughput'];
  const componentKinds=[
   {id:'heat-source',name:'Heat source',hint:'Associate the component temperatures and power measurements'},
   {id:'fan-group',name:'Fan group',hint:'Fan RPM, available output duty and optional nearby temperature'},
@@ -31,12 +31,12 @@ const SDWorkspace = (() => {
  // Fitting/physical parts aren't sensor types: descriptions remain optional.
  const suitable=(kind,s)=>!typesByComponent[kind]||typesByComponent[kind].includes(s.type);
 
- const icon={Temperature:'°',Fan:'↻',Power:'⚡',Load:'%',Flow:'↝'};
+ const icon={Temperature:'°',Fan:'↻',Power:'⚡',Load:'%',Flow:'↝',Conductivity:'µS',Level:'%',Factor:'!'};
  const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const attr=safe;
  const date=()=>new Date().toLocaleTimeString();
  const value=(s)=>s?.value==null?'—':Number(s.value).toLocaleString(undefined,{maximumFractionDigits:s.type==='Fan'?0:1});
- const unit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Voltage:'V',Flow:'L/h',Clock:'MHz',Throughput:'B/s',Data:'GiB'}[t]||'');
+ const unit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Voltage:'V',Flow:'L/h',Conductivity:'µS/cm',Level:'%',Factor:'',Clock:'MHz',Throughput:'B/s',Data:'GiB'}[t]||'');
  const defaultSensors=(S,group,n=4)=>S.sensors.filter(s=>
      s.value!=null && !isHidden(S,s) &&(group==='all'||s.type===group)
      ).slice(0,n);
