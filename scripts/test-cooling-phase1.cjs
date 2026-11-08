@@ -13,7 +13,7 @@ const model=read('src/SensorDash/WorkspaceModels.cs');
 const recorder=read('src/SensorDash/CoolingEventRecorder.cs');
 const program=read('src/SensorDash/Program.cs');
 const html=read('src/SensorDash/wwwroot/index.html');
-const modules=vm.runInNewContext(src+'\nCoolingInsights;',{Date,console});
+const modules=vm.runInNewContext(src+'\nCoolingInsights;',{Date,console,SDWorkspace:{isHidden:()=>false}});
 assert.deepEqual(Array.from(modules.roles.map(r=>r.id)),['coolant-probe','case-air','room-ambient']);
 const now=Date.now();
 const sensor=(id,type,value,name=id)=>({id,type,value,name,observedAt:new Date(now).toISOString()});
@@ -41,11 +41,34 @@ const overview=modules.overview(S,sys);
 for(const phrase of ['CPU Heat Source','GPU Heat Source','Radiator fans','Pump','Case air sensor','Case air'])
  assert.ok(overview.includes(phrase),'Overview missing '+phrase);
 assert.match(overview,/Coolant[\s\S]*Not measured/);
-assert.match(overview,/Room ambient[\s\S]*Not measured/);
+assert.ok(!overview.includes('Room ambient'),'Uninstalled air sensors must not consume dashboard space');
 assert.ok(!overview.includes('Unrelated hardware'));
 assert.ok(overview.includes('32 °C'),'Case air shows observed value, not an invented ambient');
 assert.ok(overview.includes('Case air sensor'));
 assert.ok(!overview.includes('cooling efficiency'));
+const nextSensors=[
+ {...sensor('water','Temperature',24,'Water Temperature'),device:'high flow NEXT'},
+ {...sensor('flow','Flow',225.8,'Flow'),device:'high flow NEXT'},
+ {...sensor('cond','Conductivity',19.6,'Conductivity'),device:'high flow NEXT'},
+ {...sensor('quality','Level',100,'Water Quality'),device:'high flow NEXT'},
+ {...sensor('ext','Temperature',null,'External Temperature'),device:'high flow NEXT'},
+ {...sensor('volt','Voltage',4.7,'VCC'),device:'high flow NEXT'}
+];
+sys.components.push({id:'water-probe',kind:'coolant-probe',name:'Coolant',sensorIds:['water']});
+sys.components.push({id:'flow-meter',kind:'flow-meter',name:'Flow meter',sensorIds:['flow']});
+S.sensors=[...values,...nextSensors];
+S.byId=new Map(S.sensors.map(s=>[s.id,s]));
+const withNext=modules.overview(S,sys);
+for(const text of ['225.8 L/h','24 °C','19.6 µS/cm','Coolant conductivity','Flow rate'])
+ assert.ok(withNext.includes(text),'NEXT loop summary missing '+text);
+assert.equal((withNext.match(/data-live-reading="water"/g)||[]).length,1,
+ 'Assigned coolant probe and USB discovery must not duplicate the same sensor');
+assert.equal((withNext.match(/data-live-reading="flow"/g)||[]).length,1,
+ 'Assigned flow meter and USB discovery must not duplicate the same sensor');
+assert.ok(!withNext.includes('4.7 V'),'NEXT voltage stays on advanced diagnostics');
+assert.ok(!withNext.includes('100 %'),'Derived water quality is not a second independent chemistry tile');
+assert.ok(!withNext.includes('External Temperature'),'Unavailable external thermistor not treated as live ambient');
+
 
 for(const role of ['coolant-probe','case-air','room-ambient'])
  assert.ok(model.includes('"'+role+'"'),role+' must round-trip through server settings');
