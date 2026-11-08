@@ -83,8 +83,8 @@ internal static class HistoryRecordingSelfTest
                 "D3D dedicated VRAM fallback retained");
             Check(!Stored("other-data","D3D Shared Memory Total","GpuAmd","Data"),
                 "unnecessary GPU Data counters excluded");
-            Check(!Stored("disk-data","GPU Memory Used","Storage","Data"),
-                "GPU memory labels on other families do not bypass policy");
+            Check(!Stored("network-data","GPU Memory Used","Network","Data"),
+                "GPU memory labels on unrelated families do not bypass policy");
             var vr = new SensorReading("vram-used","GPU Memory Used","Radeon",
                 "GpuAmd","Data",987654321);
             Check(HistoryRecordingPolicy.EffectiveIntervalSeconds(vr,balanced,[])==30,
