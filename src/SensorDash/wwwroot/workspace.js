@@ -824,6 +824,9 @@ const SDWorkspace = (() => {
        ' · '+safe(calibration.completedSteps||0)+'/'+safe(calibration.totalSteps||'?')+
        ' steps. Open Hardware setup to monitor or cancel.</span></aside>':'')+
       renderProfiles(S)+
+      FanControlUx.section(S,'quick','Temporary fan speed',
+        (S.fanControl?.persistent?.overrides?.length||0)+' active override(s) · optional five-minute control',
+        quickFans(S),false)+
       FanControlUx.section(S,'curves','Curve library',
         'Create reusable curves · '+unassigned.size+' not assigned',
         curveContent,false)+
