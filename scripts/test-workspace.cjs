@@ -276,14 +276,17 @@ const h={
    'Calibration remains accessible in a separate, collapsed workspace');
  assert.ok(curvesView.includes('data-fan-fold="calibration"') &&
    curvesView.indexOf('data-fan-fold="profiles"') <
+     curvesView.indexOf('data-fan-fold="quick"') &&
+   curvesView.indexOf('data-fan-fold="quick"') <
      curvesView.indexOf('data-fan-fold="curves"') &&
    curvesView.indexOf('data-fan-fold="curves"') <
      curvesView.indexOf('data-fan-fold="calibration"') &&
    curvesView.includes('Hardware setup &amp; calibration') &&
    curvesView.includes('Temperature inputs · MAX') &&
    !curvesView.includes('data-fan-fold="manual"') &&
-   !curvesView.includes('data-fan-fold="quick"'),
-   'Live profiles must precede curve library and occasional hardware setup');
+   curvesView.includes('data-fan-fold="quick"') &&
+   !curvesView.includes('data-fan-fold="quick" open'),
+   'Live profiles must precede the optional, collapsed fan sliders, curve library and hardware setup');
  const priorFanControl=S.fanControl;
  S.fanControl={
    status:{state:'off'},outputs:[{id:'pwm1',name:'Chassis PWM',minimum:10,maximum:100,writable:true}],
@@ -293,9 +296,17 @@ const h={
  S.settings.fanChannelMappings=[{channelId:'pwm1',kind:'fan',label:'Radiator hub',rpmSensorId:'rpm1'}];
  let quick=workspace.render(S,'curves',h);
  assert.ok(quick.includes('Hardware setup &amp; calibration') &&
-   !quick.includes('data-quick-slider=') &&
+   quick.includes('data-quick-slider="pwm1"') &&
+   quick.includes('Apply for 5 minutes') &&
    !quick.includes('data-fan-fold="manual"'),
-   'There must not be a duplicate manual override UI');
+   'Approved fan outputs get a temporary slider without the legacy manual test UI');
+ S.fanControl.persistent.overrides=[{channelId:'pwm1',percent:36,expires:'2026-11-10T22:00:00Z'}];
+ quick=workspace.render(S,'curves',h);
+ assert.ok(quick.includes('Return to fan curve') &&
+   quick.includes('Return all to curves') &&
+   quick.includes('1 active override(s)'),
+   'Active temporary overrides expose explicit local/global return actions');
+ S.fanControl.persistent.overrides=[];
  S.settings.fanChannelMappings[0].kind='pump';
  assert.ok(!workspace.render(S,'curves',h).includes('data-quick-slider="pwm1"'),
    'Pump mappings must never appear in standalone quick-speed controls');
