@@ -51,7 +51,11 @@ jobs:
           run_id=$(gh run list --workflow windows-build.yml --branch Production --commit "$sha" --event push --status success --limit 20 --json databaseId --jq '.[0].databaseId // empty')
           [[ -n "$run_id" ]] || { echo "Production MSI CI must pass first"; exit 1; }
           mkdir -p release-assets
-          # upload-artifact names the artifact after the actual MSI filename.\n          # Select that artifact explicitly; never accidentally publish diagnostics.\n          mapfile -t artifacts < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" --jq '.artifacts[] | select(.expired == false) | .name | select(test("^SensorDash-Setup-[0-9]+\\\\.[0-9]+\\\\.[0-9]+-x64\\\\.msi$"))')\n          [[ "${#artifacts[@]}" -eq 1 ]] || { echo "Expected one MSI artifact; found ${#artifacts[@]}"; exit 1; }\n          gh run download "$run_id" --name "${artifacts[0]}" --dir release-assets
+          # Upload-artifact uses the versioned MSI filename as its artifact name.
+          # Exclude installer diagnostics and require exactly one matching artifact.
+          mapfile -t artifacts < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" --jq '.artifacts[] | select(.expired == false) | .name | select(startswith("SensorDash-Setup-") and endswith("-x64.msi"))')
+          [[ "${#artifacts[@]}" -eq 1 ]] || { echo "Expected one MSI artifact; found ${#artifacts[@]}"; exit 1; }
+          gh run download "$run_id" --name "${artifacts[0]}" --dir release-assets
           mapfile -d '' msis < <(find release-assets -type f -name '*.msi' -print0)
           [[ "${#msis[@]}" == 1 ]] || { echo "Expected one MSI"; exit 1; }
           file=$(basename "${msis[0]}")
