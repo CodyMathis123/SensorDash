@@ -1,0 +1,61 @@
+name: Production release and safe branch cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Choose release or safe branch cleanup
+        type: choice
+        options: [release, prune-merged]
+        default: release
+        required: true
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+concurrency:
+  group: production-maintenance
+  cancel-in-progress: false
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Production
+          persist-credentials: false
+      - name: Remove only merged branches with no open PR
+        if: inputs.operation == 'prune-merged'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' |
+          while IFS= read -r branch; do
+            [[ "$branch" == "Production" ]] && continue
+            open=$(gh pr list --head "$branch" --state open --json number --jq 'length')
+            [[ "$open" == "0" ]] || { echo "KEEP $branch: open PR"; continue; }
+            ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/Production...$branch" --jq '.ahead_by')
+            [[ "$ahead" == "0" ]] || { echo "KEEP $branch: $ahead unique commits"; continue; }
+            echo "Removing merged branch: $branch"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" >/dev/null
+          done
+      - name: Publish tested Production MSI
+        if: inputs.operation == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          run_id=$(gh run list --workflow windows-build.yml --branch Production --commit "$sha" --event push --status success --limit 20 --json databaseId --jq '.[0].databaseId // empty')
+          [[ -n "$run_id" ]] || { echo "Production MSI CI must pass first"; exit 1; }
+          mkdir -p release-assets
+          gh run download "$run_id" --name artifact --dir release-assets
+          mapfile -d '' msis < <(find release-assets -type f -name '*.msi' -print0)
+          [[ "${#msis[@]}" == 1 ]] || { echo "Expected one MSI"; exit 1; }
+          file=$(basename "${msis[0]}")
+          [[ "$file" =~ ^SensorDash-Setup-([0-9]+\.[0-9]+\.[0-9]+)-x64\.msi$ ]] || exit 1
+          version="v${BASH_REMATCH[1]}"
+          if gh release view "$version" >/dev/null 2>&1; then echo "Release already exists"; exit 1; fi
+          gh release create "$version" "${msis[0]}" --target "$sha" --title "SensorDash $version" --generate-notes
