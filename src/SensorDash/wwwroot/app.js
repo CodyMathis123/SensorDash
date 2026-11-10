@@ -20,7 +20,7 @@ const formatMb=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MB':'�
 const perfNumber=(value,unit='',digits=1)=>Number.isFinite(value)?Number(value).toFixed(digits)+unit:'—';
 const perfUptime=seconds=>Number.isFinite(seconds)?
  Math.floor(seconds/3600)+'h '+Math.floor((seconds%3600)/60)+'m':'—';
-const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%'}[t]||'');
+const typeUnit=t=>({Temperature:'°C',Fan:'RPM',Control:'%',Load:'%',Power:'W',Clock:'MHz',Voltage:'V',Throughput:'B/s',Data:'GB',Level:'%',Flow:'L/h',Conductivity:'µS/cm',Factor:''}[t]||'');
 const label=s=>{
  const alias=S.settings?.aliases?.[s?.id];
  if(alias)return alias;
@@ -41,10 +41,10 @@ function explorer(){
  const display=x=>SDWorkspace.displayName(S,x);
  const key=x=>x.deviceId||x.deviceType+'|'+x.device;
  const devices=[...new Map(S.sensors.map(x=>[key(x),x])).entries()].sort((a,b)=>a[1].device.localeCompare(b[1].device));
- const filterChoices=['Common types','In use','Temperature','Fan','Control','Power','Load','Pinned','Hidden','All'];
+ const filterChoices=['Common types','In use','Temperature','Fan','Control','Power','Load','Flow','Conductivity','Level','Voltage','Factor','Pinned','Hidden','All'];
  const candidates=S.sensors.filter(x=>{
   const type=S.filter==='All'||S.filter==='In use'||S.filter==='Hidden'||
-   (S.filter==='Common types'&&['Temperature','Fan','Control','Power','Load'].includes(x.type))||
+   (S.filter==='Common types'&&['Temperature','Fan','Control','Power','Load','Flow','Conductivity','Level'].includes(x.type))||
    x.type===S.filter||(S.filter==='Pinned'&&S.settings?.pinnedSensors?.includes(x.id));
   const visible=S.filter==='Hidden'?hidden(x):S.filter==='In use'?usage.has(x.id):S.showHidden||!hidden(x);
   return type&&visible&&(!S.deviceFilter||key(x)===S.deviceFilter);
@@ -94,7 +94,7 @@ function explorer(){
  const tools='<div class="toolbar explorer-toolbar">'+
   '<input id="search" placeholder="Search sensor, ID, hardware or usage…" value="'+esc(S.search)+'">'+
   filterChoices.map(v=>'<button class="filter-btn '+(S.filter===v?'selected':'')+'" data-filter="'+esc(v)+'"'+
-   (v==='Common types'?' title="Temperature, Fan, Control, Power and Load sensors" aria-label="Common types: Temperature, Fan, Control, Power and Load"':'')+'> '+
+   (v==='Common types'?' title="Temperature, Fan, Control, Power, Flow and coolant chemistry sensors" aria-label="Common types: Temperature, Fan, Control, Power and Load"':'')+'> '+
     esc(v)+(v==='In use'?' ('+counts.used+')':v==='Hidden'?' ('+counts.hidden+')':'')+'</button>').join('')+
   '</div><div class="explorer-tools">'+
   '<label>Hardware<select id="explorerDevice"><option value="">All devices</option>'+
@@ -157,7 +157,7 @@ function events(){
 }
 function settingsCandidates(field){
  return S.sensors.filter(s=>!SDWorkspace.isHidden(S,s)&&!Object.hasOwn(S.settings?.[field]||{},s.id)&&
-  (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control'].includes(s.type)))
+  (field==='aliases'||['Temperature','Fan','Power','Load','Flow','Control','Conductivity','Level'].includes(s.type)))
   .sort((a,b)=>label(a).localeCompare(label(b)));
 }
 

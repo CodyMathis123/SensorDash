@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -200,7 +200,8 @@ app.MapGet("/api/tray-state", (DashboardState state) =>
             : "--";
         var unit = sensor?.Type switch
         {
-            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" => "%",
+            "Temperature" => "°C", "Fan" => "RPM", "Control" or "Load" or "Level" => "%",
+            "Flow" => "L/h", "Conductivity" => "µS/cm",
             "Power" => "W", "Voltage" => "V", "Clock" => "MHz", _ => ""
         };
         var name = Safe(string.IsNullOrWhiteSpace(config.Label) ? sensor?.Name ?? config.SensorId : config.Label);
@@ -629,10 +630,21 @@ public sealed partial class HistoryStore {
         if (config.HistoryMode == "in-use")
             return (used ?? WorkspaceLogic.ReferencedSensorIds(config)).Contains(sensor.Id);
         if (config.PinnedSensors.Contains(sensor.Id)) return true;
-        if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput") return true;
+        // External liquid-cooling controllers expose flow, conductivity, coolant
+        // quality and alarm states that must survive to the history/export spool.
+        // Keep these types for controller devices without pinning USB sensor IDs.
+        if ((sensor.DeviceType is "Controller" or "Cooler" or "EmbeddedController") &&
+            (sensor.Type is "Flow" or "Conductivity" or "Level" or "Factor" or "Voltage")) return true;
+        if (sensor.Type is "Temperature" or "Fan" or "Control" or "Power" or "Throughput" or "Flow" or "Conductivity") return true;
         if (sensor.Type == "Load" &&
             !(sensor.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ||
               sensor.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase))) return true;
+        // A handful of GPU memory-occupancy counters complements the already
+        // retained GPU core/memory activity (%). Do not archive all Data sensors.
+        // The raw LHM GPU Data values are bytes; no unit conversion occurs here.
+        if (sensor.Type == "Data" && sensor.DeviceType is "GpuAmd" or "GpuNvidia" or "GpuIntel" &&
+            sensor.Name is "GPU Memory Used" or "GPU Memory Total" or
+               "D3D Dedicated Memory Used") return true;
         return sensor.Type == "Clock" &&
             (sensor.Name.Contains("Average") || sensor.Name is "GPU Core" or "GPU Memory");
     }

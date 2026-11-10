@@ -79,9 +79,9 @@ const h={
  const html=workspace.render(S,'cooling',h);
  assert.ok(!html.includes('<chart'),'Historical charts are Grafana owned');
  assert.ok(html.includes('data-cooling-component-id="probe-1"'));
- assert.ok(html.includes('2 power readings'),'Separate power readings should not be summed');
- assert.ok(html.includes('108 L/h'),'Single physical flow reading should appear in circulation summary');
- assert.ok(html.includes('RPM sensors'),'Pump RPM should not be misidentified as a fan count');
+ assert.ok(html.includes('CPU package power')&&html.includes('GPU board power'),'Separate heat-source power readings remain individually labeled; never summed');
+ assert.ok(html.includes('108 L/h'),'Pump-associated physical flow appears in the live circulation tile');
+ assert.ok(html.includes('Pump RPM')&&html.includes('Radiator fans'),'Separate pump and radiator tachometer readings remain visible');
  assert.ok(!html.includes('Radiator (legacy)'));
  S.focusCoolingTarget={systemId:'loop-1',componentId:'probe-1'};
  assert.match(workspace.render(S,'cooling',h),/w-referenced-component/);
@@ -125,7 +125,7 @@ const h={
  const explorerHtml=explorer();
  S.filter='Common types';
  const commonHtml=explorer();
- assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power and Load sensors"/,
+ assert.match(commonHtml,/data-filter="Common types"[^>]*title="Temperature, Fan, Control, Power, Flow and coolant chemistry sensors"/,
   'The Common types preset must explain its included readings');
  assert.doesNotMatch(commonHtml,/data-filter="Key"/,
   'The ambiguous Key label must not remain');

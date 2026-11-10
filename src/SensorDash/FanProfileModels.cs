@@ -5,6 +5,7 @@ public sealed class ApprovedFanProfile
     public string Name { get; set; } = "";
     public List<string> ChannelIds { get; set; } = [];
     public List<SimulatedFanCurveConfig> Curves { get; set; } = [];
+    public List<ThermalGuardConfig> ThermalGuards { get; set; } = [];
     public double MinimumPercent { get; set; } = 20;
     public double HysteresisDegrees { get; set; } = 2;
     public double ResponseSeconds { get; set; } = 10;

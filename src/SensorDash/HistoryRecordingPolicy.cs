@@ -13,6 +13,10 @@ internal static class HistoryRecordingPolicy
         {
             "Storage" => settings.StorageHistorySeconds,
             "Network" => settings.NetworkHistorySeconds,
+            // VRAM occupancy moves relatively slowly; keep a modest history
+            // cadence without changing the live LHM poll or fan control.
+            "GpuAmd" or "GpuNvidia" or "GpuIntel" when sensor.Type == "Data"
+                => Math.Max(30,settings.SaveEverySeconds),
             _ => settings.SaveEverySeconds
         };
         // Collection and SQLite writes cannot exceed the global recording
