@@ -140,7 +140,7 @@ async function click(action,duty){
  assert.ok(workspace.includes('FanCommissioning.render(S)') &&
   workspace.includes("'calibration','Hardware setup & calibration'") &&
   !workspace.includes("FanControlUx.section(S,'manual'") &&
-  !workspace.includes("FanControlUx.section(S,'quick'") &&
+  workspace.includes("FanControlUx.section(S,'quick','Temporary fan speed'") &&
   workspace.includes("mapping(o.id)?.label") &&
   read('src/SensorDash/FanControlRuntime.cs').includes('Channel identified as a pump; manual session stopped.') &&
   app.includes('FanCommissioning.handle(e,S') &&
