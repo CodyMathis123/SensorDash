@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -137,6 +137,8 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
 app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(state)));
+// SCM event history is read only when the Settings health panel requests it.
+app.MapGet("/api/collector-health", () => Results.Ok(CollectorHealth.Read()));
 // Read-only, bounded performance history. Browser download never contains sensor readings,
 // settings, paths, tokens or device identifiers.
 app.MapGet("/api/performance-history", async (CancellationToken ct) =>
