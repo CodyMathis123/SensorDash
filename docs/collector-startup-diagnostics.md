@@ -14,6 +14,10 @@ Service Control Manager (SCM) in the previous seven days, the latest unexpected
 termination, and the latest service start within 15 minutes of that crash.
 Expand **Recent service events** to see SCM event IDs 7031, 7034 and 7036.
 
+A small warning also appears in the dashboard's top bar if the latest unexpected
+termination occurred within 24 hours. It opens Settings for details and is not a
+persistent service-down indicator; the dashboard itself is hosted by the service.
+
 **Important:** An SCM start after a crash is not proof that Windows performed
 an automatic recovery; a person could have started the service manually.
 The UI intentionally labels it **Last start after crash**, rather than
