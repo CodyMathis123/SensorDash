@@ -47,6 +47,8 @@ jobs:
         run: node scripts/test-settings-pickers.cjs
       - name: Test collector startup and service recovery contracts
         run: node scripts/test-collector-startup.cjs
+      - name: Test collector health endpoint and Settings UI
+        run: node scripts/test-collector-health.cjs
       - name: Test hardware driver status UI
         run: node scripts/test-driver-status.cjs
       - name: Test previous MSI artifact selection
