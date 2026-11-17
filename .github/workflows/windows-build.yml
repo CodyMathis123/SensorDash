@@ -296,6 +296,17 @@ jobs:
               } catch { }
             }
             if (!$ready) { throw 'SensorDash did not open its local API' }
+            # Exercise the real Windows Event Log query in the standalone
+            # collector, not just static JS/C# contract tests.
+            $health = Invoke-RestMethod -Uri 'http://localhost:8765/api/collector-health' -TimeoutSec 10
+            if ($health.state -ne 'running' -or $health.processId -le 0 -or
+                $health.uptimeSeconds -lt 0 -or $null -eq $health.eventsAvailable) {
+              throw 'Collector health endpoint returned an invalid process status'
+            }
+            if ($health.eventsAvailable -and $null -eq $health.unexpectedTerminations7d) {
+              throw 'Collector health endpoint omitted available SCM event totals'
+            }
+            Write-Host "Collector health: uptime=$($health.uptimeSeconds)s SCM-readable=$($health.eventsAvailable)"
             if ($status.mode -ne 'service') { throw 'The local dashboard must run in the collector service' }
             $trayState = Invoke-WebRequest -Uri 'http://localhost:8765/api/tray-state' -UseBasicParsing
             if ($trayState.Content -notmatch '^status\t') { throw 'Native tray status protocol unavailable' }
