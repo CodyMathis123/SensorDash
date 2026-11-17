@@ -283,12 +283,23 @@ function paintCollectorHealth(){
  const node=byId('collectorHealthPanel');
  if(node)node.innerHTML=collectorHealthContent();
 }
+function paintCollectorHealthAlert(){
+ const node=byId('collectorHealthAlert');
+ if(!node)return;
+ const h=S.collectorHealth;
+ const at=Date.parse(h?.lastUnexpectedTermination||'');
+ const recent=h?.eventsAvailable && Number(h?.unexpectedTerminations7d)>0 &&
+  Number.isFinite(at) && at<=Date.now() && Date.now()-at<86400000;
+ node.hidden=!recent;
+ if(recent)node.textContent='⚠ Collector crash · past 24h';
+}
 async function loadCollectorHealth(){
  try{
   S.collectorHealth=await fetchJSON('/api/collector-health');
   S.collectorHealthError=null;
  }catch(e){S.collectorHealthError=e.message||'Request failed';}
  if(S.view==='settings')paintCollectorHealth();
+ paintCollectorHealthAlert();
 }
 
 function settingsView(){
@@ -785,7 +796,7 @@ async function bootstrap(){
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);if(S.view==='settings')void loadCollectorHealth();void loadTelemetryConfig();loadSimulation();loadFanControl();
+   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadCollectorHealth();void loadTelemetryConfig();loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
@@ -794,7 +805,7 @@ async function bootstrap(){
    setInterval(loadFanControl,3000);
    setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(S.view==='settings'){loadStatus(true);void loadTelemetryConfig();}},30000);
-   setInterval(()=>{if(S.view==='settings'&&!document.hidden)void loadCollectorHealth();},60000);
+   setInterval(()=>{if(!document.hidden)void loadCollectorHealth();},120000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
    byId('content').innerHTML='<div class="help">Could not connect to the local API: '+esc(err.message)+'. Restart SensorDash.exe and refresh this page.</div>';
