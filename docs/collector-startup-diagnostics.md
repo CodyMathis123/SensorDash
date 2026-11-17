@@ -6,6 +6,28 @@ outside `SensorWorker`'s exception handler. On 2026-11-17, Windows recorded a
 DiskInfoToolkit `NullReferenceException` during SMART storage discovery followed
 by a SensorDash process crash (Application 1026/1000) and SCM event 7034.
 
+## Collector health in the dashboard
+
+Open **Settings → Collector health** in the local dashboard. This read-only
+panel displays current process uptime, unexpected terminations reported by
+Service Control Manager (SCM) in the previous seven days, the latest unexpected
+termination, and the latest service start within 15 minutes of that crash.
+Expand **Recent service events** to see SCM event IDs 7031, 7034 and 7036.
+
+**Important:** An SCM start after a crash is not proof that Windows performed
+an automatic recovery; a person could have started the service manually.
+The UI intentionally labels it **Last start after crash**, rather than
+"Last automatic recovery". No unexpected terminations means none were found
+in the scanned System log window, not a guarantee that no crash ever occurred.
+
+The endpoint is `GET /api/collector-health`, available only on loopback.
+It reads at most 512 recent relevant SCM records, returns at most 12 sanitized
+service events, and does not expose arbitrary log messages or settings secrets.
+Windows event-log access errors are displayed as **Unavailable**, not zero.
+The browser refreshes the panel while Settings is open and offers a manual
+refresh button; this service-hosted dashboard cannot detect a collector that
+is currently down. An independent Windows monitor is needed for that.
+
 ## Diagnosis
 
 Run an elevated PowerShell terminal:
