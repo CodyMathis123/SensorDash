@@ -597,3 +597,13 @@
 .w-guard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin:13px 0}
 .w-guard-grid label{display:grid;gap:6px;color:#a0b6c8;font-size:12px;min-width:0}
 .w-guard-grid input,.w-guard-grid select{min-width:0;width:100%;max-width:100%}
+
+
+/* Read-only SCM service health; update the panel without resetting Settings inputs. */
+.collector-health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin-bottom:15px}
+.collector-health-stat{border:1px solid var(--edge);border-radius:9px;padding:13px;background:#132533;min-width:0;overflow-wrap:anywhere}
+.collector-health-stat small{display:block;color:var(--muted);font-size:11px;margin-bottom:7px}
+.collector-health-stat strong{display:block;font-size:14px;color:#d7e8ef}
+.collector-health-history{margin:12px 0}.collector-health-history summary{cursor:pointer;font-size:12px;color:#b8dce3;font-weight:650}
+.collector-health-events{margin-top:10px}.collector-health-events .stat-row{gap:16px}
+@media(max-width:510px){.collector-health-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
