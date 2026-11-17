@@ -11,7 +11,7 @@ const titles={
  settings:['CONFIGURATION','Settings','Collection intervals, aliases, monitoring thresholds and diagnostics']
 };
 const S={view:'cooling',frame:null,sensors:[],byId:new Map(),settings:null,events:[],filter:'Common types',search:'',selected:'',deviceFilter:'',explorerGrouping:'hardware',showHidden:false,
- status:null,auth:null,connected:false,diagnostics:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
+ status:null,auth:null,connected:false,diagnostics:null,collectorHealth:null,collectorHealthError:null,telemetryConfig:null,simulation:null,fanControl:null,fanOutputSignature:'',collectionGroups:[],schemaKey:'',livePaintQueued:false};
 const byId=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,dec=1)=>v==null||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec,minimumFractionDigits:dec});
@@ -235,6 +235,61 @@ async function saveTelemetryConfig(){
  }catch(e){toast('Could not save exporter: '+e.message);}
 }
 
+
+// Read-only Windows SCM history. A subsequent start does not prove that Windows
+// (rather than an operator) initiated recovery.
+function collectorHealthContent(){
+ const h=S.collectorHealth;
+ const available=Boolean(h?.eventsAvailable);
+ const eventCount=available?h.unexpectedTerminations7d:'—';
+ const formattedDate=t=>t?esc(new Date(t).toLocaleString()):'None recorded';
+ const lastCrash=available?formattedDate(h.lastUnexpectedTermination):'Unavailable';
+ const afterCrash=available?formattedDate(h.lastStartAfterCrash):'Unavailable';
+ const uptime=h?perfUptime(h.uptimeSeconds):'—';
+ const tiles=[
+  ['Collector',h?.state==='running'?'Running':'Loading…'],
+  ['Process uptime',uptime],
+  ['Unexpected terminations · 7d',String(eventCount)],
+  ['Last unexpected termination',lastCrash],
+  ['Last start after crash',afterCrash]
+ ];
+ const eventLabels={
+  'unexpected-termination':'Unexpected termination',
+  'started':'Service entered running state',
+  'stopped':'Service entered stopped state'
+ };
+ const recent=available?(h.recentEvents||[]):[];
+ return '<div class="panel-head"><div><h2>Collector health</h2><p>Windows service · last 7 days</p></div></div>'+
+ '<div class="collector-health-grid">'+tiles.map(([name,value])=>
+  '<div class="collector-health-stat"><small>'+esc(name)+'</small><strong>'+esc(value)+'</strong></div>'
+ ).join('')+'</div>'+
+ (S.collectorHealthError?'<p class="note">Unable to refresh health: '+esc(S.collectorHealthError)+'</p>':'')+
+ (h&&!available?'<p class="note">'+esc(h.eventsWarning||'SCM history unavailable')+'</p>':'')+
+ (available?
+  '<details class="collector-health-history"><summary>Recent service events ('+recent.length+')</summary>'+
+   (recent.length?'<div class="collector-health-events">'+recent.map(e=>
+    '<div class="stat-row"><label>'+esc(eventLabels[e.kind]||'Service event')+
+    ' · '+esc(String(e.eventId))+'</label><strong>'+formattedDate(e.at)+'</strong></div>'
+   ).join('')+'</div>':'<p class="note">No matching service lifecycle events in the sampled history.</p>')+
+   '</details>':'')+
+ '<p class="note">A start following a crash is evidence of service resumption, not proof of automatic recovery. Windows service events are authoritative; if the collector is offline, this page cannot load.</p>'+
+ '<div class="w-actions"><button type="button" class="btn secondary" id="refreshCollectorHealth">Refresh collector health</button></div>';
+}
+function collectorHealthPanel(){
+ return '<section id="collectorHealthPanel" class="panel full">'+collectorHealthContent()+'</section>';
+}
+function paintCollectorHealth(){
+ const node=byId('collectorHealthPanel');
+ if(node)node.innerHTML=collectorHealthContent();
+}
+async function loadCollectorHealth(){
+ try{
+  S.collectorHealth=await fetchJSON('/api/collector-health');
+  S.collectorHealthError=null;
+ }catch(e){S.collectorHealthError=e.message||'Request failed';}
+ if(S.view==='settings')paintCollectorHealth();
+}
+
 function settingsView(){
  const cfg=S.settings;if(!cfg)return '<div class="loading">Waiting for collector settings…</div>';
  const aliases=Object.entries(cfg.aliases||{}).sort((a,b)=>a[0].localeCompare(b[0]));
@@ -255,6 +310,7 @@ function settingsView(){
     ?'<p class="note">Authenticated as <strong>'+esc(S.auth.user||'Windows user')+'</strong>. Changes are authorized by your Windows session; cooling actions still require confirmation.</p>'
     :'<p class="note">The browser has not established Windows authentication. Readings remain visible, but saving settings and hardware actions require an authenticated Windows session.</p><p><a class="btn" href="/api/auth/sign-in">Connect Windows account</a></p><p class="note">Use the localhost dashboard address; IP-address bookmarks can prevent automatic Windows sign-in.</p>'))+
  panel('Hardware driver','', '<div id="driverDetails">'+DriverStatus.details(S.frame?.pawnIo)+'</div>')+
+ collectorHealthPanel()+
  panel('Collection and history intervals','Live polling is independent from what is archived for Grafana',
  '<div class="form-grid">'+[
   ['fastPollSeconds','Core sensor refresh (sec)',1,30,'Controls live polling when fan control is inactive.'],
@@ -587,7 +643,7 @@ async function togglePin(id){
 }
 let toastTimer;function toast(message){const el=byId('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3100)}
 document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[data-view],[data-usage-target]'))void SDWorkspace.flushCooling(S).catch(()=>{});
- const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='settings'){loadDiagnostics().catch(()=>{});void loadTelemetryConfig();}
+ const v=e.target.closest('[data-view]');if(v){S.focusCoolingTarget=null;S.view=v.dataset.view;history.replaceState(null,'','#'+S.view);if(S.view==='events'||S.view==='cooling')loadEvents();if(S.view==='settings'){loadDiagnostics().catch(()=>{});void loadTelemetryConfig();void loadCollectorHealth();}
  if(S.view==='settings')loadStatus(true);
  if(S.view==='curves'){loadSimulation();loadFanControl();}
  render();return}
@@ -649,6 +705,7 @@ document.addEventListener('click',e=>{if(S.view==='cooling'&&e.target.closest('[
  if(removeAlias){removeAlias.closest('.alias-row').querySelector('[data-alias]').value='';saveSettings();return}
  const rm=e.target.closest('[data-remove-threshold]');if(rm){changeThreshold(rm.dataset.removeThreshold,true);return}
  if(e.target.closest('#exportPerformance')){void exportPerformance();return;}
+ if(e.target.closest('#refreshCollectorHealth')){void loadCollectorHealth();return;}
  if(e.target.closest('#refreshDiagnostics')){
   Promise.all([loadStatus(false),loadDiagnostics(false)]).then(()=>{if(S.view==='settings')render()});
   return;
@@ -727,7 +784,7 @@ async function bootstrap(){
    ]);
    const version=byId('appVersion');if(version)version.textContent=status.version||'unknown';
    S.collectionGroups=groups;
-   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);void loadTelemetryConfig();loadSimulation();loadFanControl();
+   S.status=status;S.auth=auth;S.settings=cfg;const initial=location.hash.slice(1);if(titles[initial])S.view=initial;updateFrame(frame);render();loadEvents();loadDiagnostics(false);if(S.view==='settings')void loadCollectorHealth();void loadTelemetryConfig();loadSimulation();loadFanControl();
    const stream=new EventSource('/api/stream');
    stream.onmessage=e=>{try{updateFrame(JSON.parse(e.data))}catch(err){console.warn('Sensor frame error',err)}};
    stream.onerror=()=>{byId('liveStatus').textContent='Reconnecting…'};
@@ -736,6 +793,7 @@ async function bootstrap(){
    setInterval(loadFanControl,3000);
    setInterval(()=>loadDiagnostics(false),30000);
    setInterval(()=>{if(S.view==='settings'){loadStatus(true);void loadTelemetryConfig();}},30000);
+   setInterval(()=>{if(S.view==='settings'&&!document.hidden)void loadCollectorHealth();},60000);
    setInterval(()=>{if(Date.now()-Date.parse(S.frame?.timestamp||0)>12000)fetchJSON('/api/live').then(updateFrame).catch(()=>{})},5000);
  }catch(err){
    byId('content').innerHTML='<div class="help">Could not connect to the local API: '+esc(err.message)+'. Restart SensorDash.exe and refresh this page.</div>';
