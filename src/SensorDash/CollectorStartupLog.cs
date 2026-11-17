@@ -14,6 +14,7 @@ public static class CollectorStartupLog
     private static readonly string LogPath = Path.Combine(DirectoryPath, "collector-startup.log");
     private const long MaximumBytes = 2 * 1024 * 1024;
     private static int _installed;
+    public static DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
 
     public static void Install()
     {
