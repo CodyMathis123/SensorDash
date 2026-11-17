@@ -31,13 +31,19 @@ public static class HardwareCollection
     public static string Signature(DashboardSettings settings) =>
         string.Join("|", Groups.Select(g=>Enabled(settings,g.Id) ? "1" : "0"));
 
+    // Emergency process-wide opt-out for crashes inside DiskInfoToolkit device-change threads.
+    // Keep ordinary per-family Settings behavior unchanged unless explicitly opted out.
+    public static bool StorageSafeMode => string.Equals(
+        Environment.GetEnvironmentVariable("SENSORDASH_DISABLE_STORAGE"), "1",
+        StringComparison.Ordinal);
+
     public static Computer CreateComputer(DashboardSettings settings) => new()
     {
         IsCpuEnabled = Enabled(settings,"Cpu"),
         IsGpuEnabled = Enabled(settings,"Gpu"),
         IsMotherboardEnabled = Enabled(settings,"Motherboard"),
         IsMemoryEnabled = Enabled(settings,"Memory"),
-        IsStorageEnabled = Enabled(settings,"Storage"),
+        IsStorageEnabled = !StorageSafeMode && Enabled(settings,"Storage"),
         IsNetworkEnabled = Enabled(settings,"Network"),
         IsControllerEnabled = Enabled(settings,"Controller"),
         IsPowerMonitorEnabled = Enabled(settings,"PowerMonitor")
