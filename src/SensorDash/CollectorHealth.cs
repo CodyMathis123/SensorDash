@@ -17,6 +17,7 @@ public sealed record CollectorHealthSnapshot(
     int? UnexpectedTerminations7d,
     DateTimeOffset? LastUnexpectedTermination,
     DateTimeOffset? LastStartAfterCrash,
+    bool HistoryTruncated,
     IReadOnlyList<CollectorScmEvent> RecentEvents);
 
 public static class CollectorHealth
@@ -43,10 +44,12 @@ public static class CollectorHealth
             };
             using var reader = new EventLogReader(query);
             var events = new List<CollectorScmEvent>();
+            var scanned = 0;
             for (var i = 0; i < MaximumScannedEvents; i++)
             {
                 using var record = reader.ReadEvent();
                 if (record is null) break;
+                scanned++;
                 if (!string.Equals(record.ProviderName, "Service Control Manager",
                     StringComparison.OrdinalIgnoreCase)) continue;
                 if (!IsCollectorEvent(record)) continue;
@@ -58,7 +61,8 @@ public static class CollectorHealth
             var summary = Summarize(events);
             return new("running", Environment.ProcessId, started, uptime, true, null,
                 summary.UnexpectedTerminations7d, summary.LastUnexpectedTermination,
-                summary.LastStartAfterCrash, events.Take(MaximumDisplayedEvents).ToArray());
+                summary.LastStartAfterCrash, scanned == MaximumScannedEvents,
+                events.Take(MaximumDisplayedEvents).ToArray());
         }
         catch (Exception ex)
         {
@@ -68,7 +72,7 @@ public static class CollectorHealth
                 "SCM health read unavailable: " + ex.GetType().Name);
             return new("running", Environment.ProcessId, started, uptime, false,
                 "Windows Service Control Manager events could not be read.",
-                null, null, null, []);
+                null, null, null, false, []);
         }
     }
 
