@@ -607,3 +607,10 @@
 .collector-health-history{margin:12px 0}.collector-health-history summary{cursor:pointer;font-size:12px;color:#b8dce3;font-weight:650}
 .collector-health-events{margin-top:10px}.collector-health-events .stat-row{gap:16px}
 @media(max-width:510px){.collector-health-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* Appears only when SCM reports an unexpected collector termination <24h ago. */
+.collector-health-alert{border:1px solid #ab6a57;background:#3d282b;color:#ffccad;border-radius:8px;font-size:11px;font-weight:700;padding:8px 10px;cursor:pointer;white-space:nowrap}
+.collector-health-alert[hidden]{display:none}
+.collector-health-alert:hover,.collector-health-alert:focus-visible{border-color:#ffc4a3;outline-offset:2px}
+@media(max-width:510px){.collector-health-alert{font-size:10px;white-space:normal;max-width:150px;text-align:center}}
