@@ -44,7 +44,15 @@
                           DisplayName="SensorDash Collector"
                           Description="Hardware telemetry, local web dashboard and validated cooling control."
                           Type="ownProcess" Start="auto" ErrorControl="normal"
-                          Arguments="--collector" Vital="yes" />
+                          Arguments="--collector" Vital="yes">
+            <!-- Recover from unhandled exceptions in third-party hardware threads.
+                 All three failure slots restart; the third remains the steady-state action. -->
+            <util:ServiceConfig FirstFailureActionType="restart"
+                                SecondFailureActionType="restart"
+                                ThirdFailureActionType="restart"
+                                ResetPeriodInDays="1"
+                                RestartServiceDelayInSeconds="60" />
+          </ServiceInstall>
           <ServiceControl Id="ControlSensorDashCollector" Name="SensorDashCollector"
                           Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
