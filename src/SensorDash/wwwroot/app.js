@@ -241,7 +241,7 @@ async function saveTelemetryConfig(){
 function collectorHealthContent(){
  const h=S.collectorHealth;
  const available=Boolean(h?.eventsAvailable);
- const eventCount=available?h.unexpectedTerminations7d:'—';
+ const eventCount=available?(h.historyTruncated?'≥':'')+String(h.unexpectedTerminations7d):'—';
  const formattedDate=t=>t?esc(new Date(t).toLocaleString()):'None recorded';
  const lastCrash=available?formattedDate(h.lastUnexpectedTermination):'Unavailable';
  const afterCrash=available?formattedDate(h.lastStartAfterCrash):'Unavailable';
@@ -265,6 +265,7 @@ function collectorHealthContent(){
  ).join('')+'</div>'+
  (S.collectorHealthError?'<p class="note">Unable to refresh health: '+esc(S.collectorHealthError)+'</p>':'')+
  (h&&!available?'<p class="note">'+esc(h.eventsWarning||'SCM history unavailable')+'</p>':'')+
+ (h?.historyTruncated?'<p class="note">The Windows event scan reached its 512-record limit. Termination count is a minimum for the sampled period; earlier events may not be included.</p>':'')+
  (available?
   '<details class="collector-health-history"><summary>Recent service events ('+recent.length+')</summary>'+
    (recent.length?'<div class="collector-health-events">'+recent.map(e=>
