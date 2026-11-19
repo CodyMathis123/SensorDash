@@ -65,7 +65,7 @@ internal static class TelemetryCursorPersistenceSelfTest
         var interrupted = false;
         try
         {
-            TelemetryCursorPersistence.LoadOrRecover(
+            TelemetryCursorPersistence.LoadOrRecover<TelemetryCursor>(
                 samplePath, "sensor",
                 () => throw new InvalidOperationException("Must not initialize new"),
                 () => throw new InvalidOperationException("Simulated power loss before replay"),
