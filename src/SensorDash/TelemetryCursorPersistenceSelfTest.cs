@@ -59,6 +59,23 @@ internal static class TelemetryCursorPersistenceSelfTest
         // not the newest row. This is deliberately distinct from first enable.
         File.WriteAllBytes(samplePath, new byte[55]);
         File.WriteAllBytes(samplePath + ".bak", new byte[55]);
+        // Simulate an interrupted recovery before the replacement checkpoint
+        // can be persisted. The invalid originals must still be present so a
+        // restart retries archive replay rather than silently starting fresh.
+        var interrupted = false;
+        try
+        {
+            TelemetryCursorPersistence.LoadOrRecover(
+                samplePath, "sensor",
+                () => throw new InvalidOperationException("Must not initialize new"),
+                () => throw new InvalidOperationException("Simulated power loss before replay"),
+                TelemetryCursorPersistence.ValidSampleCursor, Warn);
+        }
+        catch (InvalidOperationException) { interrupted = true; }
+        Check(interrupted &&
+              File.ReadAllBytes(samplePath).All(b => b == 0) &&
+              File.ReadAllBytes(samplePath + ".bak").All(b => b == 0),
+            "interrupted recovery keeps invalid originals to retry safely");
         var replay = ReadSample();
         Check(replay == new TelemetryCursor(0, ""),
             "double corruption starts at retained archive beginning");
