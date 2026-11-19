@@ -60,7 +60,7 @@ internal static class TelemetryCursorPersistence
             return recovered;
         }
 
-        // No trustworthy checkpoint remains. Keep both damaged originals for
+        // No trustworthy checkpoint remains. Copy both damaged originals for
         // diagnosis and resume at the beginning of the RETAINED SQLite archive,
         // not its newest sample. The archive's retention policy still limits
         // how far back recovery can reach.
@@ -108,7 +108,11 @@ internal static class TelemetryCursorPersistence
         var name = path + ".corrupt-" +
             DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" +
             Guid.NewGuid().ToString("N")[..8];
-        File.Move(path, name);
+        // COPY, never move before the replacement has been committed. If a
+        // power loss occurs between quarantine and Save, the invalid file must
+        // remain in place so restart re-enters archive replay instead of
+        // interpreting two missing files as a first-time installation.
+        File.Copy(path, name);
     }
 
     internal static bool ValidSampleCursor(TelemetryCursor? c) =>
