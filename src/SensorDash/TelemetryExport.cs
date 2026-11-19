@@ -244,33 +244,28 @@ internal sealed class TelemetryExportWorker(
             var endpoint = new Uri(options.Endpoint);
             // Start at the latest already-archived sample. Historical migration is
             // a separate, explicit operation; no surprise 30-day backfill.
-            TelemetryCursor cursor;
-            if (File.Exists(cursorFile))
-            {
-                cursor = JsonSerializer.Deserialize<TelemetryCursor>(
-                    File.ReadAllText(cursorFile), JsonSerializerOptions.Web)
-                    ?? throw new InvalidDataException("Invalid telemetry cursor.");
-            }
-            else
-            {
-                cursor = new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff");
-                SaveCursor(cursorFile, cursor);
-            }
-            // A second cursor tracks derived accessory watts independently.
-            // On first activation there is no surprise historical backfill.
-            var accessoryCursor = File.Exists(accessoryCursorFile)
-                ? JsonSerializer.Deserialize<AccessoryCursor>(
-                    File.ReadAllText(accessoryCursorFile), JsonSerializerOptions.Web)
-                    ?? throw new InvalidDataException("Invalid accessory telemetry cursor.")
-                : new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\uffff", "\uffff");
-            if (!File.Exists(accessoryCursorFile))
-                SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
-            // The last server-acknowledged catalog is kept separate from the
-            // data cursor: edits to aliases or cooling mappings may remove
-            // previously published tag sets, which require explicit 0 tombstones.
-            var eventCursor = File.Exists(eventCursorFile)
-                ? JsonSerializer.Deserialize<long>(File.ReadAllText(eventCursorFile), JsonSerializerOptions.Web)
-                : 0L;
+            // Never let a corrupt cursor wedge the exporter. Prefer a
+            // validated last-acknowledged backup; if both copies are damaged,
+            // replay all still-retained SQLite history instead of skipping it.
+            // Only a genuinely new installation starts at the latest sample.
+            void WarnCursor(string message) => logger.LogWarning("{CursorRecovery}", message);
+            var cursor = TelemetryCursorPersistence.LoadOrRecover(
+                cursorFile, "sensor",
+                () => new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff"),
+                () => new TelemetryCursor(0, ""),
+                TelemetryCursorPersistence.ValidSampleCursor, WarnCursor);
+            // Accessory watts use a separate timestamp/system/component cursor.
+            var accessoryCursor = TelemetryCursorPersistence.LoadOrRecover(
+                accessoryCursorFile, "accessory",
+                () => new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\uffff", "\uffff"),
+                () => new AccessoryCursor(0, "", ""),
+                TelemetryCursorPersistence.ValidAccessoryCursor, WarnCursor);
+            // Historical threshold events use their own monotonically
+            // increasing ID. Retained events can safely replay from 0.
+            var eventCursor = TelemetryCursorPersistence.LoadOrRecover(
+                eventCursorFile, "event",
+                () => 0L, () => 0L,
+                TelemetryCursorPersistence.ValidEventCursor, WarnCursor);
             long lastSpoolAt = 0;
             var lastMetadata = TelemetryMetadata.Load(metadataFile);
             long lastMetadataAt = 0;
@@ -423,26 +418,14 @@ internal sealed class TelemetryExportWorker(
         }
     }
 
-    internal static void SaveEventCursor(string path, long cursor)
-    {
-        var temp = path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(cursor, JsonSerializerOptions.Web));
-        File.Move(temp, path, true);
-    }
+    internal static void SaveEventCursor(string path, long cursor) =>
+        TelemetryCursorPersistence.Save(path, cursor);
 
-    internal static void SaveAccessoryCursor(string path, AccessoryCursor cursor)
-    {
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(cursor, JsonSerializerOptions.Web));
-        File.Move(tmp, path, true);
-    }
+    internal static void SaveAccessoryCursor(string path, AccessoryCursor cursor) =>
+        TelemetryCursorPersistence.Save(path, cursor);
 
-    internal static void SaveCursor(string path, TelemetryCursor cursor)
-    {
-        var temp = path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(cursor, JsonSerializerOptions.Web));
-        File.Move(temp, path, true);
-    }
+    internal static void SaveCursor(string path, TelemetryCursor cursor) =>
+        TelemetryCursorPersistence.Save(path, cursor);
 }
 
 internal static class TelemetryExportSelfTest
