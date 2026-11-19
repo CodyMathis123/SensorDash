@@ -523,6 +523,7 @@ internal static class TelemetryExportSelfTest
             var reloaded = JsonSerializer.Deserialize<TelemetryCursor>(File.ReadAllText(cursorPath),
                 JsonSerializerOptions.Web);
             Require(reloaded?.SensorId == "c", "cursor persistence");
+            TelemetryCursorPersistenceSelfTest.Run(history, root);
         }
         finally
         {
