@@ -99,6 +99,39 @@ $products = Products
 if ($products.Count -ne 1 -or $products[0].DisplayVersion -ne $release.SensorDashVersion -or
     $products[0].PSChildName -ne "{$($release.SensorDashProductCode)}") { throw 'Upgrade did not leave exactly the expected product.' }
 if ((Get-Service SensorDashCollector).Status -ne 'Running') { throw 'Upgrade did not restart collector.' }
+
+# The installed MSI must register the separate operational source BEFORE
+# starting the service. No migration of previous Application entries required.
+$eventSourceKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\SensorDash\SensorDash.Collector'
+if (!(Test-Path $eventSourceKey)) {
+    throw 'MSI did not register the dedicated SensorDash.Collector event source.'
+}
+$operationalLog = Get-WinEvent -ListLog 'SensorDash' -ErrorAction Stop
+if (!$operationalLog) { throw 'Dedicated SensorDash Windows Event Log is missing.' }
+$startEvents = @(Get-WinEvent -FilterHashtable @{
+    LogName = 'SensorDash'
+    Id = 1000
+    StartTime = (Get-Date).AddMinutes(-10)
+} -ErrorAction Stop | Where-Object ProviderName -eq 'SensorDash.Collector')
+if ($startEvents.Count -lt 1) {
+    throw 'Collector did not emit its structured start event to the dedicated log.'
+}
+# Routine tray and dashboard traffic must NOT become information events.
+for ($i = 0; $i -lt 4; $i++) {
+    $response = Invoke-WebRequest 'http://localhost:8765/api/tray-state' -UseBasicParsing -TimeoutSec 3
+    if ($response.StatusCode -ne 200) { throw 'Tray-state smoke request failed.' }
+}
+$noise = @(Get-WinEvent -FilterHashtable @{
+    LogName = 'SensorDash'
+    StartTime = (Get-Date).AddMinutes(-10)
+} -ErrorAction Stop | Where-Object {
+    $_.ProviderName -eq 'SensorDash.Collector' -and
+    $_.LevelDisplayName -eq 'Information' -and
+    $_.Message -match 'EndpointMiddleware|RequestPath: /api/tray-state'
+})
+if ($noise.Count -gt 0) { throw 'HTTP request Information leaked into operational log.' }
+Write-Host 'Dedicated Windows log registration, start event, and quiet HTTP traffic verified.'
+
 $exe = "$env:ProgramFiles/SensorDash/SensorDash.exe"
 $tray = "$env:ProgramFiles/SensorDash/SensorDash.Tray.exe"
 if (!(Test-Path $tray)) { throw 'Native tray executable not installed.' }

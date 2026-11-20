@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -41,6 +41,10 @@ var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     ContentRootPath = AppContext.BaseDirectory
 });
 builder.Services.AddWindowsService(options => options.ServiceName = "SensorDashCollector");
+// Windows Event Log is an operational timeline, never an HTTP request trace.
+// Configure explicitly *after* AddWindowsService, which otherwise adds a
+// default EventLog provider writing framework Information to Application.
+OperationalEvents.Configure(builder.Logging);
 // Kestrel binds both IPv4 and IPv6 loopback for the canonical localhost URL.
 // This remains local-only: no LAN or wildcard interfaces are exposed.
 builder.WebHost.UseUrls("http://localhost:8765");
@@ -61,6 +65,14 @@ builder.Services.AddAuthentication(
 builder.Services.AddAuthorization();
 CollectorStartupLog.Write("info", "Building collector host");
 var app = builder.Build();
+var operations = app.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger(OperationalEvents.Category);
+app.Lifetime.ApplicationStarted.Register(() => operations.LogInformation(
+    OperationalEvents.CollectorStarted,
+    "SensorDash collector started; pid={ProcessId}; version={Version}.",
+    Environment.ProcessId, typeof(DashboardState).Assembly.GetName().Version?.ToString(3) ?? "unknown"));
+app.Lifetime.ApplicationStopping.Register(() => operations.LogInformation(
+    OperationalEvents.CollectorStopping, "SensorDash collector stopping normally."));
 // Bind exclusively to IPv4 loopback, and reject alternate Host headers to
 // avoid local browser DNS-rebinding requests to a SYSTEM-owned web process.
 app.Use(async (context, next) =>
@@ -812,7 +824,13 @@ public sealed partial class HistoryStore {
         }
     }
 }
-public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls, ILogger<SensorWorker> logger) : BackgroundService {
+public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls,
+    ILogger<SensorWorker> logger, ILoggerFactory loggerFactory) : BackgroundService {
+    private readonly ILogger _operations = loggerFactory.CreateLogger(OperationalEvents.Category);
+    private readonly OperationalOutage _collectionOutage = new(
+        loggerFactory.CreateLogger(OperationalEvents.Category), "sensor collection",
+        OperationalEvents.SensorFailure, OperationalEvents.SensorFailureSummary,
+        OperationalEvents.SensorRecovered, LogLevel.Error);
     private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
     private readonly PawnIoMonitor _pawnIo = new();
@@ -849,14 +867,16 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     FanResumePolicy.ShouldReopenHardware(_lastCollectionStart, now, windowsResume);
                 _lastCollectionStart = now;
                 if (reopenForResume) {
-                    logger.LogWarning("Reopening LHM after {Reason}; collection gap={GapSeconds:0.0}s.",
+                    _operations.LogInformation(OperationalEvents.ResumeReopenStarted,
+                        "Reopening LHM after {Reason}; collection gap={GapSeconds:0.0}s.",
                         windowsResume ? "Windows resume notification" : "long polling gap",
                         resumeGap.TotalSeconds);
                     controls.ReleaseBeforeHardwareReopen(_computer,
                         "Resume-sized collection gap; restoring firmware before hardware reinitialization.");
                     try { _computer!.Close(); }
                     catch (Exception closeError) {
-                        logger.LogWarning(closeError, "LHM hardware close after sleep/resume was not clean.");
+                        logger.LogWarning(OperationalEvents.ResumeHardwareCloseFailure, closeError,
+                            "LHM hardware close after sleep/resume was not clean.");
                     }
                     _computer = null;
                     _activeCollectionSignature = null;
@@ -892,14 +912,32 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     ? Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds : 0;
                 var frame = new SensorFrame(now, readings, null, devices, driver);
                 controls.Tick(_computer, frame, cfg, now);
+                if (reopenForResume)
+                    _operations.LogInformation(OperationalEvents.ResumeReopenCompleted,
+                        "LHM reopen and first sensor scan completed after {Reason}; {SensorCount} readings; approved control profiles evaluated. Hardware PWM feedback is tracked separately.",
+                        windowsResume ? "Windows resume notification" : "long polling gap",
+                        readings.Count);
                 // Fan control must never depend on local SQLite recording.
                 // Emit bounded cooling events only AFTER a recovery attempt.
                 foreach(var evt in controls.DrainRecoveryEvents())
                 {
+                    // Safety state changes are genuinely actionable; emit one
+                    // operational event per guard transition, never each PWM tick.
+                    // Detailed profile/channel identities stay in the bounded
+                    // fan trace and local SQLite event history.
+                    if (evt.Sensor.StartsWith("fan:profile:", StringComparison.Ordinal))
+                    {
+                        if (evt.Severity == "warning")
+                            _operations.LogWarning(OperationalEvents.CoolingGuardEntered,
+                                "An approved cooling profile entered a safety guard or failsafe state; inspect local cooling events and fan-control trace.");
+                        else if (evt.Severity == "info")
+                            _operations.LogInformation(OperationalEvents.CoolingGuardCleared,
+                                "A cooling profile safety guard cleared; the approved curve resumed.");
+                    }
                     try { db.Event(evt.Severity,evt.Sensor,evt.Message,evt.Value); }
                     catch(Exception eventError)
                     {
-                        logger.LogWarning(eventError,
+                        logger.LogWarning(OperationalEvents.CoolingEventArchiveFailure, eventError,
                             "Could not archive PWM recovery event; fan control is unaffected.");
                     }
                 }
@@ -910,7 +948,8 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     // optional computation/storage cannot interrupt fan control.
                     try { db.RecordAccessoryPower(frame, cfg); }
                     catch (Exception electricalError) {
-                        logger.LogWarning(electricalError, "Accessory power archive failed; control is unchanged.");
+                        logger.LogWarning(OperationalEvents.AccessoryArchiveFailure, electricalError,
+                            "Accessory power archive failed; control is unchanged.");
                     }
                     CheckEvents(frame, cfg);
                     _lastSaved = now;
@@ -920,8 +959,9 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 }
                 if (OptionalPerformanceDiagnostics.Enabled)
                     CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
+                _collectionOutage.Recovered();
             } catch (Exception ex) {
-                logger.LogError(ex, "Sensor collection failed");
+                _collectionOutage.Failed(ex, "collector-poll");
                 controls.ReleaseBeforeClose(_computer,"Hardware collection failed; release attempted.");
                 try { File.AppendAllText(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SensorDash", "SensorDash.log"), $"{DateTimeOffset.Now}: {ex}\n"); } catch { }
                 state.Publish(new SensorFrame(DateTimeOffset.UtcNow, [], ex.GetType().Name + ": " + ex.Message, PawnIo: driver));

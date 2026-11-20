@@ -186,8 +186,22 @@ internal static class ThresholdEventProtocol
 }
 
 internal sealed class TelemetryExportWorker(
-    DashboardState state, HistoryStore database, ILogger<TelemetryExportWorker> logger) : BackgroundService
+    DashboardState state, HistoryStore database, ILogger<TelemetryExportWorker> logger,
+    ILoggerFactory loggerFactory) : BackgroundService
 {
+    private readonly ILogger _operations = loggerFactory.CreateLogger(OperationalEvents.Category);
+    private readonly OperationalOutage _initializationOutage = new(
+        loggerFactory.CreateLogger(OperationalEvents.Category), "telemetry exporter initialization",
+        OperationalEvents.ExportFailure, OperationalEvents.ExportFailureSummary,
+        OperationalEvents.ExportRecovered);
+    private readonly OperationalOutage _deliveryOutage = new(
+        loggerFactory.CreateLogger(OperationalEvents.Category), "telemetry delivery",
+        OperationalEvents.ExportFailure, OperationalEvents.ExportFailureSummary,
+        OperationalEvents.ExportRecovered);
+    private readonly OperationalOutage _catalogOutage = new(
+        loggerFactory.CreateLogger(OperationalEvents.Category), "telemetry catalog",
+        OperationalEvents.ExportFailure, OperationalEvents.ExportFailureSummary,
+        OperationalEvents.ExportRecovered);
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
         var directory = Path.Combine(Environment.GetFolderPath(
@@ -201,16 +215,22 @@ internal sealed class TelemetryExportWorker(
         // No network setting ever influences the sensor sampler or PWM writer.
         while (!stop.IsCancellationRequested)
         {
+        var initializationStage = "load-export-settings";
         try
         {
             var options = TelemetryExportOptions.Load(settingsFile);
             if (!options.Enabled)
             {
+                _initializationOutage.Reset();
+                _deliveryOutage.Reset();
+                _catalogOutage.Reset();
                 TelemetryExportRuntime.Disabled();
                 await Task.Delay(TimeSpan.FromSeconds(3), stop);
                 continue;
             }
+            initializationStage = "validate-configuration";
             options.Validate();
+            initializationStage = "read-credentials";
             var fingerprint = TelemetryExportRuntime.Fingerprint(
                 settingsFile, options.TokenFile, options.CaCertificateFile);
             var token = File.ReadAllText(options.TokenFile).Trim();
@@ -220,6 +240,7 @@ internal sealed class TelemetryExportWorker(
                 X509CertificateLoader.LoadCertificateFromFile(options.CaCertificateFile);
             // Only migrate/index the archive when the opt-in receiver credentials
             // are present and valid; never burden fan-control startup otherwise.
+            initializationStage = "prepare-sample-archive";
             database.EnsureTelemetryIndex();
             using var handler = new HttpClientHandler();
             if (!options.UseSystemTrust)
@@ -248,13 +269,16 @@ internal sealed class TelemetryExportWorker(
             // validated last-acknowledged backup; if both copies are damaged,
             // replay all still-retained SQLite history instead of skipping it.
             // Only a genuinely new installation starts at the latest sample.
-            void WarnCursor(string message) => logger.LogWarning("{CursorRecovery}", message);
+            void WarnCursor(string message) => _operations.LogWarning(
+                OperationalEvents.ExportCheckpointRecovered, "{CursorRecovery}", message);
+            initializationStage = "read-sensor-cursor";
             var cursor = TelemetryCursorPersistence.LoadOrRecover(
                 cursorFile, "sensor",
                 () => new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff"),
                 () => new TelemetryCursor(0, ""),
                 TelemetryCursorPersistence.ValidSampleCursor, WarnCursor);
             // Accessory watts use a separate timestamp/system/component cursor.
+            initializationStage = "read-accessory-cursor";
             var accessoryCursor = TelemetryCursorPersistence.LoadOrRecover(
                 accessoryCursorFile, "accessory",
                 () => new AccessoryCursor(database.LatestAccessoryPowerTimestamp(), "\uffff", "\uffff"),
@@ -262,18 +286,23 @@ internal sealed class TelemetryExportWorker(
                 TelemetryCursorPersistence.ValidAccessoryCursor, WarnCursor);
             // Historical threshold events use their own monotonically
             // increasing ID. Retained events can safely replay from 0.
+            initializationStage = "read-event-cursor";
             var eventCursor = TelemetryCursorPersistence.LoadOrRecover(
                 eventCursorFile, "event",
                 () => 0L, () => 0L,
                 TelemetryCursorPersistence.ValidEventCursor, WarnCursor);
             long lastSpoolAt = 0;
+            initializationStage = "read-catalog-checkpoint";
             var lastMetadata = TelemetryMetadata.Load(metadataFile);
             long lastMetadataAt = 0;
             long lastMetadataCheckAt = 0;
             logger.LogInformation("Telemetry export session active; cursor starts at {TimestampMs}.", cursor.TimestampMs);
             TelemetryExportRuntime.Running();
+            _initializationOutage.Recovered();
             while (!stop.IsCancellationRequested)
             {
+                var deliveryStage = "verify-export-settings";
+                var deliveredThisIteration = false;
                 try
                 {
                     if (TelemetryExportRuntime.Fingerprint(
@@ -312,15 +341,17 @@ internal sealed class TelemetryExportWorker(
                                 lastMetadata = current;
                                 lastMetadataAt = now;
                             }
+                            _catalogOutage.Recovered();
                         }
                         catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
                         catch (Exception e)
                         {
                             // Catalog metadata must never block numeric readings
                             // or the local hardware control path.
-                            logger.LogWarning(e, "Telemetry catalog synchronization failed; retrying.");
+                            _catalogOutage.Failed(e, "catalog-sync");
                         }
                     }
+                    deliveryStage = "sensor-batch";
                     var rows = database.ReadTelemetryBatch(cursor);
                     if (rows.Count > 0)
                     {
@@ -336,9 +367,11 @@ internal sealed class TelemetryExportWorker(
                         cursor = new TelemetryCursor(last.TimestampMs, last.SensorId);
                         SaveCursor(cursorFile, cursor);
                         TelemetryExportRuntime.Delivered();
+                        deliveredThisIteration = true;
                     }
                     // Archive-time estimates are never recalculated from the
                     // current calibration during retries or sleep resumes.
+                    deliveryStage = "accessory-power-batch";
                     var power = database.ReadAccessoryPowerBatch(
                         accessoryCursor.TimestampMs, accessoryCursor.System, accessoryCursor.Component);
                     if (power.Count > 0)
@@ -353,10 +386,12 @@ internal sealed class TelemetryExportWorker(
                         accessoryCursor = new AccessoryCursor(last.TimestampMs, last.System, last.Component);
                         SaveAccessoryCursor(accessoryCursorFile, accessoryCursor);
                         TelemetryExportRuntime.Delivered();
+                        deliveredThisIteration = true;
                     }
                     // Persist events with their original event times. The
                     // initial 0 cursor imports only events still held by the
                     // bounded local Windows SQLite archive.
+                    deliveryStage = "threshold-event-batch";
                     var events = database.ReadThresholdEvents(eventCursor);
                     if (events.Count > 0)
                     {
@@ -373,10 +408,12 @@ internal sealed class TelemetryExportWorker(
                         eventCursor = events[^1].Id;
                         SaveEventCursor(eventCursorFile, eventCursor);
                         TelemetryExportRuntime.Delivered();
+                        deliveredThisIteration = true;
                     }
                     // The archive remains a minimal durable retry buffer. Send
                     // three tiny aggregate gauges periodically, never filenames
                     // or per-sensor disk allocation estimates.
+                    deliveryStage = "spool-health-batch";
                     if (now - lastSpoolAt >= 60_000)
                     {
                         var spool = database.StorageFootprint(host, now);
@@ -388,7 +425,12 @@ internal sealed class TelemetryExportWorker(
                         spoolResponse.EnsureSuccessStatusCode();
                         lastSpoolAt = now;
                         TelemetryExportRuntime.Delivered();
+                        deliveredThisIteration = true;
                     }
+                    // Recovery means a full export cycle completed after a
+                    // successful receiver acknowledgment, not just a healthy
+                    // in-memory state or an attempted HTTP connection.
+                    if (deliveredThisIteration) _deliveryOutage.Recovered();
                     await Task.Delay(TimeSpan.FromMilliseconds(
                         rows.Count >= 384 || power.Count >= 256 ? 500 :
                         rows.Count > 0 || power.Count > 0 ? 3000 : 7000), stop);
@@ -397,7 +439,7 @@ internal sealed class TelemetryExportWorker(
                 catch (Exception e)
                 {
                     TelemetryExportRuntime.Failed(e);
-                    logger.LogWarning("Telemetry delivery failed ({ExceptionType}); keeping local history and retrying.", e.GetType().Name);
+                    _deliveryOutage.Failed(e, deliveryStage);
                     try { await Task.Delay(TimeSpan.FromSeconds(15), stop); }
                     catch (OperationCanceledException) { break; }
                 }
@@ -410,8 +452,7 @@ internal sealed class TelemetryExportWorker(
         catch (Exception exception)
         {
             TelemetryExportRuntime.Failed(exception);
-            logger.LogWarning("Telemetry exporter could not initialize ({ExceptionType}); local hardware control is unaffected.",
-                exception.GetType().Name);
+            _initializationOutage.Failed(exception, initializationStage);
             try { await Task.Delay(TimeSpan.FromSeconds(5), stop); }
             catch (OperationCanceledException) { break; }
         }

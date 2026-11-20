@@ -56,6 +56,15 @@
           <ServiceControl Id="ControlSensorDashCollector" Name="SensorDashCollector"
                           Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
+        <!-- Register a distinct source for the dedicated classic Windows log.
+             The old SensorDash source (Application) is intentionally not moved
+             or removed; no event-data migration is required. -->
+        <Component Id="SensorDashOperationalEventSource" Guid="*">
+          <util:EventSource Name="SensorDash.Collector" Log="SensorDash"
+                            EventMessageFile="%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll"
+                            SupportsErrors="yes" SupportsWarnings="yes"
+                            SupportsInformationals="yes" KeyPath="yes" />
+        </Component>
         <Component Id="NativeTrayExecutable" Guid="*">
           <File Id="NativeTrayExe" Source="$(var.PublishDir)\SensorDash.Tray.exe" KeyPath="yes">
             <Shortcut Id="OpenSensorDashTray" Directory="ProgramMenuFolder" Name="SensorDash Tray"
@@ -76,6 +85,7 @@
 
     <Feature Id="Complete" Title="SensorDash" Level="1">
       <ComponentRef Id="SensorDashExecutable" />
+      <ComponentRef Id="SensorDashOperationalEventSource" />
       <ComponentRef Id="NativeTrayExecutable" />
       <ComponentRef Id="TrayAutoStart" />
     </Feature>
