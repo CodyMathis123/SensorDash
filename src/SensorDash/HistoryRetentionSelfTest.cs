@@ -60,6 +60,8 @@ internal static class HistoryRetentionSelfTest
                 cmd.Parameters["$ts"].Value = recentMs;
                 cmd.ExecuteNonQuery();
 
+                cmd.Parameters.Clear();
+                cmd.Parameters.Add("$ts", SqliteType.Integer);
                 cmd.CommandText = "INSERT INTO events(ts,severity,sensor,message,value) VALUES($ts,'info','test','test',NULL)";
                 for (var i = 0; i < 300; i++)
                 {
