@@ -69,6 +69,8 @@ jobs:
         run: node scripts/test-fan-review.cjs
       - name: Test role-aware Cooling Systems analysis
         run: node scripts/test-cooling-phase1.cjs
+      - name: Validate dedicated Windows operational Event Log contracts
+        run: node scripts/test-operational-logging.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |

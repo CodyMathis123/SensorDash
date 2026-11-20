@@ -43,13 +43,15 @@ internal sealed class WindowsPowerResumeNotifications : IDisposable
             };
             _registration = Register(ref args, DeviceNotifyCallback);
             if (_registration == IntPtr.Zero)
-                logger.LogWarning("Windows resume notifications unavailable (Win32 error {Error}); polling-gap recovery remains active.", Marshal.GetLastWin32Error());
+                logger.LogWarning(OperationalEvents.ResumeRegistrationFailure,
+                    "Windows resume notifications unavailable (Win32 error {Error}); polling-gap recovery remains active.", Marshal.GetLastWin32Error());
             else
                 logger.LogInformation("Windows resume notifications registered for collector fan rearm.");
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Windows resume registration failed; polling-gap recovery remains active.");
+            logger.LogWarning(OperationalEvents.ResumeRegistrationFailure, ex,
+                "Windows resume registration failed; polling-gap recovery remains active.");
         }
     }
 
