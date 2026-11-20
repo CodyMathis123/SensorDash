@@ -12,9 +12,14 @@ internal sealed class FanControlTrace
     private readonly object _sync=new();
     private readonly object _fileSync=new();
     private readonly Channel<string> _pending;
+    private readonly int _capacity;
+    private long _depth;
     private long _dropped;
     internal ChannelReader<string> PendingLines => _pending.Reader;
     internal long Dropped => Interlocked.Read(ref _dropped);
+    internal int Capacity => _capacity;
+    internal int Depth => (int)Math.Max(0, Interlocked.Read(ref _depth));
+    internal void MarkDequeued() => Interlocked.Decrement(ref _depth);
     private readonly Dictionary<string,(DateTimeOffset Time,string State,double Duty)>
         _samples=new(StringComparer.Ordinal);
     private int _resumeRearms;
@@ -25,6 +30,7 @@ internal sealed class FanControlTrace
 
     internal FanControlTrace(string dataDirectory,int bufferCapacity=2048)
     {
+        _capacity=bufferCapacity;
         _path=Path.Combine(dataDirectory,"logs","fan-control.log");
         _pending=Channel.CreateBounded<string>(new BoundedChannelOptions(bufferCapacity) {
             SingleReader=true,FullMode=BoundedChannelFullMode.Wait
@@ -81,8 +87,9 @@ internal sealed class FanControlTrace
         var line=(time??DateTimeOffset.UtcNow).ToUniversalTime()
             .ToString("O",CultureInfo.InvariantCulture)+
             " ["+kind+"] "+clean+Environment.NewLine;
-        if(!_pending.Writer.TryWrite(line))
-            Interlocked.Increment(ref _dropped);
+        if(_pending.Writer.TryWrite(line))
+            Interlocked.Increment(ref _depth);
+        else Interlocked.Increment(ref _dropped);
     }
 
     internal bool WriteBufferedLine(string line)
@@ -106,8 +113,11 @@ internal sealed class FanControlTrace
     internal void FlushPendingForTest()
     {
         while(_pending.Reader.TryRead(out var line))
+        {
+            MarkDequeued();
             if(!WriteBufferedLine(line))
                 throw new IOException("Cannot flush synthetic fan diagnostic trace.");
+        }
     }
 
     internal void Observe(string profileId,string channelId,string state,

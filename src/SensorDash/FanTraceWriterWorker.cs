@@ -18,6 +18,7 @@ internal sealed class FanTraceWriterWorker(
         {
             await foreach (var line in trace.PendingLines.ReadAllAsync(stoppingToken))
             {
+                trace.MarkDequeued();
                 Write(trace, line);
                 NoticeIfNeeded(trace);
             }
@@ -28,7 +29,10 @@ internal sealed class FanTraceWriterWorker(
             // Make a bounded best-effort flush at normal service shutdown.
             // A crash cannot flush an in-memory diagnostic buffer.
             while (trace.PendingLines.TryRead(out var line))
+            {
+                trace.MarkDequeued();
                 Write(trace, line);
+            }
             NoticeIfNeeded(trace);
         }
     }

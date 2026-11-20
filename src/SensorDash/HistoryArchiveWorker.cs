@@ -24,10 +24,12 @@ public sealed class ArchiveQueue
 {
     internal const int DefaultCapacity = 512;
     private readonly Channel<ArchiveWork> _channel;
-    private long _accepted, _dropped;
+    private readonly int _capacity;
+    private long _accepted, _dropped, _depth;
 
     internal ArchiveQueue(int capacity = DefaultCapacity)
     {
+        _capacity = capacity;
         _channel = Channel.CreateBounded<ArchiveWork>(new BoundedChannelOptions(capacity)
         {
             SingleReader = true,
@@ -37,6 +39,9 @@ public sealed class ArchiveQueue
     }
 
     internal ChannelReader<ArchiveWork> Reader => _channel.Reader;
+    internal int Capacity => _capacity;
+    internal int Depth => (int)Math.Max(0, Interlocked.Read(ref _depth));
+    internal void MarkDequeued() => Interlocked.Decrement(ref _depth);
     internal long Accepted => Interlocked.Read(ref _accepted);
     internal long Dropped => Interlocked.Read(ref _dropped);
 
@@ -48,6 +53,7 @@ public sealed class ArchiveQueue
         if (_channel.Writer.TryWrite(item))
         {
             Interlocked.Increment(ref _accepted);
+            Interlocked.Increment(ref _depth);
             return true;
         }
         Interlocked.Increment(ref _dropped);
@@ -131,6 +137,7 @@ internal sealed class HistoryArchiveWorker(
         {
             await foreach (var item in queue.Reader.ReadAllAsync(stoppingToken))
             {
+                queue.MarkDequeued();
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     ReportOverflow();

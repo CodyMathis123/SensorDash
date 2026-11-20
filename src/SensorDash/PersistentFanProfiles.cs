@@ -89,6 +89,31 @@ public sealed class PersistentFanProfiles
         double.IsFinite(p.ResponseSeconds) && p.ResponseSeconds is >=0 and <=90 &&
         double.IsFinite(p.HysteresisDegrees) && p.HysteresisDegrees is >=0 and <=10;
 
+    // Read-only diagnostic view of inputs authorized for active cooling.
+    // Missing/stale detection itself remains inside FanProfilePlanner.Tick.
+    internal CoolingInputRequirement[] CoolingInputRequirements()
+    {
+        lock (_sync)
+        {
+            var strictest = new Dictionary<string, int>(StringComparer.Ordinal);
+            void Include(string id, int maxAge)
+            {
+                if (string.IsNullOrWhiteSpace(id)) return;
+                if (!strictest.TryGetValue(id, out var previous) || maxAge < previous)
+                    strictest[id] = maxAge;
+            }
+            foreach (var profile in _approved.Values)
+            {
+                foreach (var curve in profile.Curves)
+                    Include(curve.SourceSensorId, curve.MaxSampleAgeSeconds);
+                foreach (var guard in profile.ThermalGuards)
+                    Include(guard.SourceSensorId, guard.MaxSampleAgeSeconds);
+            }
+            return strictest.Select(pair =>
+                new CoolingInputRequirement(pair.Key, pair.Value)).ToArray();
+        }
+    }
+
     public bool HasActiveProfiles { get { lock(_sync)return _approved.Count>0; } }
     // Keep the fast hardware poll until firmware/profile restoration actually
     // completes, even if the UI has already requested cancellation.

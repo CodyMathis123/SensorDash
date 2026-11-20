@@ -187,7 +187,8 @@ internal static class ThresholdEventProtocol
 
 internal sealed class TelemetryExportWorker(
     DashboardState state, HistoryStore database, ILogger<TelemetryExportWorker> logger,
-    ILoggerFactory loggerFactory) : BackgroundService
+    ILoggerFactory loggerFactory, PipelineHealthMetrics metrics, ArchiveQueue archive,
+    FanControlRuntime controls) : BackgroundService
 {
     private readonly ILogger _operations = loggerFactory.CreateLogger(OperationalEvents.Category);
     private readonly OperationalOutage _initializationOutage = new(
@@ -221,6 +222,7 @@ internal sealed class TelemetryExportWorker(
             var options = TelemetryExportOptions.Load(settingsFile);
             if (!options.Enabled)
             {
+                metrics.SetExportCursor(-1);
                 _initializationOutage.Reset();
                 _deliveryOutage.Reset();
                 _catalogOutage.Reset();
@@ -277,6 +279,7 @@ internal sealed class TelemetryExportWorker(
                 () => new TelemetryCursor(database.LatestTelemetryTimestamp(), "\uffff"),
                 () => new TelemetryCursor(0, ""),
                 TelemetryCursorPersistence.ValidSampleCursor, WarnCursor);
+            metrics.SetExportCursor(cursor.TimestampMs);
             // Accessory watts use a separate timestamp/system/component cursor.
             initializationStage = "read-accessory-cursor";
             var accessoryCursor = TelemetryCursorPersistence.LoadOrRecover(
@@ -366,6 +369,7 @@ internal sealed class TelemetryExportWorker(
                         var last = rows[^1];
                         cursor = new TelemetryCursor(last.TimestampMs, last.SensorId);
                         SaveCursor(cursorFile, cursor);
+                        metrics.SetExportCursor(cursor.TimestampMs);
                         TelemetryExportRuntime.Delivered();
                         deliveredThisIteration = true;
                     }
@@ -416,7 +420,13 @@ internal sealed class TelemetryExportWorker(
                     deliveryStage = "spool-health-batch";
                     if (now - lastSpoolAt >= 60_000)
                     {
-                        var spool = database.StorageFootprint(host, now);
+                        // Virtual Pipeline readings use the ingest receiver's
+                        // already-whitelisted sensordash_reading schema. They
+                        // are diagnostics only, never active hardware sensors.
+                        var spool = database.StorageFootprint(host, now) +
+                            PipelineHealthMetrics.SerializeForPi(
+                                metrics.Snapshot(archive, controls.Trace, state.Latest),
+                                host, now);
                         using var spoolRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
                         spoolRequest.Headers.Authorization =
                             new AuthenticationHeaderValue("Bearer", token);
