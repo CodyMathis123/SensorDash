@@ -77,6 +77,8 @@ jobs:
         run: node scripts/test-collector-isolation.cjs
       - name: Validate buffered fan-control trace I/O isolation
         run: node scripts/test-buffered-fan-trace.cjs
+      - name: Validate collector pipeline health instrumentation and single event source
+        run: node scripts/test-pipeline-health.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
