@@ -97,11 +97,13 @@ internal static class FanResumeSelfTest
             Check(fake.Writes==2 && fake.Resets==2,
                 "Resume gap must force SetDefault then SetSoftware despite cached 10%");
             Check(trace.ResumeRearms==1,"One resume event");
+            trace.FlushPendingForTest();
             var lines=JsonSerializer.Serialize(trace.ReadRecent());
             Check(lines.Contains("REARM")&&lines.Contains("PWM") &&
                   lines.Contains("registerDuty=10.0%"),
                 "Text trace includes resume, PWM and independent control register feedback");
             trace.HardwareReopened(TimeSpan.FromSeconds(9.7),now.AddSeconds(66),"windows-resume");
+            trace.FlushPendingForTest();
             var hardwareTrace=JsonSerializer.Serialize(trace.ReadRecent());
             Check(hardwareTrace.Contains("HW-REOPEN") &&
                   hardwareTrace.Contains("reason=windows-resume gap=9.7s"),
@@ -132,6 +134,7 @@ internal static class FanResumeSelfTest
             profiles.Tick(channels,Frame(now.AddSeconds(96)),now.AddSeconds(96));
             Check(fake.Writes==beforeWakeWrites+2,
                 "Stable approved PWM must not be repeatedly reasserted");
+            trace.FlushPendingForTest();
             var recent=JsonSerializer.Serialize(trace.ReadRecent());
             Check(recent.Contains("POST-RESUME-REARM"),
                 "Delayed recovery must appear in diagnostics");
@@ -146,8 +149,22 @@ internal static class FanResumeSelfTest
                 "Never rearm when no active approved profile");
 
             for(var i=0;i<100;i++)trace.Event("TEST","diagnostic "+i,now);
+            trace.FlushPendingForTest();
             Check(new FileInfo(trace.PathName).Length<2*1024*1024,
                 "Low-volume log bounded");
+
+            // A stalled trace writer cannot slow down PWM. Its bounded queue
+            // reports loss rather than waiting or accessing the filesystem.
+            var saturated=new FanControlTrace(dir.FullName,2);
+            saturated.Event("TEST","buffer-one",now);
+            saturated.Event("TEST","buffer-two",now);
+            saturated.Event("TEST","buffer-three",now);
+            Check(saturated.Dropped==1,"Trace saturation must be observable");
+            saturated.FlushPendingForTest();
+            var overflowTrace=JsonSerializer.Serialize(saturated.ReadRecent());
+            Check(overflowTrace.Contains("buffer-one") && overflowTrace.Contains("buffer-two") &&
+                  !overflowTrace.Contains("buffer-three"),
+                  "Queued diagnostic writes are ordered and bounded");
         }
         finally
         {
