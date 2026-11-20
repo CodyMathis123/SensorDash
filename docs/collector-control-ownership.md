@@ -49,13 +49,24 @@ Archive write failures produce bounded warning/recovery events (5101-5103).
 The worker holds its current work item across retries and can catch up after
 transient SQLite contention. It does not retry PWM commands.
 
-## Next stage
+## Buffered fan diagnostics
 
-Disk-backed fan trace logging and event-log notifications still originate
-from the cooling path. The next PR buffers that diagnostic I/O, without
-changing the LHM single-owner rule. A later instrumentation pass can examine
-hardware-scan versus PWM-evaluation latency and whether cooling-critical
-sensor groups warrant independent *schedules*, not independent hardware writers.
+`FanControlTrace.Event` now only formats and enqueues an in-memory line.
+A distinct `FanTraceWriterWorker` owns file append and 2 MiB rotation, with a
+bounded 2,048-line queue and a best-effort shutdown flush. A long-lived disk
+failure cannot delay a physical PWM command. If diagnostics exceed buffer
+capacity or the file fails, operational events 5201 and 5202 report dropped
+lines. A process crash can lose the buffered lines; these are diagnostics,
+not a durable safety audit.
+
+Windows operational Event Log notifications for thermal guard transitions
+are still synchronous when emitted from the collector; they're infrequent
+state changes, not the 1-second PWM trace. If their duration becomes
+measurable in critical-path profiling, they can be queued separately.
+
+A later instrumentation pass can examine scan vs PWM-evaluation latency and
+whether cooling-critical hardware families warrant different *schedules*,
+not separate LHM hardware-writing threads.
 
 Any queue or thread split must preserve these safety invariants:
 1. Only the hardware owner accesses LHM controls.
