@@ -22,6 +22,7 @@ public sealed class FanControlRuntime
     private readonly object _sync = new();
     private readonly PersistentFanProfiles _profiles;
     private readonly FanControlTrace _trace;
+    internal FanControlTrace Trace => _trace;
     public FanControlRuntime(string dataDirectory)
     {
         _trace=new FanControlTrace(dataDirectory);

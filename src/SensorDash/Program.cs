@@ -57,6 +57,7 @@ if (OptionalPerformanceDiagnostics.Enabled)
 builder.Services.AddSingleton(new ArchiveQueue());
 builder.Services.AddHostedService<HistoryArchiveWorker>();
 builder.Services.AddHostedService<LiveFrameBroadcastWorker>();
+builder.Services.AddHostedService<FanTraceWriterWorker>();
 builder.Services.AddHostedService<TelemetryExportWorker>();
 builder.Services.AddHostedService<SensorWorker>();
 builder.Services.AddHostedService<HistoryRetentionWorker>();
