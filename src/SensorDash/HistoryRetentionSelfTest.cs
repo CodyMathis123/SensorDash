@@ -34,8 +34,65 @@ internal static class HistoryRetentionSelfTest
                 command.CommandText = "PRAGMA auto_vacuum";
                 Check(Convert.ToInt32(command.ExecuteScalar()) == 1, "Auto reclamation not enabled");
             }
+            // Exercise the actual bounded maintenance path, including large
+            // backlogs and multiple independent tables. No batch may delete
+            // more than its configured limit, even when millions are expired.
+            // Seed stale and recent auxiliary data too; those tables must
+            // obey the same cutoff and per-batch bounds as sensor readings.
+            var oldMs = DateTimeOffset.UtcNow.AddDays(-40).ToUnixTimeMilliseconds();
+            var recentMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            using (var c = new SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                c.Open();
+                using var tx = c.BeginTransaction();
+                using var cmd = c.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "INSERT INTO accessory_power(system,component,ts,watts,source,revision) VALUES('loop',$component,$ts,4,'rated','v1')";
+                cmd.Parameters.Add("$component", SqliteType.Text);
+                cmd.Parameters.Add("$ts", SqliteType.Integer);
+                for (var i = 0; i < 700; i++)
+                {
+                    cmd.Parameters["$component"].Value = "fan-" + i;
+                    cmd.Parameters["$ts"].Value = oldMs;
+                    cmd.ExecuteNonQuery();
+                }
+                cmd.Parameters["$component"].Value = "recent-accessory";
+                cmd.Parameters["$ts"].Value = recentMs;
+                cmd.ExecuteNonQuery();
+
+                cmd.Parameters.Clear();
+                cmd.Parameters.Add("$ts", SqliteType.Integer);
+                cmd.CommandText = "INSERT INTO events(ts,severity,sensor,message,value) VALUES($ts,'info','test','test',NULL)";
+                for (var i = 0; i < 300; i++)
+                {
+                    cmd.Parameters["$ts"].Value = oldMs + i;
+                    cmd.ExecuteNonQuery();
+                }
+                cmd.Parameters["$ts"].Value = recentMs;
+                cmd.ExecuteNonQuery();
+                tx.Commit();
+            }
             var before = new FileInfo(path).Length;
-            store.Cleanup(30);
+            var deletedSamples = 0;
+            var deletedEvents = 0;
+            var deletedAccessories = 0;
+            var count = 0;
+            while (true)
+            {
+                var batch = store.CleanupBatch(30, 500);
+                Check(batch.Samples <= 500 && batch.Events <= 256 &&
+                      batch.AccessoryPower <= 500, "Cleanup exceeded its batch limit");
+                deletedSamples += batch.Samples;
+                deletedEvents += batch.Events;
+                deletedAccessories += batch.AccessoryPower;
+                count++;
+                Check(count <= 60, "Cleanup failed to make incremental progress");
+                if (batch.Total == 0) break;
+            }
+            Check(count > 1 && deletedSamples == 20000 &&
+                  deletedAccessories == 700 && deletedEvents == 300,
+                "Expired sample, event or accessory backlog was not drained in bounded batches");
+            store.TryRetentionCheckpoint();
             Check(new FileInfo(path).Length < before / 2, "Retention did not reclaim file space");
             using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
             {
@@ -45,10 +102,17 @@ internal static class HistoryRetentionSelfTest
                 Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Retention removed the wrong rows");
                 command.CommandText = "SELECT value FROM samples WHERE sensor='retained'";
                 Check(Convert.ToDouble(command.ExecuteScalar()) == 27.5, "Retained value changed");
+                command.CommandText = "SELECT COUNT(*) FROM accessory_power";
+                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Recent accessory data lost");
+                command.CommandText = "SELECT COUNT(*) FROM events";
+                Check(Convert.ToInt64(command.ExecuteScalar()) == 1, "Recent events lost");
                 command.CommandText = "PRAGMA integrity_check";
                 Check((string?)command.ExecuteScalar() == "ok", "Database integrity failed");
             }
-            store.Cleanup(30);
+            Check(store.CleanupBatch(30, 500).Total == 0,
+                "Repeated cleanup should not delete retained samples");
+            Check(new DashboardSettings().RetentionDays == 3,
+                "New installations should default to 3-day Windows history");
             _ = new HistoryStore(path); // Reopening must not require another migration.
             CheckAccessories(path, store);
         }
