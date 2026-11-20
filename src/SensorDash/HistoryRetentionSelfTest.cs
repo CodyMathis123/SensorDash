@@ -34,8 +34,25 @@ internal static class HistoryRetentionSelfTest
                 command.CommandText = "PRAGMA auto_vacuum";
                 Check(Convert.ToInt32(command.ExecuteScalar()) == 1, "Auto reclamation not enabled");
             }
+            // Exercise the actual bounded maintenance path, including large
+            // backlogs and multiple independent tables. No batch may delete
+            // more than its configured limit, even when millions are expired.
             var before = new FileInfo(path).Length;
-            store.Cleanup(30);
+            var deletedSamples = 0;
+            var count = 0;
+            while (true)
+            {
+                var batch = store.CleanupBatch(30, 500);
+                Check(batch.Samples <= 500 && batch.Events <= 256 &&
+                      batch.AccessoryPower <= 500, "Cleanup exceeded its batch limit");
+                deletedSamples += batch.Samples;
+                count++;
+                Check(count <= 60, "Cleanup failed to make incremental progress");
+                if (batch.Total == 0) break;
+            }
+            Check(count > 1 && deletedSamples == 20000,
+                "Expired sample backlog was not drained in bounded batches");
+            store.TryRetentionCheckpoint();
             Check(new FileInfo(path).Length < before / 2, "Retention did not reclaim file space");
             using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
             {
@@ -48,7 +65,10 @@ internal static class HistoryRetentionSelfTest
                 command.CommandText = "PRAGMA integrity_check";
                 Check((string?)command.ExecuteScalar() == "ok", "Database integrity failed");
             }
-            store.Cleanup(30);
+            Check(store.CleanupBatch(30, 500).Total == 0,
+                "Repeated cleanup should not delete retained samples");
+            Check(new DashboardSettings().RetentionDays == 3,
+                "New installations should default to 3-day Windows history");
             _ = new HistoryStore(path); // Reopening must not require another migration.
             CheckAccessories(path, store);
         }
