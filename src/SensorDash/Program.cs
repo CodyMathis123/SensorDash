@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -30,6 +30,8 @@ if (!args.Contains("--collector", StringComparer.OrdinalIgnoreCase))
         catch { }
     return;
 }
+CollectorStartupLog.Install();
+CollectorStartupLog.Write("info", "Initializing ProgramData and host");
 var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SensorDash");
 Directory.CreateDirectory(data);
 var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
@@ -57,6 +59,7 @@ builder.Services.AddAuthentication(
     Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 builder.Services.AddAuthorization();
+CollectorStartupLog.Write("info", "Building collector host");
 var app = builder.Build();
 // Bind exclusively to IPv4 loopback, and reject alternate Host headers to
 // avoid local browser DNS-rebinding requests to a SYSTEM-owned web process.
@@ -134,6 +137,8 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
 app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(state)));
+// SCM event history is read only when the Settings health panel requests it.
+app.MapGet("/api/collector-health", () => Results.Ok(CollectorHealth.Read()));
 // Read-only, bounded performance history. Browser download never contains sensor readings,
 // settings, paths, tokens or device identifiers.
 app.MapGet("/api/performance-history", async (CancellationToken ct) =>
@@ -302,7 +307,17 @@ app.MapGet("/api/stream", async (HttpContext ctx, DashboardState state) =>
     finally { state.Unsubscribe(id); }
 });
 
-await app.RunAsync();
+CollectorStartupLog.Write("info", "Starting collector host and loopback dashboard");
+try
+{
+    await app.RunAsync();
+    CollectorStartupLog.Write("info", "Collector host stopped normally");
+}
+catch (Exception ex)
+{
+    CollectorStartupLog.Write("fatal", "Collector host failed: " + ex);
+    throw;
+}
 
 // Optional, explicitly enabled process diagnostics. Disabled by default: no sampler,
 // no memory/GC enumeration, no history storage and no per-cycle measurement.
@@ -811,6 +826,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
         // Native OS notification catches quick sleep/wake cycles which are too
         // short for the old >20s polling-gap heuristic. Register once for the
         // lifetime of the elevated collector; all reopens happen on this thread.
+        CollectorStartupLog.Write("info", "Sensor worker initializing");
         using var resumeNotifications = new WindowsPowerResumeNotifications(logger);
         while (!stoppingToken.IsCancellationRequested) {
             var cfg = state.Settings;
@@ -856,6 +872,7 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                 if (_computer == null) {
                     _computer = HardwareCollection.CreateComputer(cfg);
                     _computer.Open();
+                    CollectorStartupLog.Write("info", "Hardware opened; storage collection enabled=" + _computer.IsStorageEnabled);
                     _activeCollectionSignature = collectionSignature;
                     if (reopenForResume)
                         controls.RecordHardwareReopened(resumeGap, now,

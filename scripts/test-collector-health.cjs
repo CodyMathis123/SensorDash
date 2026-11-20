@@ -1,0 +1,44 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const backend = fs.readFileSync('src/SensorDash/CollectorHealth.cs', 'utf8');
+const host = fs.readFileSync('src/SensorDash/Program.cs', 'utf8');
+const project = fs.readFileSync('src/SensorDash/SensorDash.csproj', 'utf8');
+const ui = fs.readFileSync('src/SensorDash/wwwroot/app.js', 'utf8');
+const css = fs.readFileSync('src/SensorDash/wwwroot/style.css', 'utf8');
+const html = fs.readFileSync('src/SensorDash/wwwroot/index.html', 'utf8');
+
+assert.match(host, /app\.MapGet\("\/api\/collector-health"/);
+assert.match(project, /System\.Diagnostics\.EventLog/);
+assert.match(host, /CollectorHealth\.SelfTest\(\)/);
+assert.match(backend, /new EventLogQuery\("System", PathType\.LogName/);
+assert.match(backend, /ReverseDirection = true/);
+assert.match(backend, /MaximumScannedEvents = 512/);
+assert.match(backend, /record\.ProviderName, "Service Control Manager"/);
+assert.match(backend, /IsCollectorEvent\(record\)/);
+assert.match(backend, /7031 or 7034/);
+assert.match(backend, /7036/);
+assert.match(backend, /LastStartAfterCrash/);
+assert.match(backend, /DateTimeOffset\? LastStartAfterCrash/);
+assert.match(backend, /EventsAvailable/);
+assert.match(backend, /CollectorStartupLog\.Write\("warning"/);
+assert.doesNotMatch(backend, /Process\.Start\(|sc\.exe|powershell|telemetry\.db|token/i);
+
+assert.match(ui, /function collectorHealthPanel\(/);
+assert.match(ui, /collectorHealthPanel\(\)\+/);
+assert.match(ui, /fetchJSON\('\/api\/collector-health'\)/);
+assert.match(ui, /id="refreshCollectorHealth"/);
+assert.match(ui, /paintCollectorHealth\(\)/);
+assert.match(ui, /unexpectedTerminations7d/);
+assert.match(ui, /lastStartAfterCrash/);
+assert.match(ui, /not proof of automatic recovery/);
+assert.match(ui, /if\(S\.view==='settings'\)paintCollectorHealth\(\)/);
+assert.match(html, /id="collectorHealthAlert"[^>]*data-view="settings"[^>]*hidden/);
+assert.match(ui, /function paintCollectorHealthAlert\(/);
+assert.match(ui, /Date\.now\(\)-at<86400000/);
+assert.match(ui, /node\.hidden=!recent/);
+assert.match(css, /\.collector-health-alert\[hidden\]\{display:none\}/);
+assert.match(css, /\.collector-health-grid/);
+assert.match(css, /max-width:510px/);
+console.log('Collector health UI/API contracts passed.');
