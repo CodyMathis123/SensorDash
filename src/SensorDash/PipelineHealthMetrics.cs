@@ -38,7 +38,9 @@ internal sealed class LatencyHistogram
     {
         var count = Interlocked.Read(ref _count);
         if (count == 0) return new(0, null, null, null, null);
-        var counts = _buckets.Select(Interlocked.Read).ToArray();
+        var counts = new long[_buckets.Length];
+        for (var i = 0; i < counts.Length; i++)
+            counts[i] = Interlocked.Read(ref _buckets[i]);
         var total = counts.Sum();
         if (total == 0) return new(0, null, null, null, null);
         double Quantile(double percentile)
