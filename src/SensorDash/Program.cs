@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); ArchiveIsolationSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); ArchiveIsolationSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); PipelineHealthSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -55,6 +55,7 @@ builder.Services.AddSingleton(new FanControlRuntime(data));
 if (OptionalPerformanceDiagnostics.Enabled)
     builder.Services.AddHostedService<PerformanceSamplerWorker>();
 builder.Services.AddSingleton(new ArchiveQueue());
+builder.Services.AddSingleton<PipelineHealthMetrics>();
 builder.Services.AddHostedService<HistoryArchiveWorker>();
 builder.Services.AddHostedService<LiveFrameBroadcastWorker>();
 builder.Services.AddHostedService<FanTraceWriterWorker>();
@@ -70,6 +71,11 @@ builder.Services.AddAuthentication(
 builder.Services.AddAuthorization();
 CollectorStartupLog.Write("info", "Building collector host");
 var app = builder.Build();
+// ServiceBase.AutoLog emits separate EventId=0 Application-log entries using
+// the service name as an event source. Dedicated SensorDash.Collector events
+// already report lifecycle, while SCM writes system-level recovery events.
+if (app.Services.GetService<IHostLifetime>() is WindowsServiceLifetime windowsLifetime)
+    windowsLifetime.AutoLog = false;
 var operations = app.Services.GetRequiredService<ILoggerFactory>()
     .CreateLogger(OperationalEvents.Category);
 app.Lifetime.ApplicationStarted.Register(() => operations.LogInformation(
@@ -153,7 +159,12 @@ app.MapGet("/api/status", (DashboardState state) => Results.Ok(new
 }));
 app.MapGet("/api/live", (DashboardState state) =>
     Results.Ok(state.Latest ?? new SensorFrame(DateTimeOffset.UtcNow, [], "Connecting to SensorDash Collector...")));
-app.MapGet("/api/diagnostics", (DashboardState state) => Results.Ok(Diagnostics(state)));
+app.MapGet("/api/diagnostics", (DashboardState state, PipelineHealthMetrics metrics,
+    ArchiveQueue queue, FanControlRuntime fan) =>
+    Results.Ok(Diagnostics(state, metrics, queue, fan)));
+app.MapGet("/api/pipeline-health", (DashboardState state, PipelineHealthMetrics metrics,
+    ArchiveQueue queue, FanControlRuntime fan) =>
+    Results.Ok(metrics.Snapshot(queue, fan.Trace, state.Latest)));
 // SCM event history is read only when the Settings health panel requests it.
 app.MapGet("/api/collector-health", () => Results.Ok(CollectorHealth.Read()));
 // Read-only, bounded performance history. Browser download never contains sensor readings,
@@ -281,7 +292,7 @@ app.MapPost("/api/fan-control/authorize", async (HttpContext context, FanControl
     return Results.Ok(result);
 }).RequireAuthorization();
 
-object Diagnostics(DashboardState state)
+object Diagnostics(DashboardState state, PipelineHealthMetrics metrics, ArchiveQueue queue, FanControlRuntime fan)
 {
     var frame = state.Latest;
     var storage = frame?.Devices?.Where(d => d.Type == "Storage").ToArray() ?? [];
@@ -295,6 +306,7 @@ object Diagnostics(DashboardState state)
         storageDevices = storage,
         storageSensorCount = readings.Length,
         process = OptionalPerformanceDiagnostics.Enabled ? ProcessTelemetry.Snapshot() : null,
+        pipeline = metrics.Snapshot(queue, fan.Trace, state.Latest),
         storageTemperatures = readings.Where(s => s.Type == "Temperature").ToArray(),
         storageLastPolled = state.LastStoragePoll,
         note = storage.Length == 0
@@ -818,7 +830,7 @@ public sealed partial class HistoryStore {
 
 }
 public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, FanControlRuntime controls,
-    ILogger<SensorWorker> logger, ILoggerFactory loggerFactory) : BackgroundService {
+    PipelineHealthMetrics metrics, ILogger<SensorWorker> logger, ILoggerFactory loggerFactory) : BackgroundService {
     private readonly ILogger _operations = loggerFactory.CreateLogger(OperationalEvents.Category);
     private readonly OperationalOutage _collectionOutage = new(
         loggerFactory.CreateLogger(OperationalEvents.Category), "sensor collection",
@@ -855,6 +867,10 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 var windowsResume = resumeNotifications.ConsumePending();
                 var reopenForResume = _computer != null &&
                     FanResumePolicy.ShouldReopenHardware(_lastCollectionStart, now, windowsResume);
+                if (_lastCollectionStart is { } priorCycle)
+                    metrics.ObserveInterval(now - priorCycle,
+                        controls.IsActive ? 1 : Math.Clamp(cfg.FastPollSeconds, 1, 30),
+                        windowsResume || reopenForResume);
                 _lastCollectionStart = now;
                 if (reopenForResume) {
                     _operations.LogInformation(OperationalEvents.ResumeReopenStarted,
@@ -890,18 +906,26 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
-                var cycleStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
+                var cycleStarted = Stopwatch.GetTimestamp();
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
                 var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
-                var scanStarted = OptionalPerformanceDiagnostics.Enabled ? Stopwatch.GetTimestamp() : 0;
+                var scanStarted = Stopwatch.GetTimestamp();
                 foreach (var hardware in _computer.Hardware)
+                {
+                    var familyStart = Stopwatch.GetTimestamp();
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
-                var scanMs = OptionalPerformanceDiagnostics.Enabled
-                    ? Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds : 0;
+                    metrics.ObserveFamily(hardware.HardwareType.ToString(),
+                        Stopwatch.GetElapsedTime(familyStart).TotalMilliseconds);
+                }
+                var scanMs = Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds;
+                metrics.ObserveScan(scanMs);
                 var frame = new SensorFrame(now, readings, null, devices, driver);
+                var controlStart = Stopwatch.GetTimestamp();
                 controls.Tick(_computer, frame, cfg, now);
+                metrics.ObserveControl(Stopwatch.GetElapsedTime(controlStart).TotalMilliseconds);
+                metrics.ObserveCoolingInputs(frame, controls.CoolingInputRequirements(), now);
                 if (reopenForResume)
                     _operations.LogInformation(OperationalEvents.ResumeReopenCompleted,
                         "LHM reopen and first sensor scan completed after {Reason}; {SensorCount} readings; approved control profiles evaluated. Hardware PWM feedback is tracked separately.",
@@ -926,8 +950,10 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 var archiveDue = (now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds;
                 archive.TryEnqueue(frame, cfg, archiveDue, events);
                 if (archiveDue) _lastSaved = now;
+                var cycleMs = Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds;
+                metrics.ObserveCycle(cycleMs);
                 if (OptionalPerformanceDiagnostics.Enabled)
-                    CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
+                    CollectorPerformance.ObserveCycle(cycleMs, scanMs);
                 _collectionOutage.Recovered();
             } catch (Exception ex) {
                 _collectionOutage.Failed(ex, "collector-poll");
