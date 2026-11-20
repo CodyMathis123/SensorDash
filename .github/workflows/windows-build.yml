@@ -73,6 +73,8 @@ jobs:
         run: node scripts/test-operational-logging.cjs
       - name: Validate independent batched local SQLite retention
         run: node scripts/test-history-retention-worker.cjs
+      - name: Verify collector isolation from SQLite and live-UI encoding
+        run: node scripts/test-collector-isolation.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
