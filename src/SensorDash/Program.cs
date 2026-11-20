@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); ArchiveIsolationSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -54,6 +54,9 @@ builder.Services.AddSingleton<SimulationState>();
 builder.Services.AddSingleton(new FanControlRuntime(data));
 if (OptionalPerformanceDiagnostics.Enabled)
     builder.Services.AddHostedService<PerformanceSamplerWorker>();
+builder.Services.AddSingleton(new ArchiveQueue());
+builder.Services.AddHostedService<HistoryArchiveWorker>();
+builder.Services.AddHostedService<LiveFrameBroadcastWorker>();
 builder.Services.AddHostedService<TelemetryExportWorker>();
 builder.Services.AddHostedService<SensorWorker>();
 builder.Services.AddHostedService<HistoryRetentionWorker>();
@@ -522,6 +525,14 @@ public sealed class DashboardSettings {
 public sealed class DashboardState {
     private readonly string _settingsPath;
     private readonly ConcurrentDictionary<Guid, Channel<string>> _listeners = new();
+    // Latest is always updated without JSON work on the hardware thread.
+    // Slow UI consumers coalesce superseded frames, unlike durable history.
+    private readonly Channel<SensorFrame> _pendingLive = Channel.CreateBounded<SensorFrame>(
+        new BoundedChannelOptions(1) {
+            SingleReader = true, SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+    internal ChannelReader<SensorFrame> PendingLiveFrames => _pendingLive.Reader;
     private DashboardSettings _settings;
     private SensorFrame? _latest;
     public DateTimeOffset Started { get; } = DateTimeOffset.UtcNow;
@@ -556,7 +567,9 @@ public sealed class DashboardState {
     }
     public void Publish(SensorFrame frame) {
         Volatile.Write(ref _latest, frame);
-        var message = JsonSerializer.Serialize(frame, JsonSerializerOptions.Web);
+        _pendingLive.Writer.TryWrite(frame);
+    }
+    internal void BroadcastSerialized(string message) {
         foreach (var listener in _listeners.Values) listener.Writer.TryWrite(message);
     }
     public (Guid Id, ChannelReader<string> Reader) Subscribe() {
@@ -803,14 +816,13 @@ public sealed partial class HistoryStore {
     }
 
 }
-public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls,
+public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, FanControlRuntime controls,
     ILogger<SensorWorker> logger, ILoggerFactory loggerFactory) : BackgroundService {
     private readonly ILogger _operations = loggerFactory.CreateLogger(OperationalEvents.Category);
     private readonly OperationalOutage _collectionOutage = new(
         loggerFactory.CreateLogger(OperationalEvents.Category), "sensor collection",
         OperationalEvents.SensorFailure, OperationalEvents.SensorFailureSummary,
         OperationalEvents.SensorRecovered, LogLevel.Error);
-    private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
     private readonly PawnIoMonitor _pawnIo = new();
     private string? _activeCollectionSignature;
@@ -894,43 +906,25 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                         "LHM reopen and first sensor scan completed after {Reason}; {SensorCount} readings; approved control profiles evaluated. Hardware PWM feedback is tracked separately.",
                         windowsResume ? "Windows resume notification" : "long polling gap",
                         readings.Count);
-                // Fan control must never depend on local SQLite recording.
-                // Emit bounded cooling events only AFTER a recovery attempt.
-                foreach(var evt in controls.DrainRecoveryEvents())
+                // Publish an immutable frame reference and queue optional
+                // persistence. Neither action touches SQLite or serializes JSON.
+                // A saturated archive buffer is explicitly counted; cooling
+                // must continue even when local storage is unavailable.
+                var events = controls.DrainRecoveryEvents();
+                foreach (var evt in events)
                 {
-                    // Safety state changes are genuinely actionable; emit one
-                    // operational event per guard transition, never each PWM tick.
-                    // Detailed profile/channel identities stay in the bounded
-                    // fan trace and local SQLite event history.
-                    if (evt.Sensor.StartsWith("fan:profile:", StringComparison.Ordinal))
-                    {
-                        if (evt.Severity == "warning")
-                            _operations.LogWarning(OperationalEvents.CoolingGuardEntered,
-                                "An approved cooling profile entered a safety guard or failsafe state; inspect local cooling events and fan-control trace.");
-                        else if (evt.Severity == "info")
-                            _operations.LogInformation(OperationalEvents.CoolingGuardCleared,
-                                "A cooling profile safety guard cleared; the approved curve resumed.");
-                    }
-                    try { db.Event(evt.Severity,evt.Sensor,evt.Message,evt.Value); }
-                    catch(Exception eventError)
-                    {
-                        logger.LogWarning(OperationalEvents.CoolingEventArchiveFailure, eventError,
-                            "Could not archive PWM recovery event; fan control is unaffected.");
-                    }
+                    if (!evt.Sensor.StartsWith("fan:profile:", StringComparison.Ordinal)) continue;
+                    if (evt.Severity == "warning")
+                        _operations.LogWarning(OperationalEvents.CoolingGuardEntered,
+                            "An approved cooling profile entered a safety guard or failsafe state; inspect local cooling events and fan-control trace.");
+                    else if (evt.Severity == "info")
+                        _operations.LogInformation(OperationalEvents.CoolingGuardCleared,
+                            "A cooling profile safety guard cleared; the approved curve resumed.");
                 }
                 state.Publish(frame);
-                if ((now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds) {
-                    db.Record(frame, cfg);
-                    // Derived electrical history is observational only. A failed
-                    // optional computation/storage cannot interrupt fan control.
-                    try { db.RecordAccessoryPower(frame, cfg); }
-                    catch (Exception electricalError) {
-                        logger.LogWarning(OperationalEvents.AccessoryArchiveFailure, electricalError,
-                            "Accessory power archive failed; control is unchanged.");
-                    }
-                    CheckEvents(frame, cfg);
-                    _lastSaved = now;
-                }
+                var archiveDue = (now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds;
+                archive.TryEnqueue(frame, cfg, archiveDue, events);
+                if (archiveDue) _lastSaved = now;
                 if (OptionalPerformanceDiagnostics.Enabled)
                     CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
                 _collectionOutage.Recovered();
@@ -973,19 +967,5 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
             Scan(child, target, devices, refreshStorage, now, lastStorage,
                 pausedDeviceIds, paused);
     }
-    private void CheckEvents(SensorFrame frame, DashboardSettings cfg) {
-        var byId = frame.Sensors.ToDictionary(s => s.Id, s => s);
-        foreach (var (id, threshold) in cfg.HighThresholds) {
-            if (!byId.TryGetValue(id, out var sensor) || sensor.Value is not double value) continue;
-            var active = _alarms.GetValueOrDefault(id);
-            if (!active && value >= threshold) {
-                db.Event("warning", id, $"{cfg.Aliases.GetValueOrDefault(id, sensor.Name)} reached {value:0.#} (threshold {threshold:0.#})", value);
-                _alarms[id] = true;
-            } else if (active && value < threshold - 2) {
-                db.Event("info", id, $"{cfg.Aliases.GetValueOrDefault(id, sensor.Name)} returned below threshold", value);
-                _alarms[id] = false;
-            }
-        }
 
-    }
 }
