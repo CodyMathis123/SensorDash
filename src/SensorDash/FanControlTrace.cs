@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Threading.Channels;
 
 // Low-volume, bounded, human-readable collector-side diagnostics. Deliberately
 // independent of SQLite telemetry, fan controllers, and logger providers.
@@ -9,6 +10,11 @@ internal sealed class FanControlTrace
     private const long MaxFileBytes=2*1024*1024;
     private readonly string _path;
     private readonly object _sync=new();
+    private readonly object _fileSync=new();
+    private readonly Channel<string> _pending;
+    private long _dropped;
+    internal ChannelReader<string> PendingLines => _pending.Reader;
+    internal long Dropped => Interlocked.Read(ref _dropped);
     private readonly Dictionary<string,(DateTimeOffset Time,string State,double Duty)>
         _samples=new(StringComparer.Ordinal);
     private int _resumeRearms;
@@ -17,9 +23,12 @@ internal sealed class FanControlTrace
     internal string PathName => _path;
     internal int ResumeRearms => Volatile.Read(ref _resumeRearms);
 
-    internal FanControlTrace(string dataDirectory)
+    internal FanControlTrace(string dataDirectory,int bufferCapacity=2048)
     {
         _path=Path.Combine(dataDirectory,"logs","fan-control.log");
+        _pending=Channel.CreateBounded<string>(new BoundedChannelOptions(bufferCapacity) {
+            SingleReader=true,FullMode=BoundedChannelFullMode.Wait
+        });
     }
 
     internal void ResumeGap(TimeSpan gap, IEnumerable<string> channels,DateTimeOffset now)
@@ -48,7 +57,7 @@ internal sealed class FanControlTrace
         {
             // Read only on explicit diagnostic request. The file is bounded
             // to 2 MiB and its rotated predecessor is retained separately.
-            lock(_sync)
+            lock(_fileSync)
             {
                 var lines=File.Exists(_path)
                     ?File.ReadLines(_path).TakeLast(Math.Clamp(maxLines,10,500)).ToArray()
@@ -63,6 +72,8 @@ internal sealed class FanControlTrace
         }
     }
 
+    // Producers perform only bounded in-memory operations. File creation,
+    // rotation, and writes are exclusively the background trace worker's job.
     internal void Event(string kind,string detail,DateTimeOffset? time=null)
     {
         var clean=detail.Replace('\r',' ').Replace('\n',' ');
@@ -70,20 +81,33 @@ internal sealed class FanControlTrace
         var line=(time??DateTimeOffset.UtcNow).ToUniversalTime()
             .ToString("O",CultureInfo.InvariantCulture)+
             " ["+kind+"] "+clean+Environment.NewLine;
+        if(!_pending.Writer.TryWrite(line))
+            Interlocked.Increment(ref _dropped);
+    }
+
+    internal bool WriteBufferedLine(string line)
+    {
         try
         {
-            lock(_sync)
+            lock(_fileSync)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-                if(File.Exists(_path) && new FileInfo(_path).Length+Encoding.UTF8.GetByteCount(line)>MaxFileBytes)
-                {
-                    var previous=_path+".1";
-                    File.Move(_path,previous,true);
-                }
+                if(File.Exists(_path) && new FileInfo(_path).Length+
+                    Encoding.UTF8.GetByteCount(line)>MaxFileBytes)
+                    File.Move(_path,_path+".1",true);
                 File.AppendAllText(_path,line,Encoding.UTF8);
             }
+            return true;
         }
-        catch { /* Logging must never interrupt collector or fan commands. */ }
+        catch { return false; } // Diagnostics cannot interrupt cooling.
+    }
+
+    // Only used by hardware-free self-tests, when no hosted writer is running.
+    internal void FlushPendingForTest()
+    {
+        while(_pending.Reader.TryRead(out var line))
+            if(!WriteBufferedLine(line))
+                throw new IOException("Cannot flush synthetic fan diagnostic trace.");
     }
 
     internal void Observe(string profileId,string channelId,string state,
