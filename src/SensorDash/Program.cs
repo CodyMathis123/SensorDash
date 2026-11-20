@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // Pure synthetic tests run without opening any hardware or web endpoints.
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
-    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
+    try { WorkspaceSelfTest.Run(); CollectorHealth.SelfTest(); ThermalGuardSelfTest.Run(); FanControlSelfTest.Run(); FanCommissioningSelfTest.Run(); FanProfileReviewSelfTest.Run(); CoolingEventRecorderSelfTest.Run(); FanResumeSelfTest.Run(); FanFeedbackCalibrationSelfTest.Run(); HistoryStatisticsSelfTest.Run(); HistoryRetentionSelfTest.Run(); HistoryRecordingSelfTest.Run(); ArchiveIsolationSelfTest.Run(); CoolingElectricalSelfTest.Run(); CoolingPresetCatalog.SelfTest(); PawnIoMonitor.SelfTest(); TelemetryExportSelfTest.Run(); TelemetryConfigurationSelfTest.Run(); TelemetryMetadataSelfTest.Run(); AccessoryPowerTelemetrySelfTest.Run(); OperationalLoggingSelfTest.Run(); }
     catch (Exception ex)
     {
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "SensorDash-workspace-selftest-error.txt"), ex.ToString());
@@ -823,7 +823,6 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
         loggerFactory.CreateLogger(OperationalEvents.Category), "sensor collection",
         OperationalEvents.SensorFailure, OperationalEvents.SensorFailureSummary,
         OperationalEvents.SensorRecovered, LogLevel.Error);
-    private readonly Dictionary<string, bool> _alarms = new();
     private Computer? _computer;
     private readonly PawnIoMonitor _pawnIo = new();
     private string? _activeCollectionSignature;
