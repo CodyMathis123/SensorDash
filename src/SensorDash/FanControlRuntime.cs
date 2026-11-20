@@ -23,6 +23,7 @@ public sealed class FanControlRuntime
     private readonly PersistentFanProfiles _profiles;
     private readonly FanControlTrace _trace;
     internal FanControlTrace Trace => _trace;
+    internal CoolingInputRequirement[] CoolingInputRequirements() => _profiles.CoolingInputRequirements();
     public FanControlRuntime(string dataDirectory)
     {
         _trace=new FanControlTrace(dataDirectory);
