@@ -71,6 +71,8 @@ jobs:
         run: node scripts/test-cooling-phase1.cjs
       - name: Validate dedicated Windows operational Event Log contracts
         run: node scripts/test-operational-logging.cjs
+      - name: Validate independent batched local SQLite retention
+        run: node scripts/test-history-retention-worker.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
