@@ -20,7 +20,7 @@ internal sealed class ArchiveWork(
     internal int CoolingEventsSaved { get; set; }
 }
 
-internal sealed class ArchiveQueue
+public sealed class ArchiveQueue
 {
     internal const int DefaultCapacity = 512;
     private readonly Channel<ArchiveWork> _channel;
