@@ -56,6 +56,7 @@ if (OptionalPerformanceDiagnostics.Enabled)
     builder.Services.AddHostedService<PerformanceSamplerWorker>();
 builder.Services.AddHostedService<TelemetryExportWorker>();
 builder.Services.AddHostedService<SensorWorker>();
+builder.Services.AddHostedService<HistoryRetentionWorker>();
 builder.Services.AddHostedService<SimulationWorker>();
 // Keep privilege decisions server-side. Windows Negotiate authenticates the
 // interactive user for mutations; read-only status and assets remain local.
@@ -492,7 +493,7 @@ public sealed class DashboardSettings {
     // Important/pinned sensors always retain SaveEverySeconds cadence.
     public int StorageHistorySeconds { get; set; } = 60;
     public int NetworkHistorySeconds { get; set; } = 60;
-    public int RetentionDays { get; set; } = 30; // configurable through 3 years
+    public int RetentionDays { get; set; } = 3; // Windows retry spool; Pi retains long-term history
     public List<CoolingSystemConfig> CoolingSystems { get; set; } = [];
     public List<TrayWidgetConfig> TrayWidgets { get; set; } = [];
     public List<FanProfileConfig> FanProfiles { get; set; } = [];
@@ -800,29 +801,7 @@ public sealed partial class HistoryStore {
         while (r.Read()) output.Add(new MonitorEvent(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.IsDBNull(4) ? null : r.GetDouble(4)));
         return output;
     }
-    public void Cleanup(int retentionDays) {
-        var before = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeMilliseconds();
-        using var conn = Open(); using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM samples WHERE ts < $before; DELETE FROM events WHERE ts < $before; DELETE FROM accessory_power WHERE ts < $before";
-        cmd.Parameters.AddWithValue("$before", before);
-        using (var transaction = conn.BeginTransaction()) {
-            cmd.Transaction = transaction;
-            cmd.ExecuteNonQuery();
-            transaction.Commit();
-        }
-        // Auto-vacuum reclaims deleted pages at commit. Do not wait on live
-        // readers to truncate WAL; a later cleanup can finish that checkpoint.
-        using var checkpoint = conn.CreateCommand();
-        checkpoint.CommandText = "PRAGMA busy_timeout";
-        var busyTimeout = Convert.ToInt32(checkpoint.ExecuteScalar());
-        try {
-            checkpoint.CommandText = "PRAGMA busy_timeout=0; PRAGMA wal_checkpoint(TRUNCATE)";
-            checkpoint.ExecuteNonQuery();
-        } finally {
-            checkpoint.CommandText = $"PRAGMA busy_timeout={busyTimeout}";
-            checkpoint.ExecuteNonQuery();
-        }
-    }
+
 }
 public sealed class SensorWorker(DashboardState state, HistoryStore db, FanControlRuntime controls,
     ILogger<SensorWorker> logger, ILoggerFactory loggerFactory) : BackgroundService {
@@ -838,8 +817,6 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
     private DateTimeOffset? _lastCollectionStart;
     private DateTimeOffset _lastSaved = DateTimeOffset.MinValue;
     private DateTimeOffset _lastStorage = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
-    private int _lastRetentionDays;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         // Native OS notification catches quick sleep/wake cycles which are too
         // short for the old >20s polling-gap heuristic. Register once for the
@@ -953,9 +930,6 @@ public sealed class SensorWorker(DashboardState state, HistoryStore db, FanContr
                     }
                     CheckEvents(frame, cfg);
                     _lastSaved = now;
-                }
-                if ((now - _lastCleanup).TotalHours >= 1 || cfg.RetentionDays != _lastRetentionDays) {
-                    db.Cleanup(cfg.RetentionDays); _lastCleanup = now; _lastRetentionDays = cfg.RetentionDays;
                 }
                 if (OptionalPerformanceDiagnostics.Enabled)
                     CollectorPerformance.ObserveCycle(Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds, scanMs);
