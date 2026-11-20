@@ -26,6 +26,10 @@ internal static class OperationalEvents
     internal static readonly EventId ExportRecovered = new(4003, nameof(ExportRecovered));
     internal static readonly EventId ExportSettingsReloaded = new(4004, nameof(ExportSettingsReloaded));
     internal static readonly EventId ExportCheckpointRecovered = new(4005, nameof(ExportCheckpointRecovered));
+    internal static readonly EventId RetentionCompleted = new(5001, nameof(RetentionCompleted));
+    internal static readonly EventId RetentionFailure = new(5002, nameof(RetentionFailure));
+    internal static readonly EventId RetentionFailureSummary = new(5003, nameof(RetentionFailureSummary));
+    internal static readonly EventId RetentionRecovered = new(5004, nameof(RetentionRecovered));
 
     // Event Log is an operational timeline, not an HTTP trace. ASP.NET
     // routing, request processing, framework lifetime, and normal polling
