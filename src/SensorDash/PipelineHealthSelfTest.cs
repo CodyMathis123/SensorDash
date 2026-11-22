@@ -22,6 +22,42 @@ internal static class PipelineHealthSelfTest
               summary.P99Ms == 20 && summary.MaxMs == 300,
               "bounded histogram quantiles, maximum, and invalid values");
 
+        // Reproduce the actual 23h58m suspended GPU scan without relying on
+        // a Windows sleep event in CI. The awake clock has only advanced 40ms.
+        var suspended = StageDuration.Classify(86_318_789.689, 40);
+        Check(suspended.SleepInterrupted &&
+              suspended.ExcludedSleepMs is > 86_318_000,
+              "almost-day-long GPU measurement must be classified as suspension");
+
+        // Real hardware driver stalls advance both clocks, even when huge.
+        var trueStall = StageDuration.Classify(1558.696, 1558.4);
+        Check(!trueStall.SleepInterrupted && trueStall.ExcludedSleepMs == null,
+              "genuine awake hardware stalls must remain visible");
+        Check(!StageDuration.Classify(2500, null).SleepInterrupted,
+              "unavailable native clock must never invent a sleep diagnosis");
+        Check(!StageDuration.Classify(1000, 250).SleepInterrupted,
+              "small disagreements must not hide real scan delays");
+
+        var scan = new LatencyHistogram();
+        for (var i = 0; i < 32; i++) scan.Observe(.2);
+        scan.Observe(788.855);
+        scan.Observe(trueStall);
+        scan.Observe(2100);
+        scan.Observe(suspended);
+        var corrected = scan.Snapshot();
+        Check(corrected.Samples == 35 && corrected.SleepInterrupted == 1 &&
+              corrected.P99Ms <= corrected.MaxMs &&
+              corrected.P99Ms == corrected.MaxMs &&
+              corrected.MeanMs is < 200 &&
+              corrected.LastExcludedSleepMs > 86_318_000 &&
+              corrected.LastSleepInterruptedUtc.HasValue,
+              "sleep outlier must be separate from scan mean, percentile and max");
+        Check(corrected.Over250Ms == 3 && corrected.Over500Ms == 3 &&
+              corrected.Over1000Ms == 2 && corrected.Over2000Ms == 1,
+              "awake slow scans must be counted at 250/500/1000/2000ms thresholds");
+        Check(corrected.PercentileMethod == "bucket-upper-bound-capped-to-max",
+              "approximate percentiles must identify their method");
+
         var folder = Directory.CreateTempSubdirectory("SensorDash-pipeline-");
         try
         {
@@ -45,6 +81,9 @@ internal static class PipelineHealthSelfTest
             metrics.ObserveInterval(TimeSpan.FromHours(8), 1, true);
             metrics.ObserveFamily("Cpu", 2);
             metrics.ObserveFamily("Gpu", 6);
+            metrics.ObserveFamily("Gpu", suspended);
+            metrics.ObserveFamily("Cpu", trueStall);
+            metrics.ObserveWindowsResumeSignal(now);
             metrics.ObserveCoolingInputs(frame,
                 [
                     new CoolingInputRequirement("fresh", 5),
@@ -68,6 +107,12 @@ internal static class PipelineHealthSelfTest
                   health.DelayedControlCycles == 1,
                   "stage counts and resume gaps");
             Check(health.HardwareFamiliesMs.Count == 2, "bounded family diagnostics");
+            Check(health.HardwareFamiliesMs["Gpu"].Samples == 1 &&
+                  health.HardwareFamiliesMs["Gpu"].SleepInterrupted == 1 &&
+                  health.HardwareFamiliesMs["Cpu"].Over1000Ms == 1 &&
+                  health.WindowsResumeNotifications == 1 &&
+                  health.LastWindowsResumeUtc == now,
+                  "per-family suspended scan separate from real awake stalls and resume signal");
             Check(health.CoolingInputs.ConfiguredSources == 3 &&
                   health.CoolingInputs.MissingSources == 1 &&
                   health.CoolingInputs.StaleSources == 1 &&

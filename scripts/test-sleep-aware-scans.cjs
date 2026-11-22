@@ -1,0 +1,32 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const clocks = fs.readFileSync('src/SensorDash/SleepAwareStageTiming.cs', 'utf8');
+const metrics = fs.readFileSync('src/SensorDash/PipelineHealthMetrics.cs', 'utf8');
+const program = fs.readFileSync('src/SensorDash/Program.cs', 'utf8');
+const tests = fs.readFileSync('src/SensorDash/PipelineHealthSelfTest.cs', 'utf8');
+
+assert.match(clocks, /QueryUnbiasedInterruptTimePrecise/);
+assert.match(clocks, /DllImport\("kernel32\.dll"/);
+assert.match(clocks, /gap >= 2000 && gap >= stopwatchMs \* \.20/);
+assert.match(clocks, /OperatingSystem\.IsWindows\(\)/);
+assert.match(clocks, /Stopwatch\.GetElapsedTime\(QpcTicks, completed\)/);
+assert.match(program, /familyStart\.Finish\(\)/);
+assert.match(program, /scanStarted\.Finish\(\)/);
+assert.match(program, /controlStart\.Finish\(\)/);
+assert.match(program, /cycleStarted\.Finish\(\)/);
+assert.match(program, /ObserveWindowsResumeSignal\(now\)/);
+assert.match(program, /!cycleDuration\.SleepInterrupted && !scanDuration\.SleepInterrupted/);
+assert.match(metrics, /_sleepInterrupted/);
+assert.match(metrics, /_over250/);
+assert.match(metrics, /_over500/);
+assert.match(metrics, /_over1000/);
+assert.match(metrics, /_over2000/);
+assert.match(metrics, /Math\.Min\(i < BoundsMs\.Length \? BoundsMs\[i\] : maxMs, maxMs\)/);
+assert.match(metrics, /bucket-upper-bound-capped-to-max/);
+assert.match(metrics, /pipeline:scan_sleep_interrupted_total/);
+assert.match(metrics, /pipeline:scan_slow_over_1000ms_total/);
+assert.match(tests, /86_318_789\.689/);
+assert.match(tests, /awake hardware stalls must remain visible/);
+assert.match(tests, /per-family suspended scan separate from real awake stalls/);
+console.log('PASS: sleep-aware hardware scan timing and genuine awake stalls remain separately visible');

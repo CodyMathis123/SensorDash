@@ -5,8 +5,15 @@ using System.Globalization;
 // The time buckets are lifetime histograms for this collector process, not a
 // rolling dashboard series. Every Observe call is bounded and allocation-free
 // after its first hardware-family lookup. Reading diagnostics never touches LHM.
+// p95/p99 are upper limits of fixed histogram buckets, capped by the actual
+// measured maximum. They are not interpolated/exact sample percentiles.
+// Interrupted observations are counted but excluded from latency statistics.
 internal sealed record LatencySummary(
-    long Samples, double? MeanMs, double? P95Ms, double? P99Ms, double? MaxMs);
+    long Samples, double? MeanMs, double? P95Ms, double? P99Ms, double? MaxMs,
+    long Over250Ms, long Over500Ms, long Over1000Ms, long Over2000Ms,
+    long SleepInterrupted, double? LastExcludedSleepMs,
+    DateTimeOffset? LastSleepInterruptedUtc,
+    string PercentileMethod = "bucket-upper-bound-capped-to-max");
 
 internal sealed class LatencyHistogram
 {
@@ -14,6 +21,23 @@ internal sealed class LatencyHistogram
         [0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
     private readonly long[] _buckets = new long[BoundsMs.Length + 1];
     private long _count, _microseconds, _maxMicroseconds;
+    private long _over250, _over500, _over1000, _over2000;
+    private long _sleepInterrupted, _lastExcludedSleepMicroseconds, _lastSleepInterruptedUtcTicks;
+
+    internal void Observe(StageDuration duration)
+    {
+        if (duration.SleepInterrupted)
+        {
+            Interlocked.Increment(ref _sleepInterrupted);
+            Interlocked.Exchange(ref _lastSleepInterruptedUtcTicks, DateTimeOffset.UtcNow.UtcTicks);
+            if (duration.ExcludedSleepMs is double excluded &&
+                double.IsFinite(excluded) && excluded >= 0)
+                Interlocked.Exchange(ref _lastExcludedSleepMicroseconds,
+                    (long)Math.Round(excluded * 1000));
+            return;
+        }
+        Observe(duration.ElapsedMs);
+    }
 
     internal void Observe(double milliseconds)
     {
@@ -23,6 +47,10 @@ internal sealed class LatencyHistogram
         var idx = Array.BinarySearch(BoundsMs, milliseconds);
         if (idx < 0) idx = ~idx;
         Interlocked.Increment(ref _buckets[idx]);
+        if (milliseconds > 250) Interlocked.Increment(ref _over250);
+        if (milliseconds > 500) Interlocked.Increment(ref _over500);
+        if (milliseconds > 1000) Interlocked.Increment(ref _over1000);
+        if (milliseconds > 2000) Interlocked.Increment(ref _over2000);
         Interlocked.Add(ref _microseconds, microseconds);
         Interlocked.Increment(ref _count);
         long previous;
@@ -37,28 +65,35 @@ internal sealed class LatencyHistogram
     internal LatencySummary Snapshot()
     {
         var count = Interlocked.Read(ref _count);
-        if (count == 0) return new(0, null, null, null, null);
+        var maxMs = Interlocked.Read(ref _maxMicroseconds) / 1000.0;
         var counts = new long[_buckets.Length];
         for (var i = 0; i < counts.Length; i++)
             counts[i] = Interlocked.Read(ref _buckets[i]);
         var total = counts.Sum();
-        if (total == 0) return new(0, null, null, null, null);
-        double Quantile(double percentile)
+        double? Quantile(double percentile)
         {
+            if (total == 0) return null;
             var at = Math.Max(1, (long)Math.Ceiling(total * percentile));
             long seen = 0;
             for (var i = 0; i < counts.Length; i++)
             {
                 seen += counts[i];
                 if (seen >= at)
-                    return i < BoundsMs.Length ? BoundsMs[i] :
-                        Interlocked.Read(ref _maxMicroseconds) / 1000.0;
+                    return Math.Min(i < BoundsMs.Length ? BoundsMs[i] : maxMs, maxMs);
             }
-            return Interlocked.Read(ref _maxMicroseconds) / 1000.0;
+            return maxMs;
         }
-        return new(total, Math.Round(Interlocked.Read(ref _microseconds) / (1000.0 * count), 3),
+        var interrupted = Interlocked.Read(ref _sleepInterrupted);
+        var lastSleepUs = Interlocked.Read(ref _lastExcludedSleepMicroseconds);
+        return new(count,
+            count > 0 ? Math.Round(Interlocked.Read(ref _microseconds) / (1000.0 * count), 3) : null,
             Quantile(.95), Quantile(.99),
-            Math.Round(Interlocked.Read(ref _maxMicroseconds) / 1000.0, 3));
+            count > 0 ? Math.Round(maxMs, 3) : null,
+            Interlocked.Read(ref _over250), Interlocked.Read(ref _over500),
+            Interlocked.Read(ref _over1000), Interlocked.Read(ref _over2000),
+            interrupted, interrupted > 0 ? Math.Round(lastSleepUs / 1000.0, 3) : null,
+            Interlocked.Read(ref _lastSleepInterruptedUtcTicks) is long sleepTicks &&
+                sleepTicks > 0 ? new DateTimeOffset(sleepTicks, TimeSpan.Zero) : null);
     }
 }
 
@@ -71,7 +106,8 @@ internal sealed record PipelineHealthSnapshot(
     LatencySummary HardwareScanMs, LatencySummary ControlMs,
     LatencySummary TotalCycleMs, LatencySummary IntervalMs,
     IReadOnlyDictionary<string, LatencySummary> HardwareFamiliesMs,
-    long DelayedControlCycles, CoolingInputSummary CoolingInputs,
+    long DelayedControlCycles, long WindowsResumeNotifications,
+    DateTimeOffset? LastWindowsResumeUtc, CoolingInputSummary CoolingInputs,
     int ArchiveQueueDepth, int ArchiveQueueCapacity, long ArchiveDropped,
     int FanTraceQueueDepth, int FanTraceQueueCapacity, long FanTraceDropped,
     double? SampleExportCursorLagSeconds, string ExportState,
@@ -86,17 +122,30 @@ public sealed class PipelineHealthMetrics
     private readonly ConcurrentDictionary<string, LatencyHistogram> _families =
         new(StringComparer.Ordinal);
     private long _delayed, _lastExportCursorMs = -1;
+    private long _resumeSignals, _lastResumeTicksUtc;
     private int _configuredCooling, _missingCooling, _staleCooling;
     private long _oldestCoolingMs = -1;
 
     internal void ObserveScan(double milliseconds) => _scan.Observe(milliseconds);
     internal void ObserveControl(double milliseconds) => _control.Observe(milliseconds);
     internal void ObserveCycle(double milliseconds) => _total.Observe(milliseconds);
+    internal void ObserveScan(StageDuration sample) => _scan.Observe(sample);
+    internal void ObserveControl(StageDuration sample) => _control.Observe(sample);
+    internal void ObserveCycle(StageDuration sample) => _total.Observe(sample);
 
-    internal void ObserveFamily(string family, double milliseconds)
+    internal void ObserveWindowsResumeSignal(DateTimeOffset now)
+    {
+        Interlocked.Increment(ref _resumeSignals);
+        Interlocked.Exchange(ref _lastResumeTicksUtc, now.UtcTicks);
+    }
+
+    internal void ObserveFamily(string family, double milliseconds) =>
+        ObserveFamily(family, new StageDuration(milliseconds, false, null));
+
+    internal void ObserveFamily(string family, StageDuration sample)
     {
         if (family.Length is < 1 or > 40 || _families.Count > 32) return;
-        _families.GetOrAdd(family, _ => new LatencyHistogram()).Observe(milliseconds);
+        _families.GetOrAdd(family, _ => new LatencyHistogram()).Observe(sample);
     }
 
     internal void ObserveInterval(TimeSpan interval, int targetSeconds, bool resumed)
@@ -155,6 +204,9 @@ public sealed class PipelineHealthMetrics
             _families.OrderBy(kv => kv.Key, StringComparer.Ordinal)
                 .ToDictionary(kv => kv.Key, kv => kv.Value.Snapshot(), StringComparer.Ordinal),
             Interlocked.Read(ref _delayed),
+            Interlocked.Read(ref _resumeSignals),
+            Interlocked.Read(ref _lastResumeTicksUtc) is long ticks && ticks > 0 ?
+                new DateTimeOffset(ticks, TimeSpan.Zero) : null,
             new(Volatile.Read(ref _configuredCooling), Volatile.Read(ref _missingCooling),
                 Volatile.Read(ref _staleCooling), coolingAge < 0 ? null : coolingAge),
             queue.Depth, queue.Capacity, queue.Dropped,
@@ -174,6 +226,13 @@ public sealed class PipelineHealthMetrics
             ["pipeline:trace_queue_depth"] = snapshot.FanTraceQueueDepth,
             ["pipeline:trace_dropped_total"] = snapshot.FanTraceDropped,
             ["pipeline:delayed_cycles_total"] = snapshot.DelayedControlCycles,
+            ["pipeline:windows_resume_signals_total"] = snapshot.WindowsResumeNotifications,
+            ["pipeline:scan_sleep_interrupted_total"] = snapshot.HardwareScanMs.SleepInterrupted,
+            ["pipeline:cycle_sleep_interrupted_total"] = snapshot.TotalCycleMs.SleepInterrupted,
+            ["pipeline:scan_slow_over_250ms_total"] = snapshot.HardwareScanMs.Over250Ms,
+            ["pipeline:scan_slow_over_500ms_total"] = snapshot.HardwareScanMs.Over500Ms,
+            ["pipeline:scan_slow_over_1000ms_total"] = snapshot.HardwareScanMs.Over1000Ms,
+            ["pipeline:scan_slow_over_2000ms_total"] = snapshot.HardwareScanMs.Over2000Ms,
             ["pipeline:cooling_inputs_missing"] = snapshot.CoolingInputs.MissingSources,
             ["pipeline:cooling_inputs_stale"] = snapshot.CoolingInputs.StaleSources
         };
