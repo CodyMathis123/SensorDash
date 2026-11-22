@@ -12,6 +12,7 @@ internal sealed record LatencySummary(
     long Samples, double? MeanMs, double? P95Ms, double? P99Ms, double? MaxMs,
     long Over250Ms, long Over500Ms, long Over1000Ms, long Over2000Ms,
     long SleepInterrupted, double? LastExcludedSleepMs,
+    DateTimeOffset? LastSleepInterruptedUtc,
     string PercentileMethod = "bucket-upper-bound-capped-to-max");
 
 internal sealed class LatencyHistogram
@@ -21,13 +22,14 @@ internal sealed class LatencyHistogram
     private readonly long[] _buckets = new long[BoundsMs.Length + 1];
     private long _count, _microseconds, _maxMicroseconds;
     private long _over250, _over500, _over1000, _over2000;
-    private long _sleepInterrupted, _lastExcludedSleepMicroseconds;
+    private long _sleepInterrupted, _lastExcludedSleepMicroseconds, _lastSleepInterruptedUtcTicks;
 
     internal void Observe(StageDuration duration)
     {
         if (duration.SleepInterrupted)
         {
             Interlocked.Increment(ref _sleepInterrupted);
+            Interlocked.Exchange(ref _lastSleepInterruptedUtcTicks, DateTimeOffset.UtcNow.UtcTicks);
             if (duration.ExcludedSleepMs is double excluded &&
                 double.IsFinite(excluded) && excluded >= 0)
                 Interlocked.Exchange(ref _lastExcludedSleepMicroseconds,
@@ -89,7 +91,9 @@ internal sealed class LatencyHistogram
             count > 0 ? Math.Round(maxMs, 3) : null,
             Interlocked.Read(ref _over250), Interlocked.Read(ref _over500),
             Interlocked.Read(ref _over1000), Interlocked.Read(ref _over2000),
-            interrupted, interrupted > 0 ? Math.Round(lastSleepUs / 1000.0, 3) : null);
+            interrupted, interrupted > 0 ? Math.Round(lastSleepUs / 1000.0, 3) : null,
+            Interlocked.Read(ref _lastSleepInterruptedUtcTicks) is long sleepTicks &&
+                sleepTicks > 0 ? new DateTimeOffset(sleepTicks, TimeSpan.Zero) : null);
     }
 }
 
