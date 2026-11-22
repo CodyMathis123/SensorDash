@@ -37,8 +37,32 @@ read-only snapshot. The existing `/api/diagnostics` response also embeds a
   reports time since the exporter's last successful send.
 
 Percentiles are **approximate, fixed-bucket and since process start**; they are
-not rolling-hour percentiles or a precision latency profiler. Values are read
-from in-memory counters. They do not require SQLite queries or force a GC.
+not rolling-hour percentiles or a precision latency profiler. `percentileMethod`
+identifies the reporting method: `p95Ms` and `p99Ms` are upper-bucket estimates,
+capped to the exact observed `maxMs`. This avoids showing p99 above the largest
+actual measurement.
+
+Windows 10+ provides `QueryUnbiasedInterruptTimePrecise`, a high-resolution
+awake-only clock that excludes time spent sleeping or hibernating. Every
+critical-stage duration compares that clock to the process Stopwatch
+(which includes suspended time). Only a **large, corroborated divergence**
+(at least 2 seconds and 20% of the measured stage) classifies a scan as
+`sleepInterrupted`. These observations are counted separately, with
+`lastSleepInterruptedUtc` and `lastExcludedSleepMs`, and are excluded from
+normal averages/percentiles/maxima; the hardware scan is **not retried or
+reordered** for instrumentation. Without the native clock, no sleep
+classification is invented. Truly slow awake scans advance both clocks
+and remain fully included.
+
+Each stage and hardware family also exposes `over250Ms`, `over500Ms`,
+`over1000Ms`, and `over2000Ms` for genuinely slow **awake** observations.
+`windowsResumeNotifications` and `lastWindowsResumeUtc` help correlate
+an interrupted scan with actual Windows resume notifications; they are not
+assumed to arrive during the scan itself. This is a measurement correction,
+not a change to fan/rearm logic.
+
+Values are read from in-memory counters. They do not require SQLite queries
+or force a GC.
 
 The existing opt-in process performance sampler remains separate and
 unchanged; this adds only a few Stopwatch timestamps and atomic counters per
@@ -55,6 +79,8 @@ upgrade, token change, or new endpoint is required.
 
 Examples:
 
+- `pipeline:scan_sleep_interrupted_total` and `pipeline:windows_resume_signals_total`
+- `pipeline:scan_slow_over_500ms_total` and `pipeline:scan_slow_over_1000ms_total`
 - `pipeline:scan_p99_ms`
 - `pipeline:control_p99_ms`
 - `pipeline:cycle_max_ms`
