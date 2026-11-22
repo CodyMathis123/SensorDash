@@ -865,6 +865,7 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 var resumeGap = _lastCollectionStart.HasValue
                     ? now - _lastCollectionStart.Value : TimeSpan.Zero;
                 var windowsResume = resumeNotifications.ConsumePending();
+                if (windowsResume) metrics.ObserveWindowsResumeSignal(now);
                 var reopenForResume = _computer != null &&
                     FanResumePolicy.ShouldReopenHardware(_lastCollectionStart, now, windowsResume);
                 if (_lastCollectionStart is { } priorCycle)
@@ -906,25 +907,25 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 }
                 var refreshStorage = (now - _lastStorage).TotalSeconds >= cfg.StoragePollSeconds;
                 if (refreshStorage) { _lastStorage = now; state.MarkStoragePoll(now); }
-                var cycleStarted = Stopwatch.GetTimestamp();
+                var cycleStarted = SleepAwareStageStamp.Start();
                 var readings = new List<SensorReading>();
                 var devices = new List<HardwareDevice>();
                 var pausedDevices = cfg.DisabledCollectionDeviceIds.ToHashSet(StringComparer.Ordinal);
-                var scanStarted = Stopwatch.GetTimestamp();
+                var scanStarted = SleepAwareStageStamp.Start();
                 foreach (var hardware in _computer.Hardware)
                 {
-                    var familyStart = Stopwatch.GetTimestamp();
+                    var familyStart = SleepAwareStageStamp.Start();
                     Scan(hardware, readings, devices, refreshStorage, now, _lastStorage,
                         pausedDevices);
                     metrics.ObserveFamily(hardware.HardwareType.ToString(),
-                        Stopwatch.GetElapsedTime(familyStart).TotalMilliseconds);
+                        familyStart.Finish());
                 }
-                var scanMs = Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds;
-                metrics.ObserveScan(scanMs);
+                var scanDuration = scanStarted.Finish();
+                metrics.ObserveScan(scanDuration);
                 var frame = new SensorFrame(now, readings, null, devices, driver);
-                var controlStart = Stopwatch.GetTimestamp();
+                var controlStart = SleepAwareStageStamp.Start();
                 controls.Tick(_computer, frame, cfg, now);
-                metrics.ObserveControl(Stopwatch.GetElapsedTime(controlStart).TotalMilliseconds);
+                metrics.ObserveControl(controlStart.Finish());
                 metrics.ObserveCoolingInputs(frame, controls.CoolingInputRequirements(), now);
                 if (reopenForResume)
                     _operations.LogInformation(OperationalEvents.ResumeReopenCompleted,
@@ -950,10 +951,13 @@ public sealed class SensorWorker(DashboardState state, ArchiveQueue archive, Fan
                 var archiveDue = (now - _lastSaved).TotalSeconds >= cfg.SaveEverySeconds;
                 archive.TryEnqueue(frame, cfg, archiveDue, events);
                 if (archiveDue) _lastSaved = now;
-                var cycleMs = Stopwatch.GetElapsedTime(cycleStarted).TotalMilliseconds;
-                metrics.ObserveCycle(cycleMs);
-                if (OptionalPerformanceDiagnostics.Enabled)
-                    CollectorPerformance.ObserveCycle(cycleMs, scanMs);
+                var cycleDuration = cycleStarted.Finish();
+                metrics.ObserveCycle(cycleDuration);
+                // Keep the existing optional process sampler aligned with
+                // the same sleep-exclusion policy as the new pipeline data.
+                if (OptionalPerformanceDiagnostics.Enabled &&
+                    !cycleDuration.SleepInterrupted && !scanDuration.SleepInterrupted)
+                    CollectorPerformance.ObserveCycle(cycleDuration.ElapsedMs, scanDuration.ElapsedMs);
                 _collectionOutage.Recovered();
             } catch (Exception ex) {
                 _collectionOutage.Failed(ex, "collector-poll");
