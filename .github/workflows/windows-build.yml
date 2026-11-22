@@ -79,6 +79,8 @@ jobs:
         run: node scripts/test-buffered-fan-trace.cjs
       - name: Validate collector pipeline health instrumentation and single event source
         run: node scripts/test-pipeline-health.cjs
+      - name: Validate sleep-aware scan timings and slow-scan classification
+        run: node scripts/test-sleep-aware-scans.cjs
       - name: Check tray editor and fan curve UI contracts
         shell: pwsh
         run: |
